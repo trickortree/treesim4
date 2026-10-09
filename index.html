@@ -163,6 +163,21 @@
   #rebirthFx.show { opacity: 1; pointer-events: auto; }
   #rebirthFx small { display: block; font: 800 18px Consolas; letter-spacing: 10px; color: #7a4a00; margin-bottom: 8px; }
   #rebirthFx b { font: 900 clamp(32px, 6vw, 72px) "Segoe UI Black", sans-serif; color: #5a3000; text-shadow: 0 4px 0 rgba(255,255,255,.5); letter-spacing: 4px; }
+  .menuRow { display: flex; gap: 12px; }
+  #settingsPanel { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center; background: rgba(4,2,10,.7); }
+  #settingsPanel.show { display: flex; }
+  .sbox { position: relative; width: min(560px, 92vw); max-height: 90vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 22px 26px; box-shadow: 0 20px 60px rgba(0,0,0,.7); animation: pop .15s; }
+  .sbox h2 { margin: 0 0 14px; font: 800 22px "Segoe UI"; letter-spacing: 4px; color: var(--amber); }
+  .srow { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 4px; border-bottom: 1px solid rgba(255,255,255,.08); font: 600 15px "Segoe UI"; }
+  .sctl { display: flex; align-items: center; gap: 8px; }
+  .sctl input[type=range] { width: 190px; accent-color: var(--amber); cursor: pointer; }
+  .sctl b { min-width: 52px; text-align: right; font: 700 14px Consolas; color: var(--amber); }
+  .stog { cursor: pointer; font: 800 12px "Segoe UI"; letter-spacing: 2px; color: var(--ink); background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.2); border-radius: 8px; padding: 6px 12px; }
+  .stog.on { background: var(--amber); color: #1a0e00; border-color: var(--amber); }
+  .sdanger { margin-top: 18px; padding: 14px; border: 1px solid rgba(255,90,70,.45); border-radius: 10px; background: rgba(255,60,40,.06); }
+  .sdanger h4 { margin: 0 0 4px; font: 800 11px "Segoe UI"; letter-spacing: 3px; color: #ff8a7a; } .sdanger p { margin: 0 0 10px; font: 13px "Segoe UI"; opacity: .75; }
+  #resetBtn { cursor: pointer; font: 800 13px "Segoe UI"; letter-spacing: 3px; color: #ff8a7a; background: transparent; border: 1px solid rgba(255,120,100,.6); border-radius: 8px; padding: 9px 18px; }
+  #resetBtn:hover { background: rgba(255,90,70,.15); } #resetBtn.armed { background: linear-gradient(#ff6a5a, #d02a2a); color: #fff; border-color: #ff6a5a; animation: pulse .4s infinite alternate; }
   #buffs { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; max-width: 290px; }
   #buffs span { font: 700 11px Consolas; letter-spacing: 1px; background: var(--bg); border: 1px solid; border-radius: 10px; padding: 2px 8px; }
   #rebirthFx.violet { background: radial-gradient(circle, #f4eaff, #b88aff 60%, #6a3ad8); }
@@ -356,8 +371,17 @@
   <div id="menuStats"></div>
   <button id="menuBtn" class="btn">PLAY</button>
   <div id="menuControls"></div>
-  <button id="menuQuit" class="btn ghost">QUIT</button>
+  <div class="menuRow"><button id="menuSettings" class="btn ghost">SETTINGS</button><button id="menuQuit" class="btn ghost">QUIT</button></div>
   <div class="ver" id="ver">TREE CHOP STUDIOS</div>
+</div>
+
+<div id="settingsPanel">
+  <div class="sbox">
+    <button class="xbtn" data-sclose>✕ CLOSE <kbd>Esc</kbd></button>
+    <h2>SETTINGS</h2>
+    <div id="setRows"></div>
+    <div class="sdanger"><h4>DANGER ZONE</h4><p>Deletes your save: cash, islands, rebirths, axes, everything. You start over on Pine Island. Your settings stay.</p><button id="resetBtn">RESET PROGRESS</button></div>
+  </div>
 </div>
 
 <div id="death"><h1>YOU DIED</h1><div id="deathLost"></div><small>click or press space to wake up in the safehouse</small></div>

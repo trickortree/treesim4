@@ -25,7 +25,12 @@ function lockPointer() {
 let lookSkip = 0;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
 renderer.autoClear = false;
-const SCALE = 3; // render at 1/3 res, CSS upscales with pixelated sampling
+// player settings: kept on this computer, separate from the save (so resetting progress keeps them)
+const SETTINGS_KEY = "ts4_settings";
+const settings = Object.assign({ sens: 1, invert: false, fov: 75, vol: 0.8, pixel: 3, bob: true, fps: true },
+    (() => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch (e) { return {}; } })());
+const saveSettings = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
+let SCALE = settings.pixel; // render at 1/SCALE res, CSS upscales with pixelated sampling
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x21143a);
@@ -148,7 +153,8 @@ const isNight = () => dayAmt() < 0.2;
 const fmtClock = () => { const h = hourNow(); const hh = Math.floor(h), mm = Math.floor((h - hh) * 60); return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0"); };
 
 // ---------- audio ----------
-let actx = null, windGain = null;
+let actx = null, windGain = null, master = null;
+const audioOut = () => master || actx.destination; // every sound goes through the master volume
 function sfx(freq, dur, type = "square", vol = 0.12, slide = 0.5) {
     if (!actx) return;
     const o = actx.createOscillator(), gn = actx.createGain();
@@ -157,7 +163,7 @@ function sfx(freq, dur, type = "square", vol = 0.12, slide = 0.5) {
     o.frequency.exponentialRampToValueAtTime(Math.max(20, freq * slide), actx.currentTime + dur);
     gn.gain.setValueAtTime(vol, actx.currentTime);
     gn.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
-    o.connect(gn).connect(actx.destination);
+    o.connect(gn).connect(audioOut());
     o.start();
     o.stop(actx.currentTime + dur);
 }
@@ -2219,7 +2225,7 @@ function renderMenu() {
     $("menuControls").innerHTML = CONTROLS.map(c => `<div><kbd>${c[0]}</kbd><span>${c[1]}</span></div>`).join("");
 }
 function startPlaying() {
-    if (!actx) { try { actx = new AudioContext(); } catch (e) { /* no audio */ } }
+    if (!actx) { try { actx = new AudioContext(); master = actx.createGain(); master.gain.value = settings.vol; master.connect(actx.destination); } catch (e) { /* no audio */ } }
     if (actx && actx.state === "suspended") actx.resume();
     startAmbience();
     if (state === "title") { if (isle >= 2) player.pos.set(RESPAWN.x, groundY(RESPAWN.x, RESPAWN.z) + 1.7, RESPAWN.z); else player.pos.set(0, 1.7, -0.5); }
@@ -2229,6 +2235,55 @@ function startPlaying() {
 }
 $("menuBtn").addEventListener("click", startPlaying);
 $("menuQuit").addEventListener("click", () => { writeSave(); window.close(); });
+
+// ---------- settings + reset progress ----------
+const SET_ROWS = [
+    { k: "sens", name: "Mouse sensitivity", type: "range", min: 0.2, max: 3, step: 0.05, show: v => v.toFixed(2) + "×" },
+    { k: "invert", name: "Invert mouse Y", type: "toggle" },
+    { k: "fov", name: "Field of view", type: "range", min: 60, max: 105, step: 1, show: v => v + "°" },
+    { k: "vol", name: "Volume", type: "range", min: 0, max: 1, step: 0.05, show: v => Math.round(v * 100) + "%" },
+    { k: "pixel", name: "Pixel size", type: "pick", opts: [[2, "SHARP"], [3, "CLASSIC"], [4, "CHUNKY"]] },
+    { k: "bob", name: "Head bob", type: "toggle" },
+    { k: "fps", name: "Show FPS", type: "toggle" }
+];
+const settingsOpen = () => $("settingsPanel").classList.contains("show");
+function renderSettings() {
+    $("setRows").innerHTML = SET_ROWS.map(r => {
+        const v = settings[r.k];
+        const ctl = r.type === "range" ? `<input type="range" data-set="${r.k}" min="${r.min}" max="${r.max}" step="${r.step}" value="${v}"><b>${r.show(v)}</b>`
+            : r.type === "toggle" ? `<button class="stog ${v ? "on" : ""}" data-set="${r.k}">${v ? "ON" : "OFF"}</button>`
+            : r.opts.map(([ov, ot]) => `<button class="stog ${v === ov ? "on" : ""}" data-set="${r.k}" data-v="${ov}">${ot}</button>`).join("");
+        return `<div class="srow"><span>${r.name}</span><div class="sctl">${ctl}</div></div>`;
+    }).join("");
+}
+function applySettings() {
+    if (master) master.gain.value = settings.vol;
+    if (SCALE !== settings.pixel) { SCALE = settings.pixel; resize(); }
+    el.fps.style.display = settings.fps ? "" : "none";
+    saveSettings();
+}
+function openSettings(on) { $("settingsPanel").classList.toggle("show", on); if (on) { renderSettings(); armReset(false); } }
+let resetArmed = false, resetTimer = null;
+function armReset(on) {
+    resetArmed = on; clearTimeout(resetTimer);
+    $("resetBtn").textContent = on ? "CLICK AGAIN TO DELETE YOUR SAVE" : "RESET PROGRESS";
+    $("resetBtn").classList.toggle("armed", on);
+    if (on) resetTimer = setTimeout(() => armReset(false), 5000);
+}
+$("menuSettings").addEventListener("click", () => openSettings(true));
+$("settingsPanel").addEventListener("input", e => { const k = e.target.dataset.set; if (!k) return; settings[k] = +e.target.value; e.target.nextElementSibling.textContent = SET_ROWS.find(r => r.k === k).show(settings[k]); applySettings(); });
+$("settingsPanel").addEventListener("click", e => {
+    if (e.target.closest("[data-sclose]")) { openSettings(false); return; }
+    const b = e.target.closest("button[data-set]");
+    if (b) { const k = b.dataset.set; settings[k] = b.dataset.v !== undefined ? +b.dataset.v : !settings[k]; applySettings(); renderSettings(); return; }
+    if (e.target.closest("#resetBtn")) {
+        if (!resetArmed) { armReset(true); sfx(200, 0.2, "square", 0.08, 0.6); return; }
+        // wipe the save (settings stay) and start over from the very beginning
+        savesFrozen = true;
+        try { localStorage.removeItem(SAVE_KEY); localStorage.removeItem("ts4_test3_save"); } catch (er) { /* ignore */ }
+        location.reload();
+    }
+});
 $("death").addEventListener("mousedown", respawn);
 document.addEventListener("pointerlockchange", () => {
     locked = document.pointerLockElement === canvas;
@@ -2240,6 +2295,7 @@ document.addEventListener("pointerlockchange", () => {
 addEventListener("keydown", e => {
     if ($("intro")) return; // studio intro is playing
     if (e.target && e.target.closest && e.target.closest("input, textarea, select")) { if (e.code === "Escape") e.target.blur(); return; } // typing into a field, not playing
+    if (settingsOpen()) { if (e.code === "Escape") openSettings(false); return; } // the settings screen eats keys until it's closed
     if (DEBUG && e.code === "Backquote") { e.preventDefault(); if (state === "playing") togglePanel("dev"); else if (window.__ts4dev) window.__ts4dev.toggle(); return; }
     keys[e.code] = true;
     if (state === "dead" && (e.code === "Space" || e.code === "KeyR" || e.code === "Enter")) { respawn(); return; }
@@ -2285,8 +2341,8 @@ addEventListener("mousemove", e => {
     if (lookSkip > 0) { lookSkip--; return; } // the first events after locking can carry the whole cursor jump
     const mx = e.movementX, my = e.movementY;
     if (Math.abs(mx) > 300 || Math.abs(my) > 200) return; // a browser glitch spike, not a real flick: ignore it
-    player.yaw -= mx * 0.0022;
-    player.pitch = clamp(player.pitch - my * 0.0022, -1.45, 1.45);
+    player.yaw -= mx * 0.0022 * settings.sens;
+    player.pitch = clamp(player.pitch - my * 0.0022 * settings.sens * (settings.invert ? -1 : 1), -1.45, 1.45);
 });
 
 function nearest() {
@@ -2634,11 +2690,11 @@ function update(dt) {
     flash = Math.max(0, flash - dt * 2);
     flashEl.style.opacity = flash * 0.5;
     hurtEl.style.opacity = hurtFlash + (player.hp < 30 && state === "playing" ? 0.25 + Math.sin(time * 6) * 0.1 : 0);
-    camera.fov = 75 - fovKick * 3 + (keys.ShiftLeft && dir.lengthSq() > 0 ? 4 : 0);
+    camera.fov = settings.fov - fovKick * 3 + (keys.ShiftLeft && dir.lengthSq() > 0 ? 4 : 0);
     camera.updateProjectionMatrix();
     camera.position.set(
         player.pos.x + (Math.random() - 0.5) * shake * 0.2,
-        player.pos.y + Math.sin(player.bob * 2) * 0.04 + (Math.random() - 0.5) * shake * 0.2,
+        player.pos.y + Math.sin(player.bob * 2) * 0.04 * (settings.bob ? 1 : 0) + (Math.random() - 0.5) * shake * 0.2,
         player.pos.z + (Math.random() - 0.5) * shake * 0.2
     );
     camera.rotation.set(player.pitch, player.yaw, 0);
@@ -3083,7 +3139,7 @@ function startAmbience() {
         const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
         const f = actx.createBiquadFilter(); f.type = type; f.frequency.value = freq;
         const g = actx.createGain(); g.gain.value = gainVal;
-        src.connect(f).connect(g).connect(actx.destination); src.start();
+        src.connect(f).connect(g).connect(audioOut()); src.start();
         return g;
     };
     windGain = mk("lowpass", 360, 0.02);
@@ -5997,7 +6053,7 @@ const PROMPTS = {
 };
 function hud(dt) {
     frames++; fpsT += dt;
-    if (fpsT >= 0.5) { el.fps.textContent = Math.round(frames / fpsT) + " fps"; frames = 0; fpsT = 0; }
+    if (fpsT >= 0.5) { el.fps.textContent = Math.round(frames / fpsT) + " fps"; el.fps.style.display = settings.fps ? "" : "none"; frames = 0; fpsT = 0; }
     hudT += dt;
     if (hudT < 0.08) return;
     hudT = 0;
