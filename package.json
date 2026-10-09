@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.1.1\n\n- FIXED: the camera sometimes flew up or down on its own when moving the mouse. The game now uses raw mouse input and ignores glitchy mouse jumps.\n- SECRET CAVE: somewhere in the eastern hills of the Highland Isle there is a hidden cave. Follow it all the way down...\n- THE HYPERGAMOUS RELIC: collect all 6 pieces hidden across the Highland Isle (press K to see your progress).\n- REBIRTH 2 now needs all 6 relic pieces + $2,500,000. Talk to the Ferryman to see what you still need. (Rebirth 2 itself is still coming soon.)"
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.1.2\n\n- FIXED: the game could crash on startup if your save was already on the Highland Isle.\n- THE OLD MINE is open: it moved to the mountainside west of Basecamp, and you can walk inside. Follow the rails through the tunnels and press F on glowing ore veins for Stone, Copper, Iron, Gold and Crystal. Veins grow back every day.\n- A new Arrivals dock where you land on the Highland Isle. The Rebirth Ferry moved to the north shore, on the far side of the island.\n- Signs now read the right way from both sides.\n- Relic Piece 5 now hides deep inside the Old Mine."
     }
   }
 }
