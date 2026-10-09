@@ -114,6 +114,47 @@
   .ustatus { font: 13px Consolas; opacity: .8; min-height: 18px; margin-bottom: 10px; }
   .ubtns { display: flex; gap: 12px; justify-content: center; }
   .ubtns .btn { letter-spacing: 4px; padding: 12px 34px; font-size: 16px; }
+  #panelFerry { width: min(760px, 94vw); border-color: rgba(255,224,128,.6); }
+  #ferrySay { font: italic 600 15px "Segoe UI"; color: #9fe8ff; margin: -6px 0 14px; opacity: .9; }
+  .fprice { font: 700 20px Consolas; margin-bottom: 12px; } .fprice b { color: var(--green); } .fprice span { font-size: 13px; opacity: .6; }
+  .flist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .flist > div { padding: 10px 14px; border-radius: 10px; font: 14px/1.5 "Segoe UI"; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); }
+  .flist h4 { margin: 0 0 3px; font: 800 11px "Segoe UI"; letter-spacing: 3px; }
+  .flist .lose h4 { color: #ff8a7a; } .flist .keep h4 { color: #9fe8ff; } .flist .gain h4 { color: var(--amber); } .flist .gain { border-color: rgba(255,208,64,.4); }
+  .ferrybtns { display: flex; gap: 14px; justify-content: center; }
+  .ferrybtns .btn { letter-spacing: 4px; padding: 13px 30px; font-size: 16px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.6); box-shadow: none; transform: none; }
+  .btn.danger { background: linear-gradient(#ff6a5a, #d02a2a); box-shadow: 0 6px 0 #6a0a0a, 0 0 30px rgba(255,60,40,.5); color: #fff; }
+  #ammo { position: fixed; right: 26px; bottom: 26px; background: var(--bg); border: 2px solid var(--line); border-radius: 12px; padding: 8px 18px; text-align: right; font: 700 20px Consolas, monospace; color: #ddd; display: none; }
+  #ammo small { display: block; font: 700 10px Consolas; letter-spacing: 2px; opacity: .6; } #ammo b { font-size: 38px; color: var(--amber); } #ammo em { display: block; font: 800 11px Consolas; color: #ff8a7a; font-style: normal; letter-spacing: 2px; }
+  #hotbar.tight { gap: 5px; } #hotbar.tight .slot { width: 66px; height: 80px; } #hotbar.tight .nm { display: none; } #hotbar.tight .ic { font-size: 26px; }
+  #invLeft { flex: 1; min-width: 0; max-height: 68vh; overflow-y: auto; padding-right: 6px; }
+  .invh { font: 800 12px Consolas; letter-spacing: 3px; color: var(--amber); margin: 4px 0 8px; } .invh small { letter-spacing: 0; opacity: .55; font-weight: 400; margin-left: 8px; }
+  #invHot { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 12px; }
+  .hslot { position: relative; height: 92px; border: 2px solid rgba(255,255,255,.2); border-radius: 10px; background: rgba(255,255,255,.04); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: grab; text-align: center; padding: 4px; }
+  .hslot.empty { border-style: dashed; cursor: default; } .hslot.empty small { opacity: .4; font: 11px Consolas; }
+  .hslot.over { background: rgba(255,208,64,.18); box-shadow: 0 0 0 2px var(--amber) inset; } .hslot.eq { box-shadow: 0 0 14px rgba(255,208,64,.5); }
+  .hslot img { width: 52px; height: 52px; pointer-events: none; } .hslot b { font: 700 10px "Segoe UI"; } .hslot .k { position: absolute; top: 3px; left: 7px; font: 700 11px Consolas; opacity: .6; }
+  #invSlots { flex: none; margin-bottom: 12px; }
+  #invItems { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .card img.big { width: 60px; height: 60px; margin: 0 auto; pointer-events: none; }
+  .wcard { cursor: grab; } .dragging { opacity: .4; }
+  #panelShop { max-height: 92vh; overflow-y: auto; }
+  #shopList .row img.ico { width: 56px; height: 56px; flex: none; margin-right: 10px; }
+  .recipe { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  .rp { display: inline-flex; align-items: center; gap: 3px; font: 700 11px Consolas; padding: 1px 7px 1px 2px; border-radius: 10px; background: rgba(0,0,0,.35); }
+  .rp img { width: 20px; height: 20px; } .rp.ok { color: var(--green); } .rp.no { color: #ff8a7a; }
+  .pager { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 10px; font: 700 13px Consolas; }
+  .pager .pg { background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 8px; padding: 6px 14px; font: 800 12px Consolas; cursor: pointer; } .pager .pg:disabled { opacity: .3; cursor: default; }
+  #shopList .empty { opacity: .6; padding: 20px; text-align: center; }
+  .slot img.ic { width: 44px; height: 44px; } .slot.empty { opacity: .35; border-style: dashed; }
+  .mp { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; font-size: 17px; } .mp img { width: 24px; height: 24px; } #logsN:has(.mp) { font-size: 17px; }
+  #rideCap { position: fixed; left: 0; right: 0; bottom: 18%; text-align: center; z-index: 3; font: 800 clamp(18px, 3vw, 34px) "Segoe UI", sans-serif; letter-spacing: 6px; color: #fff; text-shadow: 0 3px 0 #000, 0 0 24px rgba(0,0,0,.9); opacity: 0; transition: opacity .8s; pointer-events: none; }
+  #rideCap.show { opacity: 1; }
+  #rebirthFx { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; text-align: center; background: radial-gradient(circle, #fff6d0, #ffd860 60%, #ffb020); opacity: 0; pointer-events: none; transition: opacity 1.6s ease; }
+  #rebirthFx.show { opacity: 1; pointer-events: auto; }
+  #rebirthFx small { display: block; font: 800 18px Consolas; letter-spacing: 10px; color: #7a4a00; margin-bottom: 8px; }
+  #rebirthFx b { font: 900 clamp(32px, 6vw, 72px) "Segoe UI Black", sans-serif; color: #5a3000; text-shadow: 0 4px 0 rgba(255,255,255,.5); letter-spacing: 4px; }
   #panelFish { width: min(1000px, 94vw); }
   #panelFish .sub { font: 13px Consolas; opacity: .7; margin: -6px 0 12px; }
   #fishGrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; max-height: 58vh; overflow: auto; padding-right: 4px; }
@@ -204,11 +245,12 @@
   </div>
   <div id="wallet" class="hud">
     <div class="chip"><small>CASH</small><span id="cash">$0</span></div>
-    <div class="chip"><small>LOGS CARRIED</small><span id="logsN">0</span></div>
+    <div class="chip"><small id="logsLbl">LOGS CARRIED</small><span id="logsN">0</span></div>
   </div>
   <div id="cross" class="hud"></div>
   <div id="prompt" class="hud"></div>
   <div id="hotbar" class="hud"></div>
+  <div id="ammo" class="hud"></div>
   <div id="fps" class="hud"></div>
 </div>
 <div id="toasts"></div>
@@ -219,8 +261,8 @@
 <div id="panelInv" class="panel">
   <button class="xbtn" data-close>✕ CLOSE <kbd>E</kbd></button>
   <h2>INVENTORY</h2>
-  <div class="cols"><div id="invSlots"></div><div id="invStats"></div></div>
-  <div class="foot">click an axe to equip it · click bandage / lantern to use it · E or Esc to close</div>
+  <div class="cols"><div id="invLeft"><div class="invh">HOTBAR <small>drag weapons here · drag off or right-click to clear</small></div><div id="invHot"></div><div class="invh">WEAPONS <small>click to equip · drag onto the hotbar</small></div><div id="invSlots"></div><div class="invh">ITEMS</div><div id="invItems"></div></div><div id="invStats"></div></div>
+  <div class="foot">click a weapon to equip it · drag weapons onto the hotbar · click bandage / lantern to use it · E or Esc to close</div>
 </div>
 <div id="panelMap" class="panel">
   <button class="xbtn" data-close>✕ CLOSE <kbd>M</kbd></button>
@@ -230,11 +272,11 @@
 </div>
 <div id="panelShop" class="panel">
   <button class="xbtn" data-close>✕ LEAVE <kbd>F</kbd></button>
-  <h2>THE REAPER'S SHOP <span id="shopCash">$0</span></h2>
+  <h2><span id="shopName">THE REAPER'S SHOP</span> <span id="shopCash">$0</span></h2>
   <div id="shopSay"></div>
-  <div class="tabs"><button class="tab" data-tab="axes">AXES</button><button class="tab" data-tab="gear">GEAR</button><button class="tab" data-tab="sell">SELL FISH</button></div>
+  <div class="tabs" id="shopTabs"></div>
   <div id="shopList"></div>
-  <div class="foot">click a row to buy · number keys also work · Tab switches tab · F or Esc to leave</div>
+  <div class="foot">click a row · 1-4 picks a row · ◀ ▶ arrows change page · Tab switches tab · F or Esc to leave</div>
 </div>
 
 <div id="panelTalk" class="panel talk">
@@ -264,6 +306,16 @@
 </div>
 <div id="fishUI"><div class="fbar"><div id="fZone"></div><div id="fMark"></div></div><div class="fcap">hit F or click when the marker is in the green</div></div>
 <div id="catchPop"></div>
+
+<div id="panelFerry" class="panel">
+  <button class="xbtn" data-close>✕ <kbd>Esc</kbd></button>
+  <h2>THE FERRY TO REBIRTH ISLAND</h2>
+  <div id="ferrySay"></div>
+  <div id="ferryBody"></div>
+  <div class="ferrybtns"><button class="btn" id="ferryBuy">BUY TICKET</button><button class="btn ghost" data-close>NOT YET</button></div>
+</div>
+<div id="rideCap"></div>
+<div id="rebirthFx"><div><small id="rbSmall">REBIRTH</small><b>A NEW LIFE BEGINS</b></div></div>
 
 <div id="menu" data-mode="title">
   <div id="menuHead"></div>

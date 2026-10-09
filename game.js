@@ -24,9 +24,20 @@ const SCALE = 3; // render at 1/3 res, CSS upscales with pixelated sampling
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x21143a);
 scene.fog = new THREE.Fog(0x21143a, 6, 56);
-const camera = new THREE.PerspectiveCamera(75, 16 / 10, 0.2, 420);
+const camera = new THREE.PerspectiveCamera(75, 16 / 10, 0.2, 640);
 camera.rotation.order = "YXZ";
 scene.add(camera);
+// everything that belongs to the first island lives in one group, so a rebirth can hide it
+const isle1 = new THREE.Group();
+scene.add(isle1);
+let curBuild = 1; // which island labels are being built for
+let addTgt = null; // while set, scene.add puts new objects in this group
+{ const _add = scene.add.bind(scene); scene.add = function (...o) { if (addTgt) { for (const x of o) addTgt.add(x); return this; } return _add(...o); }; }
+let isle = 1; // 1 = Pine Island, 2 = the Highland Isle
+let groundFn = null;
+const groundY = (x, z) => (groundFn ? groundFn(x, z) : 0);
+const curShoreAt = (x, z) => (isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
+const curShoreR = a => (isle === 2 ? shoreR2(a) : shoreR(a));
 
 // viewmodel (axe) gets its own scene + depth pass so it never clips into trees
 const viewScene = new THREE.Scene();
@@ -69,7 +80,7 @@ const shoreAt = (x, z) => shoreR(Math.atan2(z, x));
 const BED = { x: 2.75, z: 1.7 }, HOPPER = { x: 5, z: -7 };
 const MILL = { x: 17.5, z: -12.5 };
 const RESPAWN = { x: 1.0, z: 0.0 };
-const N_AXES = 8;
+const N_AXES = 11;
 
 // ---------- save ----------
 const SAVE_KEY = "ts4_save_v1";
@@ -78,7 +89,8 @@ const save = {
     logs: 0, logBonus: 0, money: 0, owned: [1, 0, 0, 0, 0, 0, 0, 0], equipped: 0, ghosts: 0, bandages: 1, priceLvl: 0,
     hpLvl: 0, bootLvl: 0, oilLvl: 0, felled: 0, rareFelled: 0, deaths: 0, sold: 0, seconds: 0, day: 1, clock: 8,
     contract: null, chestsDay: 0, altarDay: 0, chestsOpened: 0,
-    rodLvl: 0, fishBag: [], fishDex: {}, fishSold: 0, ghostCash: 0, ghostFelled: 0, bmSurvived: 0
+    rodLvl: 0, fishBag: [], fishDex: {}, fishSold: 0, ghostCash: 0, ghostFelled: 0, bmSurvived: 0, rebirths: 0,
+    isle: 1, gunOwned: [], gunEq: -1, gunAmmo: {}, vestLvl: 0, magLvl: 0, whetLvl: 0, powderLvl: 0, magnetLvl: 0, ferryTalks: 0, ferry2Talk: 0, mats: {}, hotbar: null
 };
 try { Object.assign(save, JSON.parse(localStorage.getItem(SAVE_KEY) || localStorage.getItem("ts4_test3_save") || "{}")); } catch (e) { /* fresh save */ }
 if (!Array.isArray(save.owned)) save.owned = [1, 0, 0, 0, 0, 0, 0, 0];
@@ -86,10 +98,17 @@ while (save.owned.length < N_AXES) save.owned.push(0);
 if (!Array.isArray(save.fishBag)) save.fishBag = [];
 if (!save.fishDex || typeof save.fishDex !== "object") save.fishDex = {};
 if (!save.owned[save.equipped]) save.equipped = 0;
+if (!Array.isArray(save.gunOwned)) save.gunOwned = [];
+if (!save.gunAmmo || typeof save.gunAmmo !== "object") save.gunAmmo = {};
+if (typeof save.gunEq !== "number" || !save.gunOwned[save.gunEq]) save.gunEq = -1;
+if (!save.mats || typeof save.mats !== "object") save.mats = {};
 function writeSave() { save.clock = hourNow(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
 // difficulty follows your best axe, so a strong axe never one-shots everything
 const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; }); return b; };
-const bestDmg = () => AXES[bestIdx()].dmg;
+const gunPow = () => { let p = 0; (save.gunOwned || []).forEach((o, i) => { if (o) p = Math.max(p, GUNS[i].pow); }); return p; };
+const gunTier = () => (save.gunOwned || []).filter(Boolean).length * 2;
+const bestDmg = () => Math.max(AXES[bestIdx()].dmg, gunPow());
+const isleHp = () => (isle === 2 ? 2.2 : 1), isleRw = () => (isle === 2 ? 1.6 : 1), isleDm = () => (isle === 2 ? 1.5 : 1);
 const hpScale = () => 1 + (bestDmg() - 1) * 0.7;
 const rewardScale = () => 1 + (bestDmg() - 1) * 0.14;
 const dmgScale = () => 1 + bestIdx() * 0.1;
@@ -99,7 +118,10 @@ const hpCost = () => Math.floor(120 * Math.pow(1.7, save.hpLvl));
 const bootCost = () => Math.floor(150 * Math.pow(1.9, save.bootLvl));
 const oilCost = () => Math.floor(90 * Math.pow(2, save.oilLvl));
 const BANDAGE_COST = 25;
-const logValue = () => 4 + save.priceLvl * 2;
+// rebirth: each trip on the ferry costs 3x more and gives +50% log/fish value and +10% axe damage, forever
+const rebirthCost = () => Math.round(250000 * Math.pow(3, save.rebirths || 0));
+const rebirthMult = () => 1 + 0.5 * (save.rebirths || 0);
+const logValue = () => Math.round((4 + save.priceLvl * 2) * rebirthMult() * (isle === 2 ? 2.5 : 1));
 const ghostIncome = () => 0; // ghosts now earn by really chopping trees
 const maxHpNow = () => 100 + save.hpLvl * 20;
 
@@ -148,7 +170,7 @@ let starMat = null, waterMesh = null;
     }
     g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
     g.computeVertexNormals();
-    scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+    isle1.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
     const wg = new THREE.PlaneGeometry(1600, 1600);
     wg.rotateX(-Math.PI / 2);
     waterMesh = new THREE.Mesh(wg, new THREE.MeshLambertMaterial({ color: 0x2f78a8, emissive: 0x0a2a40, transparent: true, opacity: 0.9, flatShading: true }));
@@ -216,6 +238,7 @@ function applySky() {
     lantern.distance = 24 + save.oilLvl * 6;
 }
 
+addTgt = isle1;
 // ---------- helpers for building ----------
 const occluders = []; // solid meshes that hide labels and nameplates behind them
 const colliders = []; // axis-aligned boxes [minx, maxx, minz, maxz]
@@ -235,7 +258,7 @@ function label(text, color = "#ffd040", w = 3, h = 0.75) {
     el.style.color = color; el.style.borderColor = color;
     el.style.fontSize = clamp(w * 5.2, 12, 26) + "px";
     $("labels").appendChild(el);
-    const l = { el, position: new THREE.Vector3(), visible: true, material: { opacity: 1 }, maxD: 95, blurK: 1 };
+    const l = { el, position: new THREE.Vector3(), visible: true, material: { opacity: 1 }, maxD: 95, blurK: 1, isle: curBuild };
     labelList.push(l);
     return l;
 }
@@ -262,7 +285,7 @@ const behindAxe = (sx, sy) => sx > innerWidth * 0.58 && sy > innerHeight * 0.48;
 function updateLabels() {
     refreshOccluders();
     for (const l of labelList) {
-        if (!l.visible) { l.el.style.display = "none"; continue; }
+        if (!l.visible || l.isle !== isle) { l.el.style.display = "none"; continue; }
         const d = camera.position.distanceTo(l.position);
         lblV.copy(l.position).project(camera);
         if (d > l.maxD || lblV.z > 1 || Math.abs(lblV.x) > 1.15 || Math.abs(lblV.y) > 1.15) { l.el.style.display = "none"; continue; }
@@ -759,7 +782,7 @@ function ferrymanTex() {
 
     // the arch sign over the start of the dock
     for (const s of [-2.0, 2.0]) { const p = dockPt(3.5, s); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH'S", "COMING SOON", "#ffe080"), side: THREE.DoubleSide }));
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH FERRY", "FROM $250,000", "#ffe080"), side: THREE.DoubleSide }));
     const bp = dockPt(3.5, 0, 3.3);
     board.position.copy(bp); board.rotation.y = yaw + Math.PI;
     scene.add(board);
@@ -803,28 +826,27 @@ function ferrymanTex() {
     const fm = label("FERRYMAN", "#9fe8ff", 2.6, 0.6);
     fm.position.set(fp.x, 4.7, fp.z); fm.maxD = 60;
 
-    // far shore: the Rebirth Island, a golden tree and a beacon you can see from anywhere
-    const FI = dockPt(DOCK_LEN + 74, 0, 0);
-    const sand = new THREE.Mesh(new THREE.SphereGeometry(24, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0xc8b078, flatShading: true }));
-    sand.scale.y = 0.22; sand.position.set(FI.x, -0.5, FI.z);
-    const grassCap = new THREE.Mesh(new THREE.CircleGeometry(15, 16), new THREE.MeshLambertMaterial({ color: 0x4a8a4a, flatShading: true }));
-    grassCap.rotation.x = -Math.PI / 2; grassCap.position.set(FI.x, 2.35, FI.z);
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.9, 13, 8), new THREE.MeshLambertMaterial({ color: 0x8a6a2a, flatShading: true, emissive: 0x3a2a08 }));
-    trunk.position.set(FI.x, 8.5, FI.z);
-    scene.add(sand, grassCap, trunk);
+    // far shore: the Highland Isle on the horizon, a snowy mountain with the Golden Tree on its peak
+    const FI = dockPt(DOCK_LEN + 240, 0, 0);
+    const farM = c => new THREE.MeshLambertMaterial({ color: c, flatShading: true, fog: false });
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(80, 96, 6, 14), farM(0x5e7254)); base.position.set(FI.x, -2.6, FI.z);
+    const sand = new THREE.Mesh(new THREE.CylinderGeometry(97, 101, 1.2, 14), farM(0xb8a878)); sand.position.set(FI.x, -1.0, FI.z);
+    const mtn = new THREE.Mesh(new THREE.ConeGeometry(58, 64, 9), farM(0x56646c)); mtn.position.set(FI.x, 31, FI.z);
+    const snow = new THREE.Mesh(new THREE.ConeGeometry(21, 22.5, 9), farM(0xeef2fa)); snow.position.set(FI.x, 51.9, FI.z);
+    scene.add(base, sand, mtn, snow);
+    for (const [ox, oz, r, hh] of [[-46, 30, 34, 30], [40, 36, 30, 24], [30, -44, 26, 20]]) { const p = FPERP.clone().multiplyScalar(ox).addScaledVector(FDIR, oz); const m = new THREE.Mesh(new THREE.ConeGeometry(r, hh, 8), farM(0x627566)); m.position.set(FI.x + p.x, hh / 2 - 1, FI.z + p.z); scene.add(m); }
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.2, 12, 8), farM(0x8a6a2a)); trunk.position.set(FI.x, 68, FI.z); scene.add(trunk);
     const canopyM = new THREE.MeshBasicMaterial({ color: 0xffd860, fog: false });
-    for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(9 - i * 2.2, 7, 8), canopyM); c.position.set(FI.x, 16 + i * 3.6, FI.z); scene.add(c); }
-    farBeam = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 220, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe080, transparent: true, opacity: 0.2, fog: false, depthWrite: false, side: THREE.DoubleSide }));
-    farBeam.position.set(FI.x, 110, FI.z);
+    for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(10 - i * 2.5, 8, 8), canopyM); c.position.set(FI.x, 76 + i * 4.2, FI.z); scene.add(c); }
+    farBeam = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 260, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe080, transparent: true, opacity: 0.2, fog: false, depthWrite: false, side: THREE.DoubleSide }));
+    farBeam.position.set(FI.x, 150, FI.z);
     scene.add(farBeam);
-    const runeB = batch(new THREE.MeshBasicMaterial({ color: 0xffe080, fog: false })), stonesB = batch(new THREE.MeshLambertMaterial({ color: 0x8a8a98, flatShading: true }));
-    for (let i = 0; i < 7; i++) { const a = (i / 7) * Math.PI * 2; stonesB.add(BOX, FI.x + Math.cos(a) * 11, 3.6, FI.z + Math.sin(a) * 11, 0, -a, 0, 1.0, 2.8, 0.7); runeB.add(BOX, FI.x + Math.cos(a) * 10.55, 4.2, FI.z + Math.sin(a) * 10.55, 0, -a, 0, 0.5, 0.1, 0.04); }
-    stonesB.build(); runeB.build();
-    const bl = label("REBIRTH ISLAND", "#ffe080", 5.6, 1.3); bl.position.set(FI.x, 30, FI.z); bl.maxD = 420; bl.blurK = 0.25;
-    const bl2 = label("COMING SOON", "#ffffff", 4.2, 1.0); bl2.position.set(FI.x, 26, FI.z); bl2.maxD = 420; bl2.blurK = 0.25;
+    const bl = label("THE HIGHLAND ISLE", "#ffe080", 5.6, 1.3); bl.position.set(FI.x, 128, FI.z); bl.maxD = 520; bl.blurK = 0.25;
+    const bl2 = label("A NEW LIFE AWAITS", "#ffffff", 4.6, 1.0); bl2.position.set(FI.x, 112, FI.z); bl2.maxD = 520; bl2.blurK = 0.25;
     farGlow = canopyM;
 }
 function clampToIsland(p) {
+    if (isle === 2) { clampIsle2(p); return; }
     const dx = p.x - FB.x, dz = p.z - FB.z;
     const along = dx * FDIR.x + dz * FDIR.z, side = dx * FPERP.x + dz * FPERP.z;
     if (along > 4.5 && along < DOCK_LEN + 3 && Math.abs(side) < 6) { // out on the dock: stay on the planks
@@ -837,17 +859,17 @@ function clampToIsland(p) {
 }
 const FERRY_FIRST = [
     "Ahh... a woodcutter, out on my dock at this hour.",
-    "See that golden glow, far across the water? That is Rebirth Island.",
-    "One day soon, this ferry will carry you there. To a whole new life. A fresh start, with everything you have earned still waiting on this shore.",
-    "But passage isn't cheap, friend. The ticket will be... expensive. Very. Expensive.",
-    "Rebirths are coming soon. Keep chopping. Keep saving. I'll be right here."
+    "See that golden glow, far across the water? That is the Highland Isle.",
+    "One ticket, one trip, one whole new life. Everything you've earned stays behind... but over there: mountains, strange trees, and guns.",
+    "The first ticket costs $250,000. The second costs three times that. Then three times again.",
+    "Come back when your pockets are heavy."
 ];
-const FERRY_AGAIN = [
-    ["Back again? The water is patient, and so am I.", "Rebirths are still coming soon. Hold on to your coin."],
-    ["Not yet, woodcutter. The boat isn't ready to sail.", "When it is, it won't come cheap. I wouldn't lie to you."],
-    ["Every night that glow gets a little brighter, don't you think?", "Soon. Very soon."],
-    ["The ticket price? Ahh... you don't want to know. Not yet."],
-    ["I've ferried kings, and thieves, and one very rude goat.", "None of them paid as much as you will."]
+const FERRY_QUIPS = [
+    "The water is patient, and so am I.",
+    "Heavy pockets, light heart. That's how the best trips start.",
+    "Every trip across, the island gives a little more back.",
+    "I've ferried kings, and thieves, and one very rude goat.",
+    "Take your time. The ferry always waits."
 ];
 
 // ---------- the wider map: landmarks, chests, scenery ----------
@@ -1140,17 +1162,30 @@ function scatter(count, fn, inside = false, margin = 1.5) {
     scene.add(sh, hat);
 }
 
+addTgt = null;
 // ---------- the living trees (rarer ones come out at night) ----------
 const TYPES = {
     pine:  { name: "Pine Tree",   leaf: [0x264a3a, 0x2f2c52, 0x3d2650], trunk: 0x4a3024, hp: 1,   logs: 1,   dmg: 1,    speed: 1,    bonus: 0,  wd: 1,    wn: 0.55, col: "#3f8a62" },
     elder: { name: "Elder Tree",  leaf: [0x4a2a6a],                     trunk: 0x33233a, hp: 1.7, logs: 1.6, dmg: 1.25, speed: 1,    bonus: 2,  wd: 0.1,  wn: 0.32, col: "#a070ff", glow: 0x1a0a30, rare: true },
     ghost: { name: "Ghost Tree",  leaf: [0x9fe8ff],                     trunk: 0x7aa0b0, hp: 2.3, logs: 2,   dmg: 1.1,  speed: 1.35, bonus: 6,  wd: 0,    wn: 0.2,  col: "#8ff0ff", glow: 0x2a5a6a, rare: true, night: true, ghost: true },
-    blood: { name: "Blood Tree",  leaf: [0x8a1010],                     trunk: 0x3a0a0a, hp: 3,   logs: 2.5, dmg: 1.7,  speed: 1.15, bonus: 10, wd: 0,    wn: 0.12, col: "#ff3a3a", glow: 0x3a0000, rare: true, night: true },
+    blood: { name: "Blood Tree",  leaf: [0x8a1010],                     trunk: 0x3a0a0a, hp: 3,   logs: 2.5, dmg: 1.7,  speed: 1.15, bonus: 10, wd: 0,    wn: 0.12, col: "#ff3a3a", glow: 0x3a0000, rare: true, night: true, isl: [1, 2], mat: "magma" },
     ironwood: { name: "Ironwood",     leaf: [0x56687a],           trunk: 0x34343e, hp: 2.0, logs: 1.5, dmg: 1.2, speed: 1,    bonus: 3,  wd: 0.3,  wn: 0.22, col: "#a9bcd4", glow: 0x10161c, minTier: 2 },
     frostbark: { name: "Frostbark",    leaf: [0x9fe0ff],           trunk: 0x5a7a9a, hp: 2.6, logs: 2,   dmg: 1.3, speed: 1,    bonus: 8,  wd: 0.22, wn: 0.16, col: "#8fe0ff", glow: 0x0a3a5a, minTier: 3 },
     emberwood: { name: "Emberwood",    leaf: [0xff6a1a],           trunk: 0x3a1a0a, hp: 3.4, logs: 2.5, dmg: 1.6, speed: 1.1,  bonus: 14, wd: 0.2,  wn: 0.22, col: "#ff9a3a", glow: 0x6a2000, minTier: 5 },
     titan: { name: "Titan Tree",       leaf: [0x1f4a34, 0x2a3a5a], trunk: 0x4a3a2a, hp: 6,   logs: 5,   dmg: 2,   speed: 0.7,  bonus: 25, wd: 0.07, wn: 0.1,  col: "#ffd8a0", minTier: 6, titan: true },
-    gold:  { name: "Golden Tree", leaf: [0xffd040],                     trunk: 0x9a7a20, hp: 2,   logs: 3,   dmg: 0,    speed: 1,    bonus: 25, wd: 0.03, wn: 0.03, col: "#ffd040", glow: 0x6a4a00, rare: true, flee: true }
+    gold:  { name: "Golden Tree", leaf: [0xffd040],                     trunk: 0x9a7a20, hp: 2,   logs: 3,   dmg: 0,    speed: 1,    bonus: 25, wd: 0.03, wn: 0.03, col: "#ffd040", glow: 0x6a4a00, rare: true, flee: true, isl: [1, 2], mat: "gold" },
+    // ---- the Highland Isle ----
+    larch:    { name: "Highland Larch", leaf: [0x6a8a3a, 0x8a9a3a, 0x4a7a42], trunk: 0x5a4030, hp: 1.3, logs: 1.6, dmg: 1.1, speed: 1,    bonus: 4,  wd: 0.8,  wn: 0.4,  col: "#a0d060", isl: [2], round: true, mat: "wood" },
+    stonebark:  { name: "Stonebark",   leaf: [0x7a7a84, 0x6a6a72], trunk: 0x5a5a62, hp: 1.6, logs: 1.4, dmg: 1.15, speed: 0.9, bonus: 5,  wd: 0.6,  wn: 0.35, col: "#c8c8d4", isl: [2], round: true, mat: "stone" },
+    copperleaf: { name: "Copperleaf",  leaf: [0xd0763a, 0xe0904a], trunk: 0x5a3a22, hp: 1.5, logs: 1.2, dmg: 1.1, speed: 1,    bonus: 6,  wd: 0.45, wn: 0.3,  col: "#ff9a5a", isl: [2], mat: "copper" },
+    ironbark:   { name: "Ironbark",    leaf: [0x4a5a6a, 0x56687a], trunk: 0x34343e, hp: 2.0, logs: 1.1, dmg: 1.2, speed: 1,    bonus: 8,  wd: 0.45, wn: 0.3,  col: "#a9c0dc", glow: 0x10161c, isl: [2], minTier: 1, mat: "iron" },
+    powderwood: { name: "Powderwood",  leaf: [0x2a2228, 0x3a2a2a], trunk: 0x1a1418, hp: 2.2, logs: 1.1, dmg: 1.3, speed: 1.05, bonus: 9,  wd: 0.35, wn: 0.35, col: "#ff6a6a", glow: 0x400a0a, isl: [2], minTier: 2, mat: "gunpowder" },
+    goldleaf:   { name: "Goldleaf",    leaf: [0xffd040, 0xffe070], trunk: 0x7a5a20, hp: 2.6, logs: 0.6, dmg: 1.2, speed: 1,    bonus: 20, wd: 0.16, wn: 0.16, col: "#ffd040", glow: 0x5a4000, isl: [2], minTier: 3, round: true, mat: "gold" },
+    redwood:  { name: "Redwood",        leaf: [0x2a5a32],                     trunk: 0x7a3a22, hp: 2.4, logs: 2.2, dmg: 1.35, speed: 0.9, bonus: 10, wd: 0.35, wn: 0.25, col: "#e08a5a", isl: [2], minTier: 2, tall: true, alt: [0, 26], mat: "wood" },
+    snowpine: { name: "Snowcap Pine",   leaf: [0xe8f4ff, 0xcfe4f4],           trunk: 0x4a4a52, hp: 2.8, logs: 2.4, dmg: 1.4, speed: 1,    bonus: 14, wd: 0.5,  wn: 0.35, col: "#d8f0ff", glow: 0x203040, isl: [2], minTier: 3, alt: [15, 70], mat: "iron" },
+    crystal:  { name: "Crystal Tree",   leaf: [0x7affef, 0xff7ad8],           trunk: 0x3a4a6a, hp: 3.4, logs: 3,   dmg: 1.5, speed: 1.25, bonus: 30, wd: 0.05, wn: 0.4,  col: "#7affef", glow: 0x1a6a6a, isl: [2], rare: true, night: true, minTier: 4, mat: "crystal" },
+    magma:    { name: "Magma Oak",      leaf: [0xff5a1a, 0xd03a10],           trunk: 0x2a1a14, hp: 4.5, logs: 3.4, dmg: 1.9, speed: 1.1, bonus: 45, wd: 0.14, wn: 0.14, col: "#ff7a3a", glow: 0x7a2000, isl: [2], minTier: 5, alt: [6, 70], mat: "magma" },
+    colossus: { name: "Colossus Tree",  leaf: [0x1f5a3a, 0x2a4a6a],           trunk: 0x5a4a38, hp: 9,   logs: 8,   dmg: 2.6, speed: 0.6,  bonus: 80, wd: 0.05, wn: 0.05, col: "#ffe0a0", isl: [2], minTier: 8, titan: true, mat: "gold" }
 };
 const typeMats = {};
 for (const [k, T] of Object.entries(TYPES)) {
@@ -1160,6 +1195,63 @@ for (const [k, T] of Object.entries(TYPES)) {
     typeMats[k] = { trunk: new THREE.MeshLambertMaterial({ color: T.trunk, ...base }), leaves: T.leaf.map(c => new THREE.MeshLambertMaterial({ color: c, ...base })) };
 }
 const armMat = new THREE.MeshLambertMaterial({ color: 0x2c1c16, flatShading: true });
+// how each species is shaped: conifer tiers, round broadleaf canopies, tall redwoods, dead spiky blood trees, crystal shards
+const TREE_STYLE = {
+    pine: { s: "conifer" }, elder: { s: "round" }, ghost: { s: "conifer" }, blood: { s: "dead", dots: 0xff3030 }, ironwood: { s: "conifer" },
+    frostbark: { s: "conifer", snow: true }, emberwood: { s: "round", dots: 0xffa040 }, titan: { s: "conifer" }, gold: { s: "round", dots: 0xfff4b0 },
+    larch: { s: "round" }, stonebark: { s: "round", rocks: true }, copperleaf: { s: "round", dots: 0xffb070 }, ironbark: { s: "conifer" },
+    powderwood: { s: "spiky", dots: 0xff3a2a }, goldleaf: { s: "round", dots: 0xfff4b0 }, redwood: { s: "tall" }, snowpine: { s: "conifer", snow: true },
+    crystal: { s: "crystal", dots: 0xbffff6 }, magma: { s: "round", dots: 0xffa030 }, colossus: { s: "conifer" }
+};
+const snowMat = new THREE.MeshLambertMaterial({ color: 0xf2f6ff, flatShading: true }), rockMat = new THREE.MeshLambertMaterial({ color: 0x7a7a84, flatShading: true });
+const dotMats = {};
+const ni = g => (g.index ? g.toNonIndexed() : g);
+function treeShape(key, r, h) {
+    const st = TREE_STYLE[key] || { s: "conifer" }, leaf = [], deco = [], snow = [], dots = [], rocks = [];
+    const R = Math.random, rot = g => { g.rotateY(R() * 6.28); return g; };
+    // roots splaying out from the base
+    for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * 6.283 + R() * 0.6, c = new THREE.ConeGeometry(r * 0.38, r * 2.0, 5);
+        c.rotateZ(-(Math.PI / 2 + 0.45)); c.rotateY(-a); c.translate(Math.cos(a) * r * 0.75, r * 0.32, Math.sin(a) * r * 0.75);
+        deco.push(ni(c));
+    }
+    const dot = (x, y, z, s = 0.13) => { const d = new THREE.IcosahedronGeometry(r * s * 2, 0); d.translate(x, y, z); dots.push(d); };
+    if (st.s === "conifer" || st.s === "spiky") {
+        const tiers = h > 7 ? 5 : 4, seg = st.s === "spiky" ? 4 : 8;
+        for (let i = 0; i < tiers; i++) {
+            const k = i / tiers, rad = r * (st.s === "spiky" ? 3.0 : 3.7) * (1 - k * 0.78), ht = h * 0.36, y = h * 0.45 + i * (h * 0.62 / tiers), jx = (R() - 0.5) * r * 0.25, jz = (R() - 0.5) * r * 0.25;
+            const c = rot(new THREE.ConeGeometry(rad, ht, seg)); c.translate(jx, y, jz); leaf.push(ni(c));
+            if (st.snow) { const sc = rot(new THREE.ConeGeometry(rad * 0.55, ht * 0.42, seg)); sc.translate(jx, y + ht * 0.3, jz); snow.push(ni(sc)); }
+            if (st.dots) for (let d = 0; d < 3; d++) { const a = R() * 6.28, rr = rad * 0.55; dot(jx + Math.cos(a) * rr, y - ht * 0.15, jz + Math.sin(a) * rr); }
+        }
+    } else if (st.s === "round") {
+        const blobs = [[0, h * 1.0, 0, 2.5]];
+        for (let i = 0; i < 6; i++) { const a = (i / 6) * 6.283 + R() * 0.5; blobs.push([Math.cos(a) * r * 1.9, h * (0.7 + R() * 0.2), Math.sin(a) * r * 1.9, 1.8 + R() * 0.7]); }
+        for (const [x, y, z, sz] of blobs) {
+            const b = new THREE.IcosahedronGeometry(r * sz, 0); b.rotateY(R() * 6); b.scale(1, 0.82, 1); b.translate(x, y, z); leaf.push(b);
+            if (x || z) { const br = new THREE.CylinderGeometry(r * 0.12, r * 0.22, Math.hypot(x, z) * 1.1, 5); br.translate(0, Math.hypot(x, z) * 0.55, 0); br.rotateZ(-Math.atan2(Math.hypot(x, z), y - h * 0.55) * 0.9); br.rotateY(-Math.atan2(z, x)); br.translate(0, h * 0.55, 0); deco.push(ni(br)); }
+            if (st.dots) for (let d = 0; d < 2; d++) { const a = R() * 6.28, e = R() * 1.2; dot(x + Math.cos(a) * r * sz * 0.85, y + Math.sin(e) * r * sz * 0.6, z + Math.sin(a) * r * sz * 0.85); }
+        }
+        if (st.rocks) for (let i = 0; i < 4; i++) { const a = R() * 6.28, rk = new THREE.IcosahedronGeometry(r * (0.5 + R() * 0.5), 0); rk.translate(Math.cos(a) * r * 2.2, r * 0.3, Math.sin(a) * r * 2.2); rocks.push(rk); }
+    } else if (st.s === "tall") {
+        for (let i = 0; i < 5; i++) { const k = i / 5, c = rot(new THREE.ConeGeometry(r * 2.6 * (1 - k * 0.6), h * 0.2, 7)); c.translate((R() - 0.5) * r * 0.3, h * 0.6 + i * h * 0.11, (R() - 0.5) * r * 0.3); leaf.push(ni(c)); }
+    } else if (st.s === "dead") {
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * 6.283 + R() * 0.4, len = h * (0.35 + R() * 0.2), c = new THREE.ConeGeometry(r * 0.55, len, 4);
+            c.translate(0, len / 2, 0); c.rotateZ(-(0.5 + R() * 0.6)); c.rotateY(-a); c.translate(0, h * (0.65 + R() * 0.3), 0); leaf.push(ni(c));
+            if (st.dots) dot(Math.cos(a) * len * 0.5, h * 0.9, Math.sin(a) * len * 0.5, 0.18);
+        }
+        const top = new THREE.ConeGeometry(r * 1.4, h * 0.5, 5); top.translate(0, h * 1.0, 0); leaf.push(ni(top));
+    } else if (st.s === "crystal") {
+        const mk = (x, y, z, w, l, tz, tx) => { const c = new THREE.ConeGeometry(w, l, 6); c.translate(0, l / 2, 0); c.rotateZ(tz); c.rotateX(tx); c.translate(x, y, z); leaf.push(ni(c)); };
+        mk(0, h * 0.62, 0, r * 1.1, h * 0.7, 0, 0);
+        for (let i = 0; i < 7; i++) { const a = (i / 7) * 6.283; mk(Math.cos(a) * r * 0.6, h * (0.6 + R() * 0.2), Math.sin(a) * r * 0.6, r * (0.5 + R() * 0.3), h * (0.3 + R() * 0.25), Math.sin(a) * 0.7, -Math.cos(a) * 0.7); }
+        for (let d = 0; d < 6; d++) dot((R() - 0.5) * r * 3, h * (0.7 + R() * 0.5), (R() - 0.5) * r * 3, 0.1);
+    }
+    const merge = a => (a.length ? mergeGeometries(a) : null);
+    return { leaf: merge(leaf), deco: merge(deco), snow: merge(snow), dots: merge(dots), rocks: merge(rocks), dotCol: st.dots };
+}
+
 
 function makeFace(mode) {
     const S = 128, cv = document.createElement("canvas");
@@ -1235,21 +1327,25 @@ function makeTree(x, z, h, key = "pine") {
     const T = TYPES[key], M = typeMats[key];
     const r = 0.42 + h * 0.075;
     const g = new THREE.Group();
-    g.position.set(x, 0, z);
+    const gy0 = groundY(x, z);
+    g.position.set(x, gy0 - (isle === 2 ? 0.25 : 0), z);
     const body = new THREE.Group();
     g.add(body);
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r, h * 1.05, 8), M.trunk);
+    // a slightly bent, knobbly trunk
+    const tg = new THREE.CylinderGeometry(r * 0.6, r * 1.05, h * 1.05, 8, 4);
+    { const p = tg.attributes.position, bend = (Math.random() - 0.5) * 0.1 * h, ph = Math.random() * 6;
+      for (let i = 0; i < p.count; i++) { const u = p.getY(i) / (h * 1.05) + 0.5, k = 1 + 0.07 * Math.sin(u * 11 + ph + p.getX(i) * 3); p.setX(i, p.getX(i) * k + bend * u * u * u); p.setZ(i, p.getZ(i) * k); }
+      tg.computeVertexNormals(); }
+    const trunk = new THREE.Mesh(tg, M.trunk);
     trunk.position.y = h * 0.525;
     body.add(trunk);
-    const cones = [];
-    for (let i = 0; i < 3; i++) {
-        const c = new THREE.ConeGeometry(r * 3.6 * (1 - i * 0.22), h * 0.45, 7);
-        c.rotateY(Math.random() * 3);
-        c.translate(0, h * 0.72 + i * h * 0.17, 0);
-        cones.push(c.toNonIndexed());
-    }
-    const foliage = new THREE.Mesh(mergeGeometries(cones), M.leaves[Math.floor(Math.random() * M.leaves.length)]);
+    const shp = treeShape(key, r, h);
+    const foliage = new THREE.Mesh(shp.leaf, M.leaves[Math.floor(Math.random() * M.leaves.length)]);
     body.add(foliage);
+    if (shp.deco) body.add(new THREE.Mesh(shp.deco, M.trunk));
+    if (shp.snow) body.add(new THREE.Mesh(shp.snow, snowMat));
+    if (shp.rocks) body.add(new THREE.Mesh(shp.rocks, rockMat));
+    if (shp.dots) body.add(new THREE.Mesh(shp.dots, dotMats[shp.dotCol] || (dotMats[shp.dotCol] = new THREE.MeshBasicMaterial({ color: shp.dotCol }))));
     const faceY = Math.min(h * 0.3, 2.0);
     const rAt = r * (1 - 0.3 * (faceY / h));
     const face = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMats.calm);
@@ -1267,9 +1363,9 @@ function makeTree(x, z, h, key = "pine") {
         arms.push({ pivot, arm, s });
     }
     scene.add(g);
-    const hp = Math.ceil(h * 0.7 * T.hp * (1 + 0.12 * (save.day - 1)) * hpScale());
+    const hp = Math.ceil(h * 0.7 * T.hp * (1 + 0.12 * (save.day - 1)) * hpScale() * isleHp());
     const t = {
-        g, body, face, arms, h, r, x, z, key, type: T, hp, maxHp: hp, solid: [trunk, foliage],
+        g, body, face, arms, h, r, x, z, gy: gy0, key, type: T, hp, maxHp: hp, solid: [trunk, foliage],
         dying: false, burn: false, t: 0, hurt: 0, phase: Math.random() * 6, gone: false,
         mode: "calm", atk: "idle", atkT: 0, cool: 1 + Math.random() * 3, armUp: 0, swing: 0, bar: null, barT: 0, _d: 99, _seen: false
     };
@@ -1277,29 +1373,31 @@ function makeTree(x, z, h, key = "pine") {
     return t;
 }
 
-function pickType() {
-    const night = isNight();
+function pickType(px = 0, pz = 0) {
+    const night = isNight(), here = isle === 2 ? groundY(px, pz) : 0;
     let total = 0;
-    const tier = bestIdx(), blood = isBlood(), tw = T => (night ? T.wn : T.wd) * (blood && T.rare ? 2.2 : 1);
-    for (const T of Object.values(TYPES)) if ((T.minTier || 0) <= tier) total += tw(T);
+    const tier = Math.max(bestIdx(), gunTier()), blood = isBlood(), tw = T => (night ? T.wn : T.wd) * (blood && T.rare ? 2.2 : 1);
+    const ok = T => (T.isl || [1]).includes(isle) && (T.minTier || 0) <= tier && (!T.alt || (here >= T.alt[0] && here <= T.alt[1]));
+    for (const T of Object.values(TYPES)) if (ok(T)) total += tw(T);
     let r = Math.random() * total;
-    for (const [k, T] of Object.entries(TYPES)) { if ((T.minTier || 0) > tier) continue; r -= tw(T); if (r <= 0) return k; }
-    return "pine";
+    for (const [k, T] of Object.entries(TYPES)) { if (!ok(T)) continue; r -= tw(T); if (r <= 0) return k; }
+    return isle === 2 ? "larch" : "pine";
 }
 let lastRareToast = -99;
 function spawnTree(announce = true) {
     for (let tries = 0; tries < 40; tries++) {
-        const a = Math.random() * Math.PI * 2, d = SAFE_R + 4 + Math.random() * (shoreR(a) - 10 - SAFE_R - 4);
+        const a = Math.random() * Math.PI * 2, d = SAFE_R + 4 + Math.random() * (curShoreR(a) - 10 - SAFE_R - 4);
         const x = Math.cos(a) * d, z = Math.sin(a) * d;
         if (Math.hypot(x - player.pos.x, z - player.pos.z) < 18) continue;
         let bad = false;
-        for (const lm of LANDMARKS) if (Math.hypot(x - lm.x, z - lm.z) < lm.r + 2) { bad = true; break; }
+        for (const lm of curLM()) if (!lm.camp && Math.hypot(x - lm.x, z - lm.z) < lm.r + 2) { bad = true; break; }
         if (bad) continue;
+        if (isle === 2 && Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 5) continue;
         for (const o of trees) if (!o.gone && Math.hypot(x - o.x, z - o.z) < 6) { bad = true; break; }
         if (bad) continue;
-        const key = pickType();
-        const t = makeTree(x, z, TYPES[key].titan ? 10 + Math.random() * 2 : 3 + Math.random() * 7, key);
-        if (announce && (TYPES[key].night || TYPES[key].titan) && time - lastRareToast > 25) { lastRareToast = time; toast(TYPES[key].titan ? `A ${TYPES[key].name} towers somewhere in the woods...` : `A ${TYPES[key].name} stirs somewhere in the woods...`, "rare"); }
+        const key = pickType(x, z), T = TYPES[key];
+        const t = makeTree(x, z, T.titan ? 10 + Math.random() * 2 : T.tall ? 8 + Math.random() * 5 : 3 + Math.random() * 7, key);
+        if (announce && (T.night || T.titan) && time - lastRareToast > 25) { lastRareToast = time; toast(T.titan ? `A ${T.name} towers somewhere in the woods...` : `A ${T.name} stirs somewhere in the woods...`, "rare"); }
         return t;
     }
 }
@@ -1356,9 +1454,12 @@ const AXES = [
     { name: "Obsidian Axe", dmg: 9,  cost: 900,  steel: 0x1d1230, edge: 0xb04aff, glow: 0x2a0a50, scale: 1.2,  rarity: "#c07aff" },
     { name: "Inferno Axe",  dmg: 14, cost: 2000, steel: 0x5a1a0a, edge: 0xff8a2a, glow: 0x8a2a00, scale: 1.28, rarity: "#ff9a3a" },
     { name: "Moonblade",    dmg: 20, cost: 4500, steel: 0x5a6a9a, edge: 0xe8f0ff, glow: 0x3a4a8a, scale: 1.34, rarity: "#b8c8ff", night: 1.5 },
-    { name: "Reaper's Axe", dmg: 30, cost: 9000, steel: 0x10261a, edge: 0x6dffa0, glow: 0x0a6a30, scale: 1.42, rarity: "#6dffa0" }
+    { name: "Reaper's Axe", dmg: 30, cost: 9000, steel: 0x10261a, edge: 0x6dffa0, glow: 0x0a6a30, scale: 1.42, rarity: "#6dffa0" },
+    { name: "Glacier Axe",   dmg: 45, cost: 18000, steel: 0x6aa8d8, edge: 0xe8faff, glow: 0x2a6a9a, scale: 1.48, rarity: "#9fe8ff", isle2: true },
+    { name: "Magma Axe",     dmg: 70, cost: 55000, steel: 0x3a1208, edge: 0xff6a1a, glow: 0xa03a00, scale: 1.54, rarity: "#ff7a3a", isle2: true },
+    { name: "Worldsplitter", dmg: 120, cost: 160000, steel: 0x180a30, edge: 0xff5ae0, glow: 0x6a1a8a, scale: 1.62, rarity: "#ff7aea", isle2: true }
 ];
-const axeDmg = () => { const a = AXES[save.equipped]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1)); };
+const axeDmg = () => { const a = AXES[save.equipped]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0))); };
 const ownedList = () => AXES.map((a, i) => i).filter(i => save.owned[i]);
 function applyAxeLook() {
     const a = AXES[save.equipped];
@@ -1367,7 +1468,7 @@ function applyAxeLook() {
     headMesh.scale.setScalar(a.scale);
 }
 applyAxeLook();
-for (let i = 0; i < 60; i++) spawnTree(false); // (needs AXES for the difficulty scale)
+if (save.isle !== 2) for (let i = 0; i < 60; i++) spawnTree(false); // (needs AXES for the difficulty scale)
 const KF = {
     rest: [-0.2, 1.1, 0.08, 0.56, -0.78, -1.0],
     wind: [0.35, 0.95, 0.45, 0.46, -0.55, -1.1],
@@ -1376,6 +1477,9 @@ const KF = {
 function mixKF(a, b, k) { return a.map((v, i) => lerp(v, b[i], k)); }
 const swing = { t: 1, hit: false };
 function animateAxe() {
+    const hg = holdingGun();
+    axe.visible = !hg; gun.visible = hg;
+    if (hg && builtGun !== save.gunEq) buildGunModel(save.gunEq);
     const sp = Math.hypot(player.vel.x, player.vel.z);
     let p = KF.rest;
     if (swing.t < 1) {
@@ -1407,12 +1511,13 @@ function dropLogs(x, z, n, back, key = "pine") {
     const T = TYPES[key];
     const meshes = Math.min(n, 14), base = Math.floor(n / meshes), extra = n % meshes; // big drops are stacks of logs, not hundreds of meshes
     for (let i = 0; i < meshes; i++) {
-        const m = new THREE.Mesh(logGeo, logMats[key] || logMat);
+        const mk = isle === 2 ? (T.mat || "wood") : null;
+        const m = mk ? new THREE.Mesh(matGeo, matMeshMat[mk]) : new THREE.Mesh(logGeo, logMats[key] || logMat);
         const d = Math.random() * 2.5;
-        m.position.set(x + back.x * d, 0.4, z + back.z * d);
+        m.position.set(x + back.x * d, groundY(x + back.x * d, z + back.z * d) + 0.4, z + back.z * d);
         m.rotation.y = Math.random() * 3;
         scene.add(m);
-        logs.push({ m, vy: 3 + Math.random() * 3, bonus: T.bonus, w: base + (i < extra ? 1 : 0) });
+        logs.push({ m, vy: 3 + Math.random() * 3, bonus: T.bonus, w: base + (i < extra ? 1 : 0), mat: mk });
         if (base > 1) m.scale.setScalar(Math.min(1.8, 1 + base * 0.08));
     }
 }
@@ -1446,7 +1551,7 @@ function newContract() {
     const roll = Math.random(), m = 1 + 0.12 * (save.day - 1);
     if (isNight() && roll < 0.5) save.contract = { type: "rare", goal: 1, prog: 0, reward: Math.round(170 * m), text: "Fell a rare tree" };
     else if (roll < 0.6) { const g = 4 + Math.floor(Math.random() * 5); save.contract = { type: "fell", goal: g, prog: 0, reward: Math.round(g * 14 * m), text: `Fell ${g} trees` }; }
-    else { const g = 12 + Math.floor(Math.random() * 14); save.contract = { type: "sell", goal: g, prog: 0, reward: Math.round(g * 6 * m), text: `Sell ${g} logs at the mill` }; }
+    else { const g = 12 + Math.floor(Math.random() * 14); save.contract = { type: "sell", goal: g, prog: 0, reward: Math.round(g * 6 * m), text: isle === 2 ? `Sell ${g} materials at the Trading Post` : `Sell ${g} logs at the mill` }; }
 }
 function contractProgress(kind, n = 1) {
     const c = save.contract;
@@ -1492,17 +1597,20 @@ function tryHit() {
         if (d < bestD) { bestD = d; best = t; }
     }
     if (!best) { sfx(160, 0.12, "sawtooth", 0.05, 0.6); return; }
-    const dmg = axeDmg();
+    hitTree(best, axeDmg(), true);
+}
+const HIT_COL = { ghost: [0x9fe8ff, 0xffffff], blood: [0xaa1818, 0xff5a5a], gold: [0xffd040, 0xfff0a0], elder: [0x7a4aa0, 0xc8a0ff], ironwood: [0xa9bcd4, 0x6a7a8a], frostbark: [0x8fe0ff, 0xffffff], emberwood: [0xff9a3a, 0xffe070], titan: [0xd8a860, 0xfff0c0],
+    larch: [0x8a9a3a, 0xb07a45], stonebark: [0x8a8a96, 0x5a5a62], copperleaf: [0xd0763a, 0xffb070], ironbark: [0xa9c0dc, 0x4a5a6a], powderwood: [0x2a2228, 0xff4a3a], goldleaf: [0xffd040, 0xfff0a0], redwood: [0x7a3a22, 0xd08a5a], snowpine: [0xe8f4ff, 0xffffff], crystal: [0x7affef, 0xff7ad8], magma: [0xff5a1a, 0xffd060], colossus: [0xd8a860, 0xfff0c0] };
+function hitTree(best, dmg, melee) {
     best.hp -= dmg;
     best.hurt = 1;
-    floatWorld(V3(best.x, Math.min(best.h * 0.55, 3.2), best.z), "-" + dmg, "dmg");
+    floatWorld(V3(best.x, best.gy + Math.min(best.h * 0.55, 3.2), best.z), "-" + dmg, "dmg");
     showBar(best);
-    shake = Math.min(0.5, shake + 0.25);
-    hitstop = 0.07; fovKick = 1; flash = 0.2;
-    const col = { ghost: [0x9fe8ff, 0xffffff], blood: [0xaa1818, 0xff5a5a], gold: [0xffd040, 0xfff0a0], elder: [0x7a4aa0, 0xc8a0ff], ironwood: [0xa9bcd4, 0x6a7a8a], frostbark: [0x8fe0ff, 0xffffff], emberwood: [0xff9a3a, 0xffe070], titan: [0xd8a860, 0xfff0c0] }[best.key];
-    burst(V3(best.x + (player.pos.x - best.x) * 0.1, Math.min(best.h * 0.35, 2.2), best.z + (player.pos.z - best.z) * 0.1), 10, 4, col ? col.map(c => new THREE.MeshBasicMaterial({ color: c })) : chipMats);
-    sfx(140, 0.14, "square", 0.18, 0.4);
-    sfx(520 + Math.random() * 200, 0.2, "sawtooth", 0.07, 0.35);
+    if (melee) { shake = Math.min(0.5, shake + 0.25); hitstop = 0.07; fovKick = 1; flash = 0.2; }
+    const col = HIT_COL[best.key];
+    burst(V3(best.x + (player.pos.x - best.x) * 0.1, best.gy + Math.min(best.h * 0.35, 2.2), best.z + (player.pos.z - best.z) * 0.1), melee ? 10 : 5, 4, col ? col.map(c => new THREE.MeshBasicMaterial({ color: c })) : chipMats);
+    if (melee) { sfx(140, 0.14, "square", 0.18, 0.4); sfx(520 + Math.random() * 200, 0.2, "sawtooth", 0.07, 0.35); }
+    else sfx(260 + Math.random() * 100, 0.07, "square", 0.06, 0.5);
     if (best.hp <= 0) fellTree(best);
 }
 function fellTree(t) {
@@ -1516,6 +1624,7 @@ function fellTree(t) {
 
 function hurtPlayer(dmg, sx, sz) {
     if (player.invuln > 0 || state !== "playing") return;
+    dmg = Math.max(1, Math.round(dmg * (1 - 0.1 * (save.vestLvl || 0))));
     player.hp -= dmg;
     player.invuln = 0.5;
     hurtFlash = 1; shake = Math.min(0.8, shake + 0.5);
@@ -1550,7 +1659,7 @@ function respawn() {
     if (state !== "dead" || deadT < 1.2) return;
     player.maxHp = maxHpNow();
     player.hp = player.maxHp;
-    player.pos.set(RESPAWN.x, 1.7, RESPAWN.z);
+    player.pos.set(RESPAWN.x, groundY(RESPAWN.x, RESPAWN.z) + 1.7, RESPAWN.z);
     player.vel.set(0, 0, 0);
     player.yaw = 0; player.pitch = 0;
     player.invuln = 3;
@@ -1569,8 +1678,8 @@ function useBandage() {
     toast("+40 HP", "good");
 }
 let talk = { who: "", lines: [], i: 0, shown: 0 };
-function startTalk(who, lines) {
-    talk = { who, lines, i: 0, shown: 0 };
+function startTalk(who, lines, then) {
+    talk = { who, lines, i: 0, shown: 0, then };
     $("talkWho").textContent = who;
     openPanel("talk");
 }
@@ -1579,7 +1688,7 @@ function advanceTalk() {
     if (!line) { closePanel(); return; }
     if (talk.shown < line.length) { talk.shown = line.length; return; }
     if (talk.i < talk.lines.length - 1) { talk.i++; talk.shown = 0; sfx(260, 0.08, "triangle", 0.05, 1.2); }
-    else closePanel();
+    else { const cb = talk.then; closePanel(); if (cb) cb(); }
 }
 function updateTalk(dt) {
     const line = talk.lines[talk.i];
@@ -1594,9 +1703,11 @@ function updateTalk(dt) {
 }
 function toggleLantern() { player.lantern = !player.lantern; viewLamp.visible = player.lantern; }
 function equipAxe(i) {
-    if (!save.owned[i]) { toast(`${AXES[i].name} is locked. The Reaper sells it.`, "bad"); return; }
-    if (save.equipped === i) return;
+    if (!save.owned[i]) { toast(`${AXES[i].name} is locked. ${isle === 2 ? "Craft it at the Forge." : "The Reaper sells it."}`, "bad"); return; }
+    if (save.equipped === i && !holdingGun()) return;
+    save.gunEq = -1; reloading = false;
     save.equipped = i;
+    addToHotbar("a" + i);
     applyAxeLook();
     swing.t = 1;
     sfx(420, 0.12, "triangle", 0.1, 1.4);
@@ -1618,39 +1729,70 @@ function openChest(c) {
 }
 
 // ---------- shop / inventory ----------
-function shopItems() {
+let shopMode = "reaper", shopPage = 0;
+const PER_PAGE = 4;
+const SHOP_TABS = {
+    reaper: [["axes", "AXES"], ["gear", "GEAR"], ["sell", "SELL FISH"]],
+    forge: [["axes", "CRAFT AXES"], ["guns", "CRAFT GUNS"], ["ammo", "AMMO"], ["gear", "GEAR"]],
+    trade: [["trade", "SELL MATERIALS"]]
+};
+const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST" };
+function reaperAxeItems() {
     const out = [];
-    if (shopTab === "sell") return sellItems();
-    if (shopTab === "axes") {
-        AXES.forEach((a, i) => {
-            if (i === 0) return;
-            out.push({ name: a.name, desc: `${a.dmg} damage per swing${a.night ? " (x1.5 at night)" : ""}`, cost: a.cost, owned: !!save.owned[i], axe: i, col: a.rarity, buy() {
-                const old = hpScale();
-                save.owned[i] = 1;
-                const f = hpScale() / old;
-                for (const t of trees) if (!t.gone && !t.dying && !t.burn && f > 1) { t.hp = Math.ceil(t.hp * f); t.maxHp = Math.ceil(t.maxHp * f); }
-                equipAxe(i);
-            } });
-        });
-    } else {
-        out.push(
-            { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees in the woods and pays you for each one. Owned: ${save.ghosts}`, cost: ghostCost(), buy() { save.ghosts++; syncGhosts(); } },
-            { name: "Bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST, buy() { save.bandages++; } },
-            { name: "Better Log Price", desc: `Each log sells for $${logValue()} → $${logValue() + 2}`, cost: priceCost(), buy() { save.priceLvl++; } },
-            { name: "Vitality", desc: `+20 max health (${save.hpLvl}/5)`, cost: hpCost(), maxed: save.hpLvl >= 5, buy() { save.hpLvl++; player.maxHp = maxHpNow(); player.hp = player.maxHp; } },
-            { name: "Swift Boots", desc: `+7% move speed (${save.bootLvl}/4)`, cost: bootCost(), maxed: save.bootLvl >= 4, buy() { save.bootLvl++; } },
-            { name: "Lantern Oil", desc: `A brighter, longer-reaching lantern (${save.oilLvl}/3)`, cost: oilCost(), maxed: save.oilLvl >= 3, buy() { save.oilLvl++; } },
-            { name: "Better Fishing Rod", desc: `Wider catch zone, faster bites, rarer fish (${save.rodLvl}/3)`, cost: rodCost(), maxed: save.rodLvl >= 3, buy() { save.rodLvl++; } }
-        );
-    }
+    AXES.forEach((a, i) => {
+        if (i === 0 || a.isle2) return;
+        out.push({ name: a.name, icon: "a" + i, desc: `${a.dmg} damage per swing${a.night ? " (x1.5 at night)" : ""}`, cost: a.cost, owned: !!save.owned[i], axe: i, col: a.rarity, buy() { gainAxe(i); } });
+    });
     return out;
+}
+function gainAxe(i) {
+    const old = hpScale();
+    save.owned[i] = 1;
+    const f = hpScale() / old;
+    for (const t of trees) if (!t.gone && !t.dying && !t.burn && f > 1) { t.hp = Math.ceil(t.hp * f); t.maxHp = Math.ceil(t.maxHp * f); }
+    equipAxe(i);
+}
+function reaperGear() {
+    return [
+        { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees in the woods and pays you for each one. Owned: ${save.ghosts}`, cost: ghostCost(), buy() { save.ghosts++; syncGhosts(); } },
+        { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST, buy() { save.bandages++; } },
+        { name: "Better Log Price", icon: "logs", desc: `Each log sells for $${logValue()} → $${logValue() + 2}`, cost: priceCost(), buy() { save.priceLvl++; } },
+        { name: "Vitality", desc: `+20 max health (${save.hpLvl}/5)`, cost: hpCost(), maxed: save.hpLvl >= 5, buy() { save.hpLvl++; player.maxHp = maxHpNow(); player.hp = player.maxHp; } },
+        { name: "Swift Boots", desc: `+7% move speed (${save.bootLvl}/4)`, cost: bootCost(), maxed: save.bootLvl >= 4, buy() { save.bootLvl++; } },
+        { name: "Lantern Oil", icon: "lantern", desc: `A brighter, longer-reaching lantern (${save.oilLvl}/3)`, cost: oilCost(), maxed: save.oilLvl >= 3, buy() { save.oilLvl++; } },
+        { name: "Better Fishing Rod", icon: "fish", desc: `Wider catch zone, faster bites, rarer fish (${save.rodLvl}/3)`, cost: rodCost(), maxed: save.rodLvl >= 3, buy() { save.rodLvl++; } }
+    ];
+}
+function shopItems() {
+    if (shopTab === "sell") return sellItems();
+    if (shopTab === "trade") return tradeItems();
+    if (shopTab === "guns") return gunCraftItems();
+    if (shopTab === "ammo") return ammoCraftItems();
+    if (shopTab === "axes") return shopMode === "forge" ? axeCraftItems() : reaperAxeItems();
+    return shopMode === "forge" ? gearItems2() : reaperGear();
+}
+function openShop(mode, say) {
+    shopMode = mode; shopPage = 0;
+    if (!SHOP_TABS[mode].some(t => t[0] === shopTab)) shopTab = SHOP_TABS[mode][0][0];
+    $("shopSay").textContent = say ? "“" + say + "”" : "";
+    openPanel("shop");
 }
 function buy(i) {
     const it = shopItems()[i];
     if (!it) return;
     if (it.sell) { it.buy(); renderShop(); return; }
-    if (it.owned) { if (it.axe !== undefined) equipAxe(it.axe); return; }
+    if (it.owned) { if (it.axe !== undefined) equipAxe(it.axe); else if (it.gun !== undefined) equipGun(it.gun); return; }
     if (it.maxed) { toast("Already maxed out.", "bad"); return; }
+    if (it.craft) {
+        if (!hasMats(it.craft)) { toast("Not enough materials. Chop the right trees!", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return; }
+        payMats(it.craft);
+        it.buy();
+        sfx(330, 0.12, "square", 0.12, 0.6); setTimeout(() => sfx(660, 0.2, "triangle", 0.12, 1.5), 120); setTimeout(() => sfx(990, 0.3, "triangle", 0.1, 1.2), 260);
+        flash = 0.3;
+        toast(`Crafted ${it.name}!`, "good");
+        renderShop(); writeSave();
+        return;
+    }
     if (save.money < it.cost) { toast("Not enough cash.", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return; }
     save.money -= it.cost;
     it.buy();
@@ -1659,60 +1801,142 @@ function buy(i) {
     renderShop();
     writeSave();
 }
+const recipeHtml = r => '<span class="recipe">' + Object.entries(r).map(([k, n]) => { const have = save.mats[k] || 0; return `<span class="rp ${have >= n ? "ok" : "no"}"><img src="${iconURL("m:" + k)}">${Math.min(have, n)}/${n} ${MATS[k].name}</span>`; }).join("") + "</span>";
 function renderShop() {
     $("shopCash").textContent = money(save.money);
-    document.querySelectorAll("#panelShop .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === shopTab));
-    const shopHtml = shopItems().map((it, i) => {
-        const cls = it.sell ? (it.value > 0 ? "ok" : "no") : it.owned ? "owned" : it.maxed ? "owned" : save.money >= it.cost ? "ok" : "no";
-        const costTxt = it.sell ? (it.value > 0 ? "+" + money(it.value) : "—") : it.owned ? (save.equipped === it.axe ? "EQUIPPED" : "OWNED · click to equip") : it.maxed ? "MAX" : money(it.cost);
-        return `<div class="row ${cls}" data-i="${i}"><span class="key">${i + 1}</span><div class="info"><b${it.col ? ` style="color:${it.col}"` : ""}>${it.name}</b><small>${it.desc}</small></div><span class="cost">${costTxt}</span></div>`;
+    $("shopName").textContent = SHOP_NAMES[shopMode];
+    const tabs = SHOP_TABS[shopMode];
+    if (!tabs.some(t => t[0] === shopTab)) shopTab = tabs[0][0];
+    const th = tabs.length > 1 ? tabs.map(t => `<button class="tab ${t[0] === shopTab ? "on" : ""}" data-tab="${t[0]}">${t[1]}</button>`).join("") : "";
+    if ($("shopTabs").dataset.h !== th) { $("shopTabs").innerHTML = th; $("shopTabs").dataset.h = th; }
+    const items = shopItems(), pages = Math.max(1, Math.ceil(items.length / PER_PAGE));
+    shopPage = clamp(shopPage, 0, pages - 1);
+    const start = shopPage * PER_PAGE;
+    let shopHtml = items.slice(start, start + PER_PAGE).map((it, k) => {
+        const i = start + k, eqd = it.owned && (it.axe !== undefined ? save.equipped === it.axe && !holdingGun() : save.gunEq === it.gun);
+        const cls = it.sell ? (it.value > 0 ? "ok" : "no") : it.owned || it.maxed ? "owned" : it.craft ? (hasMats(it.craft) ? "ok" : "no") : save.money >= it.cost ? "ok" : "no";
+        const costTxt = it.sell ? (it.value > 0 ? "+" + money(it.value) : "—") : it.owned ? (eqd ? "EQUIPPED" : "OWNED · click to equip") : it.maxed ? "MAX" : it.craft ? (hasMats(it.craft) ? "CRAFT" : "NEED MATERIALS") : money(it.cost);
+        return `<div class="row ${cls}" data-i="${i}"><span class="key">${k + 1}</span>${it.icon ? `<img class="ico" src="${iconURL(it.icon)}">` : ""}<div class="info"><b${it.col ? ` style="color:${it.col}"` : ""}>${it.name}</b><small>${it.desc}</small>${it.craft && !it.owned ? recipeHtml(it.craft) : ""}</div><span class="cost">${costTxt}</span></div>`;
     }).join("");
+    if (!items.length) shopHtml = `<div class="empty">Nothing here yet.</div>`;
+    if (pages > 1) shopHtml += `<div class="pager"><button class="pg" data-pg="-1" ${shopPage === 0 ? "disabled" : ""}>◀ PREV</button><span>PAGE ${shopPage + 1} / ${pages}</span><button class="pg" data-pg="1" ${shopPage >= pages - 1 ? "disabled" : ""}>NEXT ▶</button></div>`;
     if ($("shopList").dataset.h !== shopHtml) { $("shopList").innerHTML = shopHtml; $("shopList").dataset.h = shopHtml; }
 }
+
+// ---------- weapons, the 5-slot hotbar, and the inventory (drag weapons onto the hotbar) ----------
+const HOT_N = 5;
+const wOwned = id => !!id && (id[0] === "a" ? !!save.owned[+id.slice(1)] : !!save.gunOwned[+id.slice(1)]);
+const wName = id => (id[0] === "a" ? AXES[+id.slice(1)].name : GUNS[+id.slice(1)].name);
+const wCol = id => (id[0] === "a" ? AXES[+id.slice(1)].rarity : GUNS[+id.slice(1)].col);
+const wEquipped = id => (id[0] === "a" ? !holdingGun() && save.equipped === +id.slice(1) : holdingGun() && save.gunEq === +id.slice(1));
+function wEquip(id) { if (!wOwned(id)) return; if (id[0] === "a") equipAxe(+id.slice(1)); else equipGun(+id.slice(1)); }
+function allWeapons() { const o = []; AXES.forEach((a, i) => { if (save.owned[i]) o.push("a" + i); }); GUNS.forEach((g, i) => { if (save.gunOwned[i]) o.push("g" + i); }); return o; }
+function ensureHotbar() {
+    if (!Array.isArray(save.hotbar) || save.hotbar.length !== HOT_N) {
+        const all = allWeapons().reverse();
+        save.hotbar = Array.from({ length: HOT_N }, (_, k) => all[k] || null);
+    }
+    for (let k = 0; k < HOT_N; k++) if (save.hotbar[k] && !wOwned(save.hotbar[k])) save.hotbar[k] = null;
+}
+function addToHotbar(id) {
+    ensureHotbar();
+    if (save.hotbar.includes(id)) return;
+    const k = save.hotbar.indexOf(null);
+    if (k >= 0) save.hotbar[k] = id;
+}
+function setHotSlot(k, id) {
+    ensureHotbar();
+    const from = save.hotbar.indexOf(id);
+    if (from >= 0) save.hotbar[from] = save.hotbar[k];
+    save.hotbar[k] = id;
+    sfx(500, 0.06, "square", 0.05, 1.3);
+}
+function weaponStat(id) {
+    const i = +id.slice(1);
+    if (id[0] === "a") return axeDmgFor(i) + " dmg";
+    const G = GUNS[i], am = gunAm(i);
+    return `${gunDmg(i)}${G.pel > 1 ? "×" + G.pel : ""} dmg · ${am.mag}+${am.res}`;
+}
 function renderInv() {
-    const cards = ownedList().map(i => {
-        const a = AXES[i], eq = save.equipped === i;
-        return `<div class="card ${eq ? "eq" : ""}" data-act="axe" data-i="${i}" style="border-color:${a.rarity}"><div class="big">🪓</div><b style="color:${a.rarity}">${a.name}</b><small>${a.dmg} dmg${eq ? " · EQUIPPED" : ""}</small></div>`;
+    ensureHotbar();
+    const hot = save.hotbar.map((id, k) => id
+        ? `<div class="hslot ${wEquipped(id) ? "eq" : ""}" data-slot="${k}" data-w="${id}" draggable="true" style="border-color:${wCol(id)}"><span class="k">${k + 1}</span><img src="${iconURL(id)}"><b style="color:${wCol(id)}">${wName(id)}</b></div>`
+        : `<div class="hslot empty" data-slot="${k}"><span class="k">${k + 1}</span><small>drop here</small></div>`).join("");
+    if ($("invHot").dataset.h !== hot) { $("invHot").innerHTML = hot; $("invHot").dataset.h = hot; }
+    const cards = allWeapons().map(id => {
+        const eq = wEquipped(id), on = save.hotbar.includes(id);
+        return `<div class="card wcard ${eq ? "eq" : ""}" data-act="w" data-w="${id}" draggable="true" style="border-color:${wCol(id)}"><img class="big" src="${iconURL(id)}"><b style="color:${wCol(id)}">${wName(id)}</b><small>${weaponStat(id)}${eq ? " · EQUIPPED" : on ? " · on hotbar" : ""}</small></div>`;
     });
-    cards.push(
-        `<div class="card"><div class="big">🪵</div><b>Logs</b><small>${save.logs} carried · $${logValue()} each${save.logBonus ? " + $" + Math.floor(save.logBonus) + " bonus" : ""}</small></div>`,
-        `<div class="card" data-act="bandage"><div class="big">🩹</div><b>Bandages</b><small>${save.bandages} · click to heal 40</small></div>`,
-        `<div class="card" data-act="lantern"><div class="big">🔦</div><b>Lantern</b><small>${player.lantern ? "On" : "Off"} · click to toggle</small></div>`,
-        `<div class="card"><div class="big">💰</div><b>Cash</b><small>${money(save.money)}</small></div>`,
-        `<div class="card" data-act="fish"><div class="big">🎣</div><b>Fish</b><small>${save.fishBag.length} in bag · click for the journal</small></div>`
+    const wHtml = cards.join("");
+    if ($("invSlots").dataset.h !== wHtml) { $("invSlots").innerHTML = wHtml; $("invSlots").dataset.h = wHtml; }
+    const items = [];
+    if (isle === 2) for (const k of Object.keys(MATS)) items.push(`<div class="card"><img class="big" src="${iconURL("m:" + k)}"><b style="color:${MATS[k].col}">${MATS[k].name}</b><small>${save.mats[k] || 0} · $${matPrice(k)} each</small></div>`);
+    else items.push(`<div class="card"><img class="big" src="${iconURL("logs")}"><b>Logs</b><small>${save.logs} carried · $${logValue()} each${save.logBonus ? " + $" + Math.floor(save.logBonus) + " bonus" : ""}</small></div>`);
+    items.push(
+        `<div class="card" data-act="bandage"><img class="big" src="${iconURL("bandage")}"><b>Bandages</b><small>${save.bandages} · click to heal 40</small></div>`,
+        `<div class="card" data-act="lantern"><img class="big" src="${iconURL("lantern")}"><b>Lantern</b><small>${player.lantern ? "On" : "Off"} · click to toggle</small></div>`,
+        `<div class="card"><img class="big" src="${iconURL("cash")}"><b>Cash</b><small>${money(save.money)}</small></div>`
     );
-    while (cards.length < 12) cards.push(`<div class="card empty"></div>`);
-    const invHtml = cards.join("");
-    if ($("invSlots").dataset.h !== invHtml) { $("invSlots").innerHTML = invHtml; $("invSlots").dataset.h = invHtml; }
+    if (isle === 1) items.push(`<div class="card" data-act="fish"><img class="big" src="${iconURL("fish")}"><b>Fish</b><small>${save.fishBag.length} in bag · click for the journal</small></div>`);
+    const iHtml = items.join("");
+    if ($("invItems").dataset.h !== iHtml) { $("invItems").innerHTML = iHtml; $("invItems").dataset.h = iHtml; }
     const c = save.contract;
     const statsHtml = [
         ["Day", `${save.day} · ${fmtClock()}`],
         ["Health", `${Math.ceil(player.hp)} / ${player.maxHp}`],
-        ["Equipped", AXES[save.equipped].name],
+        ["Equipped", holdingGun() ? GUNS[save.gunEq].name : AXES[save.equipped].name],
         ["Contract", c ? `${c.prog}/${c.goal}` : "none"],
         ["Trees felled", save.felled],
         ["Rare trees", save.rareFelled],
         ["Chests opened", save.chestsOpened],
-        ["Logs sold", save.sold],
+        [isle === 2 ? "Materials sold" : "Logs sold", save.sold],
         ["Deaths", save.deaths],
-        ["Ghost earnings", money(save.ghostCash || 0)],
         ["Fish caught", Object.values(save.fishDex || {}).reduce((a, d) => a + d.n, 0)],
         ["Blood moons survived", save.bmSurvived || 0],
+        ["Rebirths", (save.rebirths || 0) + (save.rebirths ? "  (+" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% dmg)" : "")],
         ["Time played", fmtTime(save.seconds)]
     ].map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join("");
     if ($("invStats").dataset.h !== statsHtml) { $("invStats").innerHTML = statsHtml; $("invStats").dataset.h = statsHtml; }
 }
+// drag a weapon card (or a hotbar slot) onto a hotbar slot; drag a slot off the hotbar to clear it
+document.addEventListener("dragstart", e => {
+    const w = e.target.closest && e.target.closest("[data-w]");
+    if (!w) return;
+    e.dataTransfer.setData("text/plain", w.dataset.w + "|" + (w.dataset.slot ?? ""));
+    e.dataTransfer.effectAllowed = "move";
+    w.classList.add("dragging");
+});
+document.addEventListener("dragend", e => { const w = e.target.closest && e.target.closest("[data-w]"); if (w) w.classList.remove("dragging"); document.querySelectorAll(".hslot.over").forEach(s => s.classList.remove("over")); });
+document.addEventListener("dragover", e => { const s = e.target.closest && e.target.closest(".hslot, #invSlots"); if (s) { e.preventDefault(); document.querySelectorAll(".hslot.over").forEach(q => q !== s && q.classList.remove("over")); if (s.classList.contains("hslot")) s.classList.add("over"); } });
+document.addEventListener("drop", e => {
+    const s = e.target.closest && e.target.closest(".hslot, #invSlots");
+    if (!s) return;
+    e.preventDefault();
+    const [id, from] = (e.dataTransfer.getData("text/plain") || "").split("|");
+    if (!id || !wOwned(id)) return;
+    ensureHotbar();
+    if (s.classList.contains("hslot")) setHotSlot(+s.dataset.slot, id);
+    else if (from !== "") { save.hotbar[+from] = null; sfx(300, 0.06, "square", 0.05, 0.8); }
+    renderInv(); writeSave();
+});
+document.addEventListener("contextmenu", e => {
+    const s = e.target.closest && e.target.closest(".hslot[data-w]");
+    if (!s) return;
+    e.preventDefault(); save.hotbar[+s.dataset.slot] = null; renderInv(); writeSave();
+});
 function showPanels() {
     $("panelInv").classList.toggle("show", panel === "inv");
     $("panelMap").classList.toggle("show", panel === "map");
     $("panelShop").classList.toggle("show", panel === "shop");
     $("panelFish").classList.toggle("show", panel === "fish");
+    $("panelFerry").classList.toggle("show", panel === "ferry");
     $("panelTalk").classList.toggle("show", panel === "talk");
     $("panelBack").classList.toggle("show", panel !== null && panel !== "talk");
     if (panel === "inv") renderInv();
     if (panel === "map") drawMap();
     if (panel === "shop") renderShop();
     if (panel === "fish") renderFishLog();
+    if (panel === "ferry") renderFerry();
 }
 function openPanel(p) {
     if (state !== "playing") return;
@@ -1731,12 +1955,16 @@ document.addEventListener("click", e => {
     if (e.target.closest("[data-close]") || e.target.id === "panelBack") closePanel();
     const tab = e.target.closest(".tab");
     if (e.target.closest("#panelTalk") && !e.target.closest("[data-close]")) advanceTalk();
-    if (tab) { shopTab = tab.dataset.tab; renderShop(); }
+    if (tab) { shopTab = tab.dataset.tab; shopPage = 0; renderShop(); }
+    const pg = e.target.closest(".pg");
+    if (pg && !pg.disabled) { shopPage += +pg.dataset.pg; renderShop(); }
     const row = e.target.closest("#shopList .row");
     if (row) buy(+row.dataset.i);
-    const card = e.target.closest("#invSlots [data-act]");
+    const card = e.target.closest("#panelInv [data-act]");
     if (card) {
-        if (card.dataset.act === "axe") equipAxe(+card.dataset.i);
+        if (card.dataset.act === "w") wEquip(card.dataset.w);
+        else if (card.dataset.act === "axe") equipAxe(+card.dataset.i);
+        else if (card.dataset.act === "gun") equipGun(+card.dataset.i);
         else if (card.dataset.act === "bandage") useBandage();
         else if (card.dataset.act === "lantern") toggleLantern();
         else if (card.dataset.act === "fish") { openPanel("fish"); return; }
@@ -1781,7 +2009,7 @@ function updateBars(dt) {
         if (!t.bar) continue;
         t.barT -= dt;
         if (t.barT <= 0 || t.gone || t.dying) { t.bar.remove(); t.bar = null; continue; }
-        barV.set(t.x, Math.min(t.h * 1.3, 9.5) + 0.7, t.z).project(camera);
+        barV.set(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 0.7, t.z).project(camera);
         if (barV.z > 1) { t.bar.style.display = "none"; continue; }
         t.bar.style.display = "";
         t.bar.style.left = ((barV.x * 0.5 + 0.5) * innerWidth) + "px";
@@ -1796,8 +2024,8 @@ function updateBars(dt) {
 // ---------- tree nameplates (name, damage, logs) ----------
 const plates = [];
 const plateV = new THREE.Vector3();
-const treeDmg = t => (t.type.flee ? 0 : Math.round((8 + t.h) * t.type.dmg * (1 + 0.05 * (save.day - 1)) * dmgScale() * (isBlood() ? 1.25 : 1)));
-const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1)));
+const treeDmg = t => (t.type.flee ? 0 : Math.round((8 + t.h) * t.type.dmg * (1 + 0.05 * (save.day - 1)) * dmgScale() * (isBlood() ? 1.25 : 1) * isleDm()));
+const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw()));
 function hidePlates() { for (const p of plates) p.style.display = "none"; }
 function updateNameplates() {
     const cands = [];
@@ -1813,13 +2041,13 @@ function updateNameplates() {
         const e = plates[i];
         if (i >= n) { e.style.display = "none"; continue; }
         const t = cands[i];
-        plateV.set(t.x, Math.min(t.h * 1.3, 9.5) + 1.5, t.z).project(camera);
+        plateV.set(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 1.5, t.z).project(camera);
         if (plateV.z > 1 || Math.abs(plateV.x) > 1.1 || plateV.y < -1.1) { e.style.display = "none"; continue; }
         const px = (plateV.x * 0.5 + 0.5) * innerWidth, py = Math.max((-plateV.y * 0.5 + 0.5) * innerHeight, 30), nowMs = performance.now();
-        if (!(nowMs - (t._occT || 0) < 120)) { t._occT = nowMs; t._occ = isOccluded(V3(t.x, Math.min(t.h * 1.3, 9.5) + 1.5, t.z), t.solid); }
+        if (!(nowMs - (t._occT || 0) < 120)) { t._occT = nowMs; t._occ = isOccluded(V3(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 1.5, t.z), t.solid); }
         if (t._occ || behindAxe(px, py)) { e.style.display = "none"; continue; }
         const T = t.type, dmg = treeDmg(t);
-        const html = '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '') + '</span>';
+        const html = '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle === 2 ? ' · <em style="color:' + MATS[T.mat || "wood"].col + '">' + treeLogs(t) + ' ' + MATS[T.mat || "wood"].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
         if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = T.col; }
         e.style.display = "";
         e.style.left = px + "px";
@@ -1833,6 +2061,7 @@ function updateNameplates() {
 
 // ---------- map ----------
 function drawMap() {
+    if (isle === 2) { drawMap2(); return; }
     const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 112;
     g.clearRect(0, 0, S, S);
     g.fillStyle = "#0b2236";
@@ -1882,8 +2111,8 @@ function drawMap() {
 }
 
 // ---------- menus (title / pause) ----------
-const CONTROLS = [["WASD", "Move"], ["Mouse", "Look"], ["Click", "Swing axe"], ["Shift", "Sprint"], ["Space", "Jump"], ["Q", "Dash"],
-    ["E", "Inventory"], ["M", "Map"], ["F", "Interact"], ["1-9", "Equip axe"], ["H", "Bandage"], ["L", "Lantern"], ["J", "Fish journal"]];
+const CONTROLS = [["WASD", "Move"], ["Mouse", "Look"], ["Click", "Swing / shoot"], ["Drag", "Weapons onto hotbar (E)"], ["Shift", "Sprint"], ["Space", "Jump"], ["Q", "Dash"],
+    ["E", "Inventory"], ["M", "Map"], ["F", "Interact"], ["1-5", "Hotbar slot"], ["R", "Reload"], ["Wheel", "Next weapon"], ["H", "Bandage"], ["L", "Lantern"], ["J", "Fish journal"]];
 function renderMenu() {
     if ($("ver")) $("ver").textContent = "TREE CHOP STUDIOS · v" + VERSION;
     const menu = $("menu");
@@ -1908,7 +2137,7 @@ function startPlaying() {
     if (!actx) { try { actx = new AudioContext(); } catch (e) { /* no audio */ } }
     if (actx && actx.state === "suspended") actx.resume();
     startAmbience();
-    if (state === "title") player.pos.set(0, 1.7, -0.5);
+    if (state === "title") { if (isle === 2) player.pos.set(RESPAWN.x, 1.7, RESPAWN.z); else player.pos.set(0, 1.7, -0.5); }
     state = "playing";
     renderMenu();
     if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch (e) { /* needs gesture */ } }
@@ -1928,16 +2157,21 @@ addEventListener("keydown", e => {
     if (state === "dead" && (e.code === "Space" || e.code === "KeyR" || e.code === "Enter")) { respawn(); return; }
     if ((state === "title" || state === "paused") && (e.code === "Enter" || e.code === "Space")) { startPlaying(); return; }
     if (state !== "playing") return;
+    if (DEBUG && e.code === "F8") { save.money += 250000; toast("[debug] +$250,000", "cash"); return; }
+    if (DEBUG && e.code === "F9") { save.owned.fill(1); GUNS.forEach((g, i) => { save.gunOwned[i] = 1; const am = gunAm(i); am.mag = magSize(i); am.res = resCap(i); }); save.bandages += 5; for (const k of Object.keys(MATS)) save.mats[k] = (save.mats[k] || 0) + 300; toast("[debug] every axe and gun + 300 of each material", "cash"); return; }
+    if (ride) return;
     if (panel === "talk") { if (e.code === "KeyF" || e.code === "Space" || e.code === "Enter") advanceTalk(); else if (e.code === "Escape") closePanel(); return; }
     if (e.code === "Escape") { if (panel) closePanel(); return; }
-    if (e.code === "Tab") { e.preventDefault(); if (panel === "shop") { shopTab = shopTab === "axes" ? "gear" : "axes"; renderShop(); } return; }
+    if (e.code === "Tab") { e.preventDefault(); if (panel === "shop") { const tl = SHOP_TABS[shopMode].map(t => t[0]); shopPage = 0; shopTab = tl[(tl.indexOf(shopTab) + 1) % tl.length]; renderShop(); } return; }
     if (e.code === "KeyE") { togglePanel("inv"); return; }
     if (e.code === "KeyM") { togglePanel("map"); return; }
     if (e.code === "KeyF") { if (fishing.on) { fishAction(); return; } interact(); return; }
     if (e.code === "KeyJ") { togglePanel("fish"); return; }
-    if (panel === "shop" && /^Digit[1-9]$/.test(e.code)) { buy(+e.code.slice(5) - 1); return; }
-    if (/^Digit[1-9]$/.test(e.code)) { const l = ownedList(), i = l[+e.code.slice(5) - 1]; if (i !== undefined) equipAxe(i); return; }
+    if (panel === "shop" && /^Digit[1-4]$/.test(e.code)) { buy(shopPage * PER_PAGE + (+e.code.slice(5) - 1)); return; }
+    if (panel === "shop" && /^(ArrowLeft|ArrowRight|BracketLeft|BracketRight)$/.test(e.code)) { shopPage += /Right/.test(e.code) ? 1 : -1; renderShop(); return; }
+    if (/^Digit[1-9]$/.test(e.code)) { equipSlot(+e.code.slice(5) - 1); return; }
     if (e.code === "KeyH") useBandage();
+    if (e.code === "KeyR") startReload();
     if (e.code === "KeyL") toggleLantern();
     if (e.code === "KeyQ" && player.dashCd <= 0 && !panel) {
         const d = new THREE.Vector3((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), 0, (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0));
@@ -1949,6 +2183,7 @@ addEventListener("keydown", e => {
     }
 });
 addEventListener("keyup", e => (keys[e.code] = false));
+addEventListener("wheel", e => { if (state === "playing" && !panel && locked && !ride) cycleWeapon(e.deltaY > 0 ? 1 : -1); }, { passive: true });
 addEventListener("mousedown", e => {
     if ($("intro")) return;
     if (e.button !== 0 || state !== "playing") return;
@@ -1963,6 +2198,7 @@ addEventListener("mousemove", e => {
 });
 
 function nearest() {
+    if (isle === 2) return nearest2();
     const px = player.pos.x, pz = player.pos.z;
     if (Math.hypot(px - SHOP.x, pz - (KEEPER.z + 1.6)) < 3.6) return { k: "shop" };
     if (Math.hypot(px - BED.x, pz - BED.z) < 2.8) return { k: "bed" };
@@ -1980,10 +2216,13 @@ function interact() {
     if (panel) return;
     const n = nearest();
     if (!n) return;
-    if (n.k === "shop") {
+    if (n.k === "smith") {
+        openShop("forge", SMITH_SAY[Math.floor(Math.random() * SMITH_SAY.length)]);
+    } else if (n.k === "depot") openShop("trade", ["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."][Math.floor(Math.random() * 3)]);
+    else if (n.k === "ferry2") { startTalk("THE FERRYMAN", save.ferry2Talk ? [FERRY2_QUIPS[Math.floor(Math.random() * FERRY2_QUIPS.length)]] : FERRY2_LINES); save.ferry2Talk = 1; }
+    else if (n.k === "shop") {
         const lines = ["Hehehe... welcome, woodcutter.", "Everything has a price. Even your axe.", "The trees talk about you, you know.", "Spend it. You cannot take it with you.", "Smile! It suits you.", "Night is when the good ones grow."];
-        $("shopSay").textContent = "“" + lines[Math.floor(Math.random() * lines.length)] + "”";
-        openPanel("shop");
+        openShop("reaper", lines[Math.floor(Math.random() * lines.length)]);
     } else if (n.k === "bed") {
         if (!isNight()) { toast("You can't sleep in the daylight. Come back at night.", "bad"); return; }
         player.hp = player.maxHp;
@@ -1997,7 +2236,8 @@ function interact() {
     } else if (n.k === "ferry") {
         const first = !save.ferryTalks;
         save.ferryTalks = (save.ferryTalks || 0) + 1;
-        startTalk("THE FERRYMAN", first ? FERRY_FIRST : FERRY_AGAIN[Math.floor(Math.random() * FERRY_AGAIN.length)]);
+        if (first) startTalk("THE FERRYMAN", FERRY_FIRST, () => openFerry());
+        else openFerry();
     } else if (n.k === "fish") {
         if (n.spot.blocked) toast("Face the water to cast your line.", "bad"); else startFishing(n.spot);
     } else if (n.k === "chest") openChest(n.c);
@@ -2049,7 +2289,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         if (t.burn) {
             t.t += dt / 1.4;
             t.g.scale.setScalar(Math.max(0.01, 1 - t.t));
-            if (Math.random() < dt * 14) burst(V3(t.x, 0.5 + Math.random() * t.h, t.z), 1, 2, [chipMats[1], new THREE.MeshBasicMaterial({ color: 0xff7a2a })]);
+            if (Math.random() < dt * 14) burst(V3(t.x, t.gy + 0.5 + Math.random() * t.h, t.z), 1, 2, [chipMats[1], new THREE.MeshBasicMaterial({ color: 0xff7a2a })]);
             if (t.t >= 1) { scene.remove(t.g); t.gone = true; }
             continue;
         }
@@ -2060,7 +2300,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
                 if (t.byGhost) { burst(V3(t.x, 0.6, t.z), 14, 4, [chipMats[1], new THREE.MeshBasicMaterial({ color: 0x9fe8ff })]); sfx(120, 0.2, "square", 0.08, 0.5); scene.remove(t.g); t.gone = true; continue; }
     const bx = -Math.sin(t.g.rotation.y), bz = -Math.cos(t.g.rotation.y);
                 dropLogs(t.x, t.z, treeLogs(t), { x: bx, z: bz }, t.key);
-                burst(V3(t.x + bx * t.h * 0.5, 0.3, t.z + bz * t.h * 0.5), 18, 5);
+                burst(V3(t.x + bx * t.h * 0.5, t.gy + 0.3, t.z + bz * t.h * 0.5), 18, 5);
                 sfx(70, 0.35, "square", 0.2, 0.3);
                 shake = Math.min(0.6, shake + 0.2);
                 scene.remove(t.g);
@@ -2079,7 +2319,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
             t.x += mx * sp * dt; t.z += mz * sp * dt;
             const od = Math.hypot(t.x, t.z);
             if (od < SAFE_R + t.r + 0.5) { t.x = t.x / od * (SAFE_R + t.r + 0.5); t.z = t.z / od * (SAFE_R + t.r + 0.5); }
-            const tl = shoreAt(t.x, t.z) - 8; if (od > tl) { t.x *= tl / od; t.z *= tl / od; }
+            const tl = curShoreAt(t.x, t.z) - 8; if (od > tl) { t.x *= tl / od; t.z *= tl / od; }
             for (const c of circles) { const cx = t.x - c.x, cz = t.z - c.z, cd = Math.hypot(cx, cz), min = c.r + t.r; if (cd < min && cd > 0.001) { t.x = c.x + cx / cd * min; t.z = c.z + cz / cd * min; } }
         } else {
             const od = Math.hypot(t.x, t.z);
@@ -2093,7 +2333,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         const reach = t.r + 2.7;
         if (!t.type.flee) {
             if (t.atk === "idle" && !safe && dist < reach && t.cool <= 0) {
-                if (Math.random() < (isBlood() ? 0.6 : 0.4)) { t.atk = "wind"; t.atkT = 0; sfx(180, 0.3, "sawtooth", 0.05, 0.5); floatWorld(V3(t.x, Math.min(t.h * 0.7, 3.4), t.z), "!", "warn"); }
+                if (Math.random() < (isBlood() ? 0.6 : 0.4)) { t.atk = "wind"; t.atkT = 0; sfx(180, 0.3, "sawtooth", 0.05, 0.5); floatWorld(V3(t.x, t.gy + Math.min(t.h * 0.7, 3.4), t.z), "!", "warn"); }
                 else t.cool = 1 + Math.random() * 2.5; // it hesitates
             } else if (t.atk === "wind") {
                 t.atkT += dt;
@@ -2111,7 +2351,8 @@ function updateTrees(dt, safe, lookX, lookZ) {
         t.hurt = Math.max(0, t.hurt - dt * 4);
         const mode = faceMode(t, dist);
         if (mode !== t.mode) { t.mode = mode; t.face.material = faceMats[mode]; }
-        t.g.position.set(t.x + (Math.random() - 0.5) * t.hurt * 0.15, 0, t.z + (Math.random() - 0.5) * t.hurt * 0.15);
+        t.gy = groundY(t.x, t.z);
+        t.g.position.set(t.x + (Math.random() - 0.5) * t.hurt * 0.15, t.gy - (isle === 2 ? 0.25 : 0), t.z + (Math.random() - 0.5) * t.hurt * 0.15);
         t.body.rotation.z = Math.sin(time * 0.9 + t.phase) * 0.025 * swayK + (sp > 0 ? Math.sin(time * 9 + t.phase) * 0.04 : 0);
         t.body.rotation.x = t.hurt * 0.1;
         const raise = t.atk === "wind" ? 1 : (!seen && dist < 18 ? 0.55 : 0);
@@ -2137,7 +2378,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
     for (let i = trees.length - 1; i >= 0; i--) if (trees[i].gone) trees.splice(i, 1);
     let alive = 0;
     for (const t of trees) if (!t.dying && !t.burn) alive++;
-    if (alive < (isBlood() ? 82 : 60) && Math.random() < dt * (isBlood() ? 1.4 : 0.7)) spawnTree();
+    if (alive < treeTarget() && Math.random() < dt * (isBlood() ? 1.4 : 0.7) * (isle === 2 ? 1.6 : 1)) spawnTree();
 }
 
 function updateWorldAnim(dt) {
@@ -2165,7 +2406,7 @@ function updateWorldAnim(dt) {
     if (waterMesh) waterMesh.position.y = -0.45 + Math.sin(time * 0.7) * 0.05;
     if (ferryBoat) { ferryBoat.position.y = -0.15 + Math.sin(time * 1.1) * 0.07; ferryBoat.rotation.z = Math.sin(time * 0.9) * 0.03; ferryBoat.rotation.x = Math.sin(time * 0.7) * 0.015; }
     if (farBeam) farBeam.material.opacity = 0.16 + Math.sin(time * 1.7) * 0.05;
-    if (ferryman) {
+    if (ferryman && !ride) {
         ferryman.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
         const base = Math.atan2(FDIR.x, FDIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN.x, player.pos.z - FERRYMAN.z) < 14;
         const tgt = near ? base + clamp(angDiff(Math.atan2(player.pos.x - FERRYMAN.x, player.pos.z - FERRYMAN.z), base), -0.9, 0.9) : base;
@@ -2202,19 +2443,22 @@ function update(dt) {
     if (keys.Space && player.onGround && !panel) { player.vel.y = 7; player.onGround = false; }
     player.vel.y -= 22 * dt;
     player.pos.addScaledVector(player.vel, dt);
-    if (player.pos.y <= 1.7) { player.pos.y = 1.7; player.vel.y = 0; player.onGround = true; }
     clampToIsland(player.pos);
     pushOutBoxes(player.pos, 0.45);
+    if (ride) updateRide(dt);
+    const gnd = groundY(player.pos.x, player.pos.z) + 1.7;
+    if (!ride && (player.pos.y <= gnd || (player.onGround && player.vel.y <= 0 && player.pos.y - gnd < 0.7))) { player.pos.y = gnd; player.vel.y = 0; player.onGround = true; }
     player.dashCd -= dt;
     if (player.onGround) player.bob += dt * Math.hypot(player.vel.x, player.vel.z) * 1.6;
     const safe = inSafe();
     if (safe && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + 2 * dt);
 
-    // swing
+    // swing / shoot
+    if (holdingGun()) updateGun(dt);
     if (swing.t < 1) {
         swing.t = Math.min(1, swing.t + dt / 0.36);
         if (!swing.hit && swing.t >= 0.46) { swing.hit = true; tryHit(); }
-    } else if (mouseDown && !panel && !fishing.on) {
+    } else if (mouseDown && !panel && !fishing.on && !holdingGun() && !ride) {
         swing.t = 0; swing.hit = false;
         sfx(260, 0.15, "sawtooth", 0.04, 0.5);
     }
@@ -2222,7 +2466,7 @@ function update(dt) {
     camera.getWorldDirection(fwd);
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
-    updateWorldAnim(dt);
+    updateWorldAnim(dt); updateIsle2Anim(dt);
     updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
@@ -2230,7 +2474,8 @@ function update(dt) {
         const c = chips[i];
         c.life -= dt; c.v.y -= 14 * dt;
         c.m.position.addScaledVector(c.v, dt);
-        if (c.m.position.y < 0.05) { c.m.position.y = 0.05; c.v.multiplyScalar(0.4); }
+        const cgy = groundY(c.m.position.x, c.m.position.z) + 0.05;
+        if (c.m.position.y < cgy) { c.m.position.y = cgy; c.v.multiplyScalar(0.4); }
         if (c.life <= 0) { scene.remove(c.m); chips.splice(i, 1); }
     }
 
@@ -2238,13 +2483,14 @@ function update(dt) {
     for (let i = logs.length - 1; i >= 0; i--) {
         const l = logs[i], p = l.m.position;
         const dx = player.pos.x - p.x, dz = player.pos.z - p.z, d = Math.hypot(dx, dz);
-        if (d < 5) { const pull = (5 - d) * 6 * dt; p.x += dx / (d || 1) * pull; p.z += dz / (d || 1) * pull; p.y += (1 - p.y) * 0.1; }
+        const lgy = groundY(p.x, p.z), LR = 5 + 2.5 * (save.magnetLvl || 0);
+        if (d < LR) { const pull = (LR - d) * 6 * dt; p.x += dx / (d || 1) * pull; p.z += dz / (d || 1) * pull; p.y += (lgy + 1 - p.y) * 0.1; }
         l.vy -= 14 * dt; p.y += l.vy * dt;
-        if (p.y < 0.2 && d >= 5) { p.y = 0.2; l.vy = 0; }
+        if (p.y < lgy + 0.2 && d >= LR) { p.y = lgy + 0.2; l.vy = 0; }
         l.m.rotation.y += dt * 2;
-        if (d < 1.3) { save.logs += l.w; save.logBonus += l.bonus * l.w; pickupAcc += l.w; pickupT = 0.6; scene.remove(l.m); logs.splice(i, 1); sfx(700 + Math.random() * 200, 0.08, "triangle", 0.06, 1.5); }
+        if (d < 1.3) { if (l.mat) { save.mats[l.mat] = (save.mats[l.mat] || 0) + l.w; matAcc[l.mat] = (matAcc[l.mat] || 0) + l.w; } else { save.logs += l.w; save.logBonus += l.bonus * l.w; pickupAcc += l.w; } pickupT = 0.6; scene.remove(l.m); logs.splice(i, 1); sfx(700 + Math.random() * 200, 0.08, "triangle", 0.06, 1.5); }
     }
-    if (pickupAcc > 0 && (pickupT -= dt) <= 0) { toast(`+${pickupAcc} log${pickupAcc === 1 ? "" : "s"}`, "log"); pickupAcc = 0; }
+    if ((pickupAcc > 0 || matAccN()) && (pickupT -= dt) <= 0) { if (pickupAcc) toast(`+${pickupAcc} log${pickupAcc === 1 ? "" : "s"}`, "log"); if (matAccN()) toast(Object.entries(matAcc).map(([k, v]) => "+" + v + " " + MATS[k].name).join("   "), "log"); pickupAcc = 0; for (const k in matAcc) delete matAcc[k]; }
 
     // chute: queued logs drop into the hopper and slide down the tube
     if (sendVals.length > 0 && (sendTimer -= dt) <= 0) {
@@ -2319,6 +2565,7 @@ const POND = LANDMARKS[1];
     waterMesh.material.vertexColors = true;
     waterMesh.material.needsUpdate = true;
 }
+addTgt = isle1;
 const foam = (() => {
     const N = 260, p = [], idx = [];
     for (let i = 0; i <= N; i++) {
@@ -2334,6 +2581,7 @@ const foam = (() => {
     return m;
 })();
 
+addTgt = null;
 // ---------- clouds ----------
 const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false });
 const clouds = [];
@@ -2345,6 +2593,7 @@ for (let i = 0; i < 14; i++) {
     clouds.push(m);
 }
 
+addTgt = isle1;
 // ---------- flowers, tall grass ----------
 const flowerPatches = [];
 {
@@ -2583,6 +2832,7 @@ function updateEcosystem(dt) {
 }
 
 // =====================================================================
+addTgt = null;
 //  1.0.1: weather, blood moon, ghost lumberjacks, ambience
 // =====================================================================
 function isBlood() { return isNight() && save.day % 3 === 0; }
@@ -2740,7 +2990,7 @@ let birdT = 4, cricketT = 0.3, frogT = 3, gullT = 8, stepAcc = 0, stepSide = 0;
 function ambienceTick(dt) {
     if (!actx) return;
     const px = player.pos.x, pz = player.pos.z, night = isNight(), outside = !insideBuilding();
-    const near = clamp(1 - (shoreAt(px, pz) - Math.hypot(px, pz)) / 34, 0, 1);
+    const near = clamp(1 - (curShoreAt(px, pz) - Math.hypot(px, pz)) / 34, 0, 1);
     if (waveGain) waveGain.gain.value = (0.012 + 0.05 * near * near) * (0.65 + 0.35 * Math.sin(time * 0.45)) * (outside ? 1 : 0.3);
     if (windGain) windGain.gain.value = (0.014 + Math.sin(time * 0.35) * 0.008 + (night ? 0.008 : 0) + wx.storm * 0.03) * (outside ? 1 : 0.4);
     if (!outside) return;
@@ -2758,7 +3008,7 @@ function footsteps(dt) {
     stepAcc = 0; stepSide = 1 - stepSide;
     const x = player.pos.x, z = player.pos.z, dx = x - FB.x, dz = z - FB.z, along = dx * FDIR.x + dz * FDIR.z;
     const onDock = along > 4.5 && Math.abs(dx * FPERP.x + dz * FPERP.z) < 2.2;
-    const inHouse = insideBuilding(), beach = shoreAt(x, z) - Math.hypot(x, z) < 12;
+    const inHouse = insideBuilding(), beach = curShoreAt(x, z) - Math.hypot(x, z) < 12;
     const f = onDock || inHouse ? 150 : beach ? 85 : 110;
     sfx(f + stepSide * 14, onDock || inHouse ? 0.07 : 0.1, onDock || inHouse ? "square" : "triangle", onDock || inHouse ? 0.03 : 0.025, 0.55);
 }
@@ -2806,6 +3056,7 @@ let fishLine = null;
 }
 
 function fishSpot() {
+    if (isle !== 1) return null;
     const px = player.pos.x, pz = player.pos.z, fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
     const dp = Math.hypot(px - POND.x, pz - POND.z);
     if (dp > 6.4 && dp < 12.5) {
@@ -2868,7 +3119,7 @@ function catchFish(perfect) {
     const { f, kg } = fishing.fish;
     let v = f.v;
     if (f.w) v = Math.round(f.v * (0.7 + 0.6 * (kg - f.w[0]) / Math.max(0.001, f.w[1] - f.w[0])));
-    v = Math.round(v * (1 + 0.1 * save.rodLvl) * (perfect ? 1.25 : 1));
+    v = Math.round(v * (1 + 0.1 * save.rodLvl) * (perfect ? 1.25 : 1) * rebirthMult());
     splashAt(fishing.tx, fishing.tz, 12);
     const first = !(save.fishDex || (save.fishDex = {}))[f.n];
     const d = save.fishDex[f.n] || (save.fishDex[f.n] = { n: 0, best: 0, r: f.r });
@@ -2930,6 +3181,34 @@ function renderFishLog() {
 }
 
 
+// ---------- the ferry: rebirth ----------
+let ferryConfirm = 0;
+function openFerry() {
+    ferryConfirm = 0;
+    $("ferrySay").textContent = "“" + FERRY_QUIPS[Math.floor(Math.random() * FERRY_QUIPS.length)] + "”";
+    openPanel("ferry");
+}
+function renderFerry() {
+    const cost = rebirthCost(), n = (save.rebirths || 0) + 1, can = save.money >= cost;
+    const html = `<div class="fprice">Ticket #${n}: <b>${money(cost)}</b> <span>(you have ${money(save.money)})</span></div>
+      <div class="flist">
+        <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and logs · every axe except the Rusty one · all shop upgrades · ghost lumberjacks · fish bag · the day count. You can't come back to Pine Island.</div>
+        <div class="keep"><h4>YOU KEEP</h4>your Fish Journal · stats and trophies · all your rebirths</div>
+        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash from logs and fish · ★ +10% axe damage · ★ a huge new island with mountains, new trees, GUNS and new upgrades</div>
+      </div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    const b = $("ferryBuy");
+    b.disabled = !can;
+    b.textContent = !can ? "NEED " + money(cost - save.money) + " MORE" : ferryConfirm ? "CLICK AGAIN TO CONFIRM" : "BUY TICKET  " + money(cost);
+    b.classList.toggle("danger", !!ferryConfirm);
+}
+$("ferryBuy").addEventListener("click", () => {
+    if (save.money < rebirthCost()) return;
+    if (!ferryConfirm) { ferryConfirm = 1; renderFerry(); setTimeout(() => { ferryConfirm = 0; if (panel === "ferry") renderFerry(); }, 5000); return; }
+    doRebirth();
+});
+function doRebirth() { startRebirthRide(); }
+
 function sellItems() {
     const bag = save.fishBag, total = bag.reduce((a, f) => a + f.v, 0), out = [];
     out.push({ name: `Sell all fish (${bag.length})`, desc: bag.length ? "Everything in your fish bag" : "Nothing to sell yet. Try the pond!", sell: true, value: total, buy() { sellFish(null); } });
@@ -2940,13 +3219,992 @@ function sellItems() {
 }
 syncGhosts();
 
+// =====================================================================
+//  REBIRTH: the ferry ride, guns, and the Highland Isle
+// =====================================================================
+// ---- island 2 terrain: shore, noise, heights ----
+const shoreR2 = th => 150 + 14 * Math.sin(2 * th + 1.1) + 9 * Math.sin(3 * th + 0.3) + 6 * Math.sin(5 * th + 2.2);
+const shoreAt2 = (x, z) => shoreR2(Math.atan2(z, x));
+const hash2 = (ix, iz) => { let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + 1013904223) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const vnoise = (x, z) => {
+    const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz, u = fx * fx * (3 - 2 * fx), v = fz * fz * (3 - 2 * fz);
+    const a = hash2(ix, iz), b = hash2(ix + 1, iz), c = hash2(ix, iz + 1), d = hash2(ix + 1, iz + 1);
+    return (a + (b - a) * u) + ((c + (d - c) * u) - (a + (b - a) * u)) * v;
+};
+const fbm2 = (x, z, o = 4) => { let a = 0.5, f = 1, s = 0; for (let i = 0; i < o; i++) { s += a * vnoise(x * f + i * 17.3, z * f - i * 9.1); f *= 2; a *= 0.5; } return s; };
+const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const LAKE2 = { x: -70, z: 58, r: 15 };
+const D2TH = (() => { let b = 0, m = 1e9; for (let i = 0; i < 360; i++) { const th = (i / 360) * Math.PI * 2, r = shoreR2(th); if (r < m) { m = r; b = th; } } return b; })();
+const GPEAK = { x: -112, z: -8 };
+function terrain2(x, z) {
+    const d = Math.hypot(x, z), inside = shoreAt2(x, z) - d;
+    if (inside < 5) return Math.max(-3.4, -(5 - inside) * 0.2);
+    const n = fbm2(x * 0.0105 + 3.1, z * 0.0105 + 8.7, 4);
+    const cs = Math.cos(D2TH), sn = Math.sin(D2TH), along = x * cs + z * sn, lane = along > 0 ? Math.abs(z * cs - x * sn) : d;
+    const gp = Math.hypot(x - GPEAK.x, z - GPEAK.z);
+    let h = sstep(0.35, 0.64, n) * 48 * sstep(62, 112, d) * sstep(20, 52, lane) + fbm2(x * 0.03, z * 0.03, 3) * 7 * sstep(30, 80, d) + fbm2(x * 0.1, z * 0.1, 2) * 1.5 + 16 * sstep(38, 4, gp);
+    h *= sstep(24, 36, d) * sstep(5, 34, inside);
+    const ld = Math.hypot(x - LAKE2.x, z - LAKE2.z), lk = sstep(LAKE2.r + 11, LAKE2.r - 1, ld);
+    return h * (1 - lk) - lk * 2.8;
+}
+
+
+// ---------- guns ----------
+const GUNS = [
+    { name: "Old Revolver",       kind: "revolver", dmg: 12,  pel: 1, spread: 0.004, mag: 6,   rate: 0.42, reload: 1.6, range: 80,  auto: false, cost: 3500,   pack: 18,  packCost: 90,   pow: 9,   metal: 0x7a7a86, wood: 0x6a4528, col: "#c0c0d0", muz: -0.52 },
+    { name: "Pump Shotgun",       kind: "shotgun",  dmg: 8,   pel: 8, spread: 0.06,  mag: 5,   rate: 0.8,  reload: 2.2, range: 34,  auto: false, cost: 11000,  pack: 20,  packCost: 160,  pow: 26,  metal: 0x4a4a54, wood: 0x7a4a28, col: "#ffb060", muz: -0.85 },
+    { name: "Chop-Chop SMG",      kind: "smg",      dmg: 8,   pel: 1, spread: 0.025, mag: 32,  rate: 0.085, reload: 1.9, range: 60, auto: true,  cost: 24000,  pack: 96,  packCost: 300,  pow: 30,  metal: 0x2e3a4a, wood: 0x2a2a30, col: "#7fd8ff", muz: -0.52 },
+    { name: "Timber Rifle",       kind: "rifle",    dmg: 120, pel: 1, spread: 0.0015, mag: 5,  rate: 0.95, reload: 2.4, range: 140, auto: false, cost: 48000,  pack: 15,  packCost: 330,  pow: 38,  metal: 0x3a4a3a, wood: 0x8a5a34, col: "#6dffa0", muz: -1.0 },
+    { name: "Lumberjack Minigun", kind: "minigun",  dmg: 16,  pel: 1, spread: 0.04,  mag: 150, rate: 0.05, reload: 4.0, range: 70,  auto: true,  cost: 150000, pack: 300, packCost: 1500, pow: 100, metal: 0x6a2a2a, wood: 0x2a1a1a, col: "#ff6a5a", muz: -0.95 }
+];
+const gunAm = i => save.gunAmmo[i] || (save.gunAmmo[i] = { mag: 0, res: 0 });
+const magSize = i => Math.round(GUNS[i].mag * (1 + 0.25 * (save.magLvl || 0)));
+const resCap = i => GUNS[i].pack * 6;
+const holdingGun = () => save.gunEq >= 0 && !!save.gunOwned[save.gunEq];
+const gunDmg = i => Math.round(GUNS[i].dmg * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.powderLvl || 0)));
+const gun = new THREE.Group();
+gun.visible = false;
+viewScene.add(gun);
+const gunFlash = new THREE.Mesh(new THREE.IcosahedronGeometry(0.09, 0), new THREE.MeshBasicMaterial({ color: 0xffe9a0 }));
+gunFlash.visible = false;
+gun.add(gunFlash);
+const gunLight = new THREE.PointLight(0xffc060, 0, 5, 1.5);
+viewScene.add(gunLight);
+let gunCd = 0, gunKick = 0, gunFlashT = 0, reloadT = 0, reloading = false, fireLatch = false, builtGun = -2;
+function buildGunModel(i) {
+    builtGun = i;
+    for (const c of [...gun.children]) if (c !== gunFlash) gun.remove(c);
+    gunParts(i, gun, true);
+    gunFlash.position.set(0, 0.03, GUNS[i].muz - 0.04);
+}
+function gunParts(i, grp, hands) {
+    const G = GUNS[i], mt = c => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
+    const metal = mt(G.metal), wd = mt(G.wood), dark = mt(0x16161c), glove = mt(0x2a2230);
+    const gb = (w, h, d, x, y, z, m, rx = 0) => { const o = new THREE.Mesh(BOX, m); o.scale.set(w, h, d); o.position.set(x, y, z); o.rotation.x = rx; grp.add(o); return o; };
+    const gc = (r, len, x, y, z, m) => { const g = new THREE.CylinderGeometry(r, r, len, 7); g.rotateX(Math.PI / 2); const o = new THREE.Mesh(g, m); o.position.set(x, y, z); grp.add(o); return o; };
+    gb(0.075, 0.11, 0.34, 0, 0, -0.05, metal);
+    gb(0.055, 0.17, 0.08, 0, -0.13, 0.1, wd, 0.3);
+    if (hands) gb(0.095, 0.09, 0.11, 0, -0.2, 0.12, glove);
+    if (G.kind === "revolver") { gc(0.022, 0.34, 0, 0.03, -0.34, metal); gc(0.058, 0.13, 0, 0, -0.07, metal); gb(0.05, 0.03, 0.05, 0, 0.075, -0.2, dark); }
+    else if (G.kind === "shotgun") { gc(0.03, 0.62, 0, 0.035, -0.5, metal); gc(0.025, 0.5, 0, -0.02, -0.46, metal); gb(0.075, 0.07, 0.22, 0, -0.04, -0.45, wd); gb(0.06, 0.12, 0.3, 0, -0.03, 0.28, wd); }
+    else if (G.kind === "smg") { gc(0.022, 0.26, 0, 0.025, -0.32, metal); gb(0.05, 0.23, 0.07, 0, -0.2, -0.08, dark, 0.1); gb(0.045, 0.1, 0.22, 0, -0.02, 0.22, dark); gb(0.03, 0.03, 0.05, 0, 0.075, -0.3, dark); }
+    else if (G.kind === "rifle") { gc(0.024, 0.78, 0, 0.03, -0.62, metal); gb(0.065, 0.13, 0.34, 0, -0.03, 0.3, wd); gc(0.03, 0.26, 0, 0.115, -0.08, dark); gc(0.04, 0.05, 0, 0.115, -0.22, glove); }
+    else { for (let k = 0; k < 6; k++) { const a = k * 1.047; gc(0.016, 0.62, Math.cos(a) * 0.045, 0.02 + Math.sin(a) * 0.045, -0.5, metal); } gb(0.14, 0.15, 0.3, 0, 0, -0.08, metal); gc(0.1, 0.2, 0, -0.17, -0.06, dark); gb(0.05, 0.05, 0.3, 0, 0.1, -0.08, dark); }
+    if (hands) gb(0.095, 0.09, 0.12, 0, -0.07, -0.34, glove);
+}
+const tracers = [];
+{
+    const lm = new THREE.LineBasicMaterial({ color: 0xfff0b0, transparent: true, opacity: 0.9, fog: false });
+    for (let i = 0; i < 14; i++) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3)); const l = new THREE.Line(g, lm.clone()); l.visible = false; l.frustumCulled = false; scene.add(l); tracers.push({ l, life: 0 }); }
+}
+const camRight = new THREE.Vector3(), gdir = new THREE.Vector3();
+function addTracer(from, to) {
+    const t = tracers.find(q => q.life <= 0) || tracers[0];
+    const a = t.l.geometry.attributes.position;
+    a.setXYZ(0, from.x, from.y, from.z); a.setXYZ(1, to.x, to.y, to.z); a.needsUpdate = true;
+    t.life = 0.07; t.l.visible = true;
+}
+function equipGun(i) {
+    if (!save.gunOwned[i]) return;
+    save.gunEq = i; swing.t = 1; reloading = false; reloadT = 0; gunCd = 0.25;
+    addToHotbar("g" + i);
+    if (builtGun !== i) buildGunModel(i);
+    sfx(300, 0.12, "square", 0.08, 1.5); sfx(180, 0.1, "triangle", 0.08, 1.2);
+    toast(`Drew ${GUNS[i].name}`);
+}
+function startReload() {
+    if (!holdingGun() || reloading) return;
+    const i = save.gunEq, am = gunAm(i);
+    if (am.mag >= magSize(i)) return;
+    if (am.res <= 0) { toast("Out of ammo. Buy more from the Gunsmith.", "bad"); sfx(120, 0.12, "square", 0.07, 0.6); return; }
+    reloading = true; reloadT = 0;
+    sfx(240, 0.08, "square", 0.06, 0.6);
+}
+function finishReload() {
+    const i = save.gunEq, am = gunAm(i), take = Math.min(magSize(i) - am.mag, am.res);
+    am.mag += take; am.res -= take; reloading = false;
+    sfx(520, 0.06, "square", 0.07, 1.4); sfx(300, 0.1, "triangle", 0.07, 0.8);
+}
+// ray vs. the trees: closest approach to the vertical trunk line
+function rayTree(o, d, range) {
+    const hl = Math.hypot(d.x, d.z);
+    if (hl < 1e-5) return null;
+    let best = null, bs = range;
+    for (const t of trees) {
+        if (t.gone || t.dying || t.burn) continue;
+        const dx = t.x - o.x, dz = t.z - o.z;
+        const s = (dx * d.x + dz * d.z) / (hl * hl);
+        if (s <= 0.2 || s >= bs) continue;
+        const perp = Math.abs(dx * d.z - dz * d.x) / hl, y = o.y + d.y * s, rel = (y - t.gy) / t.h;
+        if (rel < -0.05 || rel > 1.08) continue;
+        const R = rel < 0.55 ? t.r + 0.22 : t.r * (3.4 - 2.6 * rel) + 0.2;
+        if (perp > R) continue;
+        bs = s; best = t;
+    }
+    return best ? { t: best, s: bs } : null;
+}
+function fireGun() {
+    const i = save.gunEq, G = GUNS[i], am = gunAm(i);
+    if (reloading) return;
+    if (am.mag <= 0) { if (am.res > 0) startReload(); else { toast("Out of ammo. Buy more from the Gunsmith.", "bad"); sfx(120, 0.1, "square", 0.06, 0.6); gunCd = 0.4; } return; }
+    am.mag--; gunCd = G.rate; gunKick = 1; gunFlashT = 0.05;
+    camera.getWorldDirection(gdir);
+    camRight.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+    const mz = V3(camera.position.x, camera.position.y - 0.25, camera.position.z).addScaledVector(camRight, 0.28).addScaledVector(gdir, 0.9);
+    const dmg = gunDmg(i), hits = new Map();
+    for (let p = 0; p < G.pel; p++) {
+        const d = gdir.clone();
+        d.x += (Math.random() - 0.5) * 2 * G.spread; d.y += (Math.random() - 0.5) * 2 * G.spread; d.z += (Math.random() - 0.5) * 2 * G.spread;
+        d.normalize();
+        const hit = rayTree(camera.position, d, G.range);
+        const end = hit ? V3(camera.position.x + d.x * hit.s, camera.position.y + d.y * hit.s, camera.position.z + d.z * hit.s) : V3(camera.position.x + d.x * G.range, camera.position.y + d.y * G.range, camera.position.z + d.z * G.range);
+        if (p < 4 || G.pel === 1) addTracer(mz, end);
+        if (hit) hits.set(hit.t, (hits.get(hit.t) || 0) + 1);
+    }
+    for (const [t, n] of hits) hitTree(t, dmg * n, false);
+    shake = Math.min(0.6, shake + (G.kind === "minigun" ? 0.03 : 0.12)); fovKick = Math.max(fovKick, 0.4);
+    const big = G.kind === "shotgun" || G.kind === "rifle";
+    sfx(big ? 90 : 140, big ? 0.22 : 0.1, "sawtooth", big ? 0.22 : 0.13, 0.25);
+    sfx(big ? 1400 : 900, 0.05, "square", 0.08, 0.2);
+    if (am.mag === 0 && am.res > 0) setTimeout(() => { if (holdingGun() && gunAm(save.gunEq).mag === 0) startReload(); }, 250);
+}
+function updateGun(dt) {
+    gunCd -= dt;
+    if (reloading) { reloadT += dt / GUNS[save.gunEq].reload; if (reloadT >= 1) finishReload(); }
+    if (!mouseDown) fireLatch = false;
+    if (mouseDown && !panel && !fishing.on && !ride && gunCd <= 0 && !reloading) {
+        const G = GUNS[save.gunEq];
+        if (G.auto || !fireLatch) { fireLatch = true; fireGun(); }
+    }
+    for (const t of tracers) if (t.life > 0) { t.life -= dt; t.l.material.opacity = Math.max(0, t.life / 0.07) * 0.9; if (t.life <= 0) t.l.visible = false; }
+}
+function animateGun(dt) {
+    gunKick = Math.max(0, gunKick - dt * 9);
+    gunFlashT = Math.max(0, gunFlashT - dt);
+    gunFlash.visible = gunFlashT > 0; gunFlash.scale.setScalar(0.7 + Math.random() * 0.8);
+    gunLight.intensity = gunFlashT > 0 ? 5 : 0;
+    const sp = Math.hypot(player.vel.x, player.vel.z), bob = Math.sin(player.bob) * 0.012 * Math.min(1, sp / 5);
+    const u = reloading ? reloadT : 0, rl = Math.sin(u * Math.PI);
+    gun.position.set(0.3, -0.27 + bob - rl * 0.18, -0.62 + gunKick * 0.07);
+    gun.rotation.set(gunKick * 0.14 + rl * 0.7, -0.03 - rl * 0.25, rl * 0.3);
+    const G = GUNS[save.gunEq] || GUNS[0];
+    gunLight.position.set(0.3, -0.2, -0.62 + G.muz);
+}
+
+
+// ---------- materials: on the Highland Isle every kind of tree drops something different ----------
+const MATS = {
+    wood:      { name: "Wood",      col: "#d09a5a", price: 6,   hex: 0x9a6a3a },
+    stone:     { name: "Stone",     col: "#b8b8c4", price: 8,   hex: 0x8a8a96 },
+    copper:    { name: "Copper",    col: "#ff9a5a", price: 14,  hex: 0xd0763a },
+    iron:      { name: "Iron",      col: "#a9c0dc", price: 22,  hex: 0x8a9ab0 },
+    gunpowder: { name: "Gunpowder", col: "#ff6a6a", price: 25,  hex: 0x2a2228 },
+    gold:      { name: "Gold",      col: "#ffd040", price: 60,  hex: 0xffc830 },
+    crystal:   { name: "Crystal",   col: "#7affef", price: 120, hex: 0x6dffe0 },
+    magma:     { name: "Magma",     col: "#ff7a3a", price: 160, hex: 0xff5a1a }
+};
+const matPrice = k => Math.round(MATS[k].price * rebirthMult() * (1 + 0.15 * (save.priceLvl || 0)));
+const hasMats = r => Object.entries(r).every(([k, n]) => (save.mats[k] || 0) >= n);
+function payMats(r) { for (const [k, n] of Object.entries(r)) save.mats[k] -= n; }
+const matMeshMat = {};
+for (const [k, M] of Object.entries(MATS)) matMeshMat[k] = new THREE.MeshLambertMaterial({ color: M.hex, flatShading: true, emissive: k === "gold" || k === "crystal" || k === "magma" ? M.hex : 0x000000, emissiveIntensity: 0.35 });
+const matGeo = new THREE.IcosahedronGeometry(0.28, 0);
+
+// what you craft at the Forge
+const AXE_RECIPES = [
+    null,
+    { wood: 8, stone: 6 },
+    { wood: 12, stone: 10, copper: 4 },
+    { wood: 16, iron: 6, copper: 6 },
+    { stone: 30, iron: 12, gold: 2 },
+    { iron: 22, gold: 5, gunpowder: 8 },
+    { iron: 30, gold: 8, crystal: 4 },
+    { iron: 40, gold: 12, crystal: 8, magma: 2 },
+    { iron: 60, gold: 18, crystal: 14 },
+    { iron: 80, gold: 25, magma: 16 },
+    { iron: 120, gold: 40, crystal: 30, magma: 30 }
+];
+const GUN_RECIPES = [
+    { wood: 10, iron: 8, gunpowder: 4 },
+    { wood: 20, iron: 16, gunpowder: 10 },
+    { iron: 30, copper: 16, gunpowder: 18 },
+    { wood: 30, iron: 45, gold: 6, gunpowder: 24 },
+    { iron: 140, gold: 40, gunpowder: 70, magma: 14 }
+];
+const AMMO_RECIPES = [{ copper: 2, gunpowder: 1 }, { copper: 3, gunpowder: 3 }, { copper: 5, gunpowder: 4 }, { copper: 4, gunpowder: 3 }, { copper: 16, gunpowder: 12 }];
+function axeCraftItems() {
+    const out = [];
+    AXES.forEach((a, i) => {
+        if (i === 0) return;
+        out.push({ name: a.name, icon: "a" + i, col: a.rarity, desc: `${Math.round(a.dmg * (1 + 0.1 * (save.rebirths || 0)))} damage per swing${a.night ? " (x1.5 at night)" : ""}`, craft: AXE_RECIPES[i], owned: !!save.owned[i], axe: i, buy() { gainAxe(i); } });
+    });
+    return out;
+}
+function gunCraftItems() {
+    return GUNS.map((g, i) => ({ name: g.name, icon: "g" + i, col: g.col, desc: `${g.pel > 1 ? g.pel + " pellets × " : ""}${gunDmg(i)} dmg · ${g.auto ? "full auto" : "semi-auto"} · ${g.mag} rounds · ${g.range}m range. Comes with ${g.pack} rounds.`, craft: GUN_RECIPES[i], owned: !!save.gunOwned[i], gun: i, buy() { save.gunOwned[i] = 1; const am = gunAm(i); am.mag = magSize(i); am.res = g.pack; equipGun(i); } }));
+}
+function ammoCraftItems() {
+    const out = [];
+    GUNS.forEach((g, i) => {
+        if (!save.gunOwned[i]) return;
+        const am = gunAm(i);
+        out.push({ name: g.name + " ammo", icon: "g" + i, col: g.col, desc: `+${g.pack} rounds · you have ${am.mag} + ${am.res} (max ${resCap(i)} spare)`, craft: AMMO_RECIPES[i], maxed: am.res >= resCap(i), buy() { am.res = Math.min(resCap(i), am.res + g.pack); if (holdingGun() && save.gunEq === i && am.mag === 0) startReload(); } });
+    });
+    if (!out.length) out.push({ name: "No guns yet", desc: "Craft a gun first. Then bring Copper and Gunpowder here to make bullets.", sell: true, value: 0, buy() {} });
+    return out;
+}
+function tradeItems() {
+    const out = [], ks = Object.keys(MATS).filter(k => (save.mats[k] || 0) > 0);
+    const total = ks.reduce((a, k) => a + save.mats[k] * matPrice(k), 0);
+    out.push({ name: "Sell everything", desc: ks.length ? "Every material you're carrying. Careful: you need them to craft!" : "You have nothing to sell. Go chop some trees.", sell: true, value: total, buy() { for (const k of ks) sellMat(k, save.mats[k], true); if (total) { toast(`Sold everything for +${money(total)}`, "cash"); writeSave(); } } });
+    for (const k of Object.keys(MATS)) {
+        const n = save.mats[k] || 0;
+        out.push({ name: `${MATS[k].name} ×${n}`, icon: "m:" + k, col: MATS[k].col, desc: `$${matPrice(k)} each · click sells ALL`, sell: true, value: n * matPrice(k), buy() { if (n) { sellMat(k, n); writeSave(); } } });
+    }
+    return out;
+}
+function sellMat(k, n, quiet) {
+    if (!n) return;
+    const v = n * matPrice(k);
+    save.mats[k] -= n; save.money += v; save.sold += n;
+    contractProgress("sell", n);
+    if (!quiet) toast(`Sold ${n} ${MATS[k].name} for +${money(v)}`, "cash");
+    sfx(900, 0.1, "triangle", 0.09, 1.4); setTimeout(() => sfx(1200, 0.12, "triangle", 0.08, 1.4), 90);
+}
+
+// ---------- item pictures: every axe, gun and material is rendered from its real 3D model ----------
+const iconR = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+iconR.setSize(96, 96, false);
+iconR.setClearColor(0x000000, 0);
+const iconScene = new THREE.Scene(), iconCam = new THREE.PerspectiveCamera(28, 1, 0.01, 50);
+iconScene.add(new THREE.AmbientLight(0xffffff, 1.3));
+{ const d = new THREE.DirectionalLight(0xffffff, 2.4); d.position.set(1, 2, 2.5); iconScene.add(d); const d2 = new THREE.DirectionalLight(0x9fb0ff, 0.9); d2.position.set(-2, -1, 1); iconScene.add(d2); }
+const iconCache = {};
+const icM = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, emissive: e });
+function axeModel(i) {
+    const a = AXES[i], g = new THREE.Group();
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 1.15, 6), icM(0x8a5a34)); handle.position.y = 0.36; g.add(handle);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 5), icM(0x6a4228)); knob.position.y = -0.22; g.add(knob);
+    const sh = new THREE.Shape();
+    sh.moveTo(-0.08, 0.0); sh.lineTo(-0.08, 0.27); sh.lineTo(0.03, 0.29); sh.lineTo(0.2, 0.38); sh.quadraticCurveTo(0.31, 0.16, 0.19, -0.1); sh.lineTo(0.04, 0.02); sh.closePath();
+    const hg = new THREE.ExtrudeGeometry(sh, { depth: 0.035, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 1 });
+    hg.translate(0, 0, -0.0175);
+    const head = new THREE.Mesh(hg, [icM(a.steel, a.glow), icM(a.edge, a.glow)]);
+    head.position.y = 0.6; head.scale.setScalar(a.scale); g.add(head);
+    g.rotation.z = -0.75;
+    return g;
+}
+function propModel(key) {
+    const g = new THREE.Group(), add = (geo, m, x = 0, y = 0, z = 0, sx = 1, sy = sx, sz = sx, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.scale.set(sx, sy, sz); o.rotation.set(rx, ry, rz); g.add(o); return o; };
+    if (key === "logs") { for (const [x, y] of [[-0.3, 0], [0.3, 0], [0, 0.5]]) { add(CYL8, icM(0x8a5a34), x, y, 0, 0.28, 1.4, 0.28, Math.PI / 2, 0.3, 0); add(CYL8, icM(0xe0b070), x, y, 0.71, 0.24, 0.02, 0.24, Math.PI / 2); } g.rotation.y = 0.5; }
+    else if (key === "bandage") { add(CYL8, icM(0xf2ece0), 0, 0, 0, 0.5, 0.5, 0.5, Math.PI / 2); add(BOX, icM(0xe02a2a), 0, 0, 0.26, 0.12, 0.42, 0.02); add(BOX, icM(0xe02a2a), 0, 0, 0.26, 0.42, 0.12, 0.02); g.rotation.set(0.4, 0.5, 0); }
+    else if (key === "lantern") { add(BOX, icM(0x2a2a30), 0, 0.45, 0, 0.5, 0.1, 0.5); add(BOX, icM(0x2a2a30), 0, -0.35, 0, 0.55, 0.12, 0.55); add(BOX, icM(0xffb040, 0xff9020), 0, 0.05, 0, 0.36, 0.7, 0.36); add(new THREE.TorusGeometry(0.18, 0.03, 4, 10), icM(0x2a2a30), 0, 0.62, 0); g.rotation.y = 0.6; }
+    else if (key === "cash") { for (let k = 0; k < 4; k++) add(BOX, icM(k % 2 ? 0x3aa05a : 0x4ab86a), (k % 2) * 0.06, k * 0.12, 0, 1, 0.1, 0.55); add(BOX, icM(0xe8d870), 0.03, 0.2, 0, 0.12, 0.42, 0.57); g.rotation.set(0.5, 0.6, 0); }
+    else if (key === "fish") { add(ICO, icM(0x5a9ad0), 0, 0, 0, 0.32, 0.22, 0.75); add(CONE6, icM(0x4a80b0), 0, 0, -0.85, 0.25, 0.4, 0.06, -Math.PI / 2); g.rotation.set(0.2, 1.2, 0); }
+    else if (key.startsWith("m:")) {
+        const k = key.slice(2), m = icM(MATS[k].hex, k === "gold" || k === "crystal" || k === "magma" ? MATS[k].hex : 0);
+        if (m.emissive) m.emissiveIntensity = 0.3;
+        if (k === "wood") { add(CYL8, icM(0x8a5a34), 0, 0, 0, 0.32, 1.2, 0.32, Math.PI / 2, 0.4, 0); add(CYL8, icM(0xe0b070), Math.sin(0.4) * 0.61, 0, Math.cos(0.4) * 0.61, 0.28, 0.02, 0.28, Math.PI / 2, 0.4, 0); }
+        else if (k === "stone") { add(ICO, m, 0, 0, 0, 0.55, 0.42, 0.5, 0.3, 0.4); add(ICO, icM(0x6a6a74), 0.45, -0.15, 0.2, 0.3, 0.25, 0.3); }
+        else if (k === "copper" || k === "iron" || k === "gold") { const tg = new THREE.CylinderGeometry(0.42, 0.62, 0.3, 4); tg.rotateY(Math.PI / 4); add(tg, m, 0, 0, 0, 1, 1, 0.55); add(tg, m, 0.12, 0.32, 0.02, 0.9, 1, 0.5); g.rotation.set(0.35, 0.5, 0); }
+        else if (k === "gunpowder") { add(CONE6, m, 0, 0, 0, 0.7, 0.55, 0.7); for (let s = 0; s < 6; s++) add(BOX, icM(0xff4a3a, 0xff2a1a), Math.cos(s) * 0.3, -0.05 + (s % 3) * 0.08, Math.sin(s) * 0.3, 0.06); add(CYL8, icM(0x6a4a2a), -0.5, -0.1, 0.3, 0.25, 0.5, 0.25); }
+        else if (k === "crystal") { add(CONE6, m, 0, 0.2, 0, 0.3, 1.2, 0.3); add(CONE6, m, 0.3, 0, 0.1, 0.18, 0.7, 0.18, 0, 0, -0.5); add(CONE6, m, -0.28, -0.05, 0, 0.16, 0.6, 0.16, 0, 0, 0.5); }
+        else { add(ICO, m, 0, 0, 0, 0.55); add(ICO, icM(0x3a1a10), 0.3, 0.25, 0.3, 0.25); }
+    }
+    return g;
+}
+function gunModel(i) { const g = new THREE.Group(); gunParts(i, g, false); g.rotation.set(0.25, Math.PI / 2 + 0.35, 0); return g; }
+const icBox = new THREE.Box3(), icC = new THREE.Vector3(), icS = new THREE.Vector3();
+function iconURL(id) {
+    if (iconCache[id]) return iconCache[id];
+    const o = id[0] === "a" && /^a\d+$/.test(id) ? axeModel(+id.slice(1)) : /^g\d+$/.test(id) ? gunModel(+id.slice(1)) : propModel(id);
+    const wrap = new THREE.Group(); wrap.add(o); iconScene.add(wrap);
+    wrap.updateMatrixWorld(true);
+    icBox.setFromObject(wrap); icBox.getCenter(icC); icBox.getSize(icS);
+    const r = Math.max(icS.x, icS.y, icS.z) * 0.62;
+    iconCam.position.set(icC.x, icC.y, icC.z + r / Math.tan((iconCam.fov / 2) * Math.PI / 180) + icS.z * 0.5);
+    iconCam.lookAt(icC);
+    iconR.render(iconScene, iconCam);
+    iconCache[id] = iconR.domElement.toDataURL();
+    iconScene.remove(wrap);
+    return iconCache[id];
+}
+
+// ---------- the hotbar: 5 slots you fill by dragging weapons in the inventory ----------
+const matAcc = {}, matAccN = () => Object.keys(matAcc).length;
+const weaponSlots = () => { ensureHotbar(); return save.hotbar; };
+function equipSlot(k) { ensureHotbar(); const id = save.hotbar[k]; if (id) wEquip(id); }
+function cycleWeapon(dir) {
+    ensureHotbar();
+    const l = save.hotbar.filter(Boolean); if (l.length < 2) return;
+    const cur = l.findIndex(wEquipped);
+    wEquip(l[(cur + dir + l.length) % l.length]);
+}
+
+// ---------- island 2: the Highland Isle ----------
+const D2DIR = V3(Math.cos(D2TH), 0, Math.sin(D2TH)), D2PERP = V3(-D2DIR.z, 0, D2DIR.x), D2SHORE = shoreR2(D2TH), D2LEN = 24;
+const D2B = V3(D2DIR.x * (D2SHORE - 8), 0, D2DIR.z * (D2SHORE - 8));
+const dock2Pt = (a, s = 0, y = 0) => V3(D2B.x + D2DIR.x * a + D2PERP.x * s, y, D2B.z + D2DIR.z * a + D2PERP.z * s);
+const FERRYMAN2 = { x: dock2Pt(D2LEN - 3.5, -0.9).x, z: dock2Pt(D2LEN - 3.5, -0.9).z };
+const BED2 = { x: -8, z: 7 };
+const DEPOT = { x: 11, z: -7 }, SMITH = { x: -11, z: -7 };
+const standPt = (p, dist = 2.4) => { const r = Math.atan2(-p.x, -p.z); return { x: p.x + Math.sin(r) * dist, z: p.z + Math.cos(r) * dist }; };
+const DEPOT_AT = standPt(DEPOT), SMITH_AT = standPt(SMITH);
+const LM2 = [
+    { name: "BASECAMP", x: 0, z: 0, r: 24, col: "#ffb060", camp: true },
+    { name: "HIGHLAND LAKE", x: LAKE2.x, z: LAKE2.z, r: LAKE2.r + 4, col: "#7fd8ff" },
+    { name: "CRYSTAL GROVE", x: -68, z: -56, r: 12, col: "#7affef" },
+    { name: "GOLDEN PEAK", x: GPEAK.x, z: GPEAK.z, r: 10, col: "#ffd040" },
+    { name: "RUINED TEMPLE", x: 58, z: -80, r: 11, col: "#ffd080" },
+    { name: "OLD MINE", x: 28, z: -56, r: 9, col: "#c0a080" },
+    { name: "HUNTER'S LODGE", x: 58, z: -14, r: 9, col: "#ff9a6a" }
+];
+function curLM() { return isle === 2 ? LM2 : LANDMARKS; }
+let isle2Built = false, altar2 = null, ferry2 = null, ferryman2 = null, ferryBoat2 = null, smithMesh = null, clerkMesh = null, mapBg2 = null;
+const treeTarget = () => (isle === 2 ? (isBlood() ? 125 : 90) : (isBlood() ? 82 : 60));
+
+function npcFaceTex(kind) {
+    const cv = document.createElement("canvas");
+    cv.width = 128; cv.height = 140;
+    const g = cv.getContext("2d");
+    const eye = (x, y, look = 0) => { g.fillStyle = "#fff"; g.fillRect(x - 9, y - 6, 18, 12); g.fillStyle = kind === "smith" ? "#3a2210" : "#2a5a8a"; g.fillRect(x - 4 + look, y - 5, 8, 10); g.fillStyle = "#000"; g.fillRect(x - 2 + look, y - 3, 4, 6); };
+    if (kind === "smith") {
+        g.fillStyle = "rgba(40,30,30,.35)"; g.fillRect(14, 30, 30, 14); g.fillRect(86, 70, 22, 10); // soot
+        eye(40, 56); eye(88, 56);
+        g.fillStyle = "#3a1a0a"; g.save(); g.translate(40, 42); g.rotate(0.18); g.fillRect(-16, -5, 32, 9); g.restore(); g.save(); g.translate(88, 42); g.rotate(-0.18); g.fillRect(-16, -5, 32, 9); g.restore();
+        g.fillStyle = "#5a2a12"; g.fillRect(30, 82, 68, 12); g.fillRect(22, 92, 84, 48); // bushy beard + moustache
+        g.fillStyle = "#7a3a1a"; for (let i = 0; i < 14; i++) g.fillRect(24 + (i * 6) % 80, 96 + (i * 7) % 40, 4, 8);
+        g.fillStyle = "#2a0a04"; g.fillRect(50, 98, 28, 6);
+    } else {
+        g.fillStyle = "rgba(255,120,120,.35)"; g.fillRect(16, 70, 20, 12); g.fillRect(92, 70, 20, 12); // rosy cheeks
+        eye(40, 58, 1); eye(88, 58, 1);
+        g.strokeStyle = "#222"; g.lineWidth = 4; g.strokeRect(26, 46, 28, 24); g.strokeRect(74, 46, 28, 24); g.beginPath(); g.moveTo(54, 56); g.lineTo(74, 56); g.stroke(); // glasses
+        g.fillStyle = "#6a3a1a"; g.fillRect(28, 36, 24, 6); g.fillRect(76, 36, 24, 6);
+        g.fillStyle = "#6a3a1a"; g.beginPath(); g.moveTo(34, 98); g.quadraticCurveTo(64, 82, 94, 98); g.lineTo(94, 92); g.quadraticCurveTo(64, 80, 34, 92); g.fill(); // moustache
+        g.strokeStyle = "#5a1a10"; g.lineWidth = 4; g.beginPath(); g.arc(64, 98, 16, 0.2 * Math.PI, 0.8 * Math.PI); g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+}
+// a proper little person: legs, boots, torso, two swinging arms, a head with a face, hair, beard and hat
+const npcs = [];
+function makeHumanoid(o) {
+    const g = new THREE.Group(), sk = lamb(o.skin), sh = lamb(o.shirt), pa = lamb(o.pants), bo = lamb(0x2a1a12), W = o.wide || 1;
+    const box = (par, m, x, y, z, sx, sy, sz) => part(par, BOX, m, x, y, z, sx, sy, sz);
+    for (const sd of [-1, 1]) { box(g, pa, sd * 0.15 * W, 0.48, 0, 0.24 * W, 0.86, 0.26); box(g, bo, sd * 0.15 * W, 0.09, 0.05, 0.27 * W, 0.18, 0.36); }
+    box(g, lamb(0x2a1a12), 0, 0.93, 0, 0.6 * W, 0.1, 0.32);
+    const torso = new THREE.Group(); torso.position.y = 0.95; g.add(torso);
+    box(torso, sh, 0, 0.38, 0, 0.62 * W, 0.74, 0.36);
+    if (o.belly) part(torso, ICO, sh, 0, 0.26, 0.1, 0.34 * W, 0.3, 0.26);
+    if (o.apron) { box(torso, lamb(o.apron), 0, 0.2, 0.2, 0.52 * W, 0.92, 0.04); box(torso, lamb(o.apron), 0, 0.62, 0.19, 0.36 * W, 0.3, 0.03); }
+    if (o.vest) for (const sd of [-1, 1]) box(torso, lamb(o.vest), sd * 0.17 * W, 0.38, 0.185, 0.24 * W, 0.72, 0.03);
+    box(torso, sk, 0, 0.8, 0, 0.16, 0.14, 0.16);
+    const arms = [];
+    for (const sd of [-1, 1]) {
+        const p = new THREE.Group(); p.position.set(sd * (0.39 * W + 0.03), 0.66, 0);
+        box(p, sh, 0, -0.27, 0, 0.19, 0.56, 0.21); box(p, sk, 0, -0.62, 0, 0.17, 0.18, 0.19);
+        torso.add(p); arms.push(p);
+    }
+    const head = new THREE.Group(); head.position.set(0, 1.12, 0); torso.add(head);
+    box(head, sk, 0, 0.0, 0, 0.44, 0.48, 0.42);
+    box(head, sk, 0, -0.02, 0.24, 0.08, 0.11, 0.07);
+    for (const sd of [-1, 1]) box(head, sk, sd * 0.23, 0, 0, 0.05, 0.12, 0.09);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.48), new THREE.MeshBasicMaterial({ map: npcFaceTex(o.face), transparent: true })); face.position.z = 0.214; head.add(face);
+    if (o.hair) { box(head, lamb(o.hair), 0, 0.22, -0.02, 0.47, 0.1, 0.46); box(head, lamb(o.hair), 0, 0.04, -0.2, 0.47, 0.4, 0.08); for (const sd of [-1, 1]) box(head, lamb(o.hair), sd * 0.225, 0.1, -0.05, 0.04, 0.22, 0.3); }
+    if (o.beard) { box(head, lamb(o.beard), 0, -0.24, 0.12, 0.44, 0.18, 0.2); box(head, lamb(o.beard), 0, -0.38, 0.15, 0.32, 0.16, 0.14); }
+    if (o.hat === "cap") { part(head, CYL8, lamb(o.hatCol), 0, 0.28, 0, 0.25, 0.14, 0.25); box(head, lamb(o.hatCol), 0, 0.22, 0.28, 0.42, 0.03, 0.22); }
+    if (o.hat === "mask") { const m = box(head, lamb(0x2a2a32), 0, 0.3, 0.06, 0.48, 0.26, 0.08); m.rotation.x = -1.1; const v = box(head, new THREE.MeshBasicMaterial({ color: 0x3a8ac0 }), 0, 0.34, 0.12, 0.3, 0.06, 0.02); v.rotation.x = -1.1; box(head, lamb(0x2a2a32), 0, 0.2, 0, 0.47, 0.06, 0.45); }
+    return { g, head, torso, armL: arms[0], armR: arms[1], kind: o.face, ph: Math.random() * 6, swing: 0, cyc: 0 };
+}
+function updateNpcs(dt) {
+    for (const p of npcs) {
+        p.g.getWorldPosition(p.wp || (p.wp = new THREE.Vector3()));
+        const dx = player.pos.x - p.wp.x, dz = player.pos.z - p.wp.z, d = Math.hypot(dx, dz);
+        const want = d < 14 ? clamp(angDiff(Math.atan2(dx, dz), p.yaw), -1.0, 1.0) : 0;
+        p.head.rotation.y += (want - p.head.rotation.y) * Math.min(1, 4 * dt);
+        p.torso.scale.y = 1 + Math.sin(time * 2 + p.ph) * 0.015;
+        if (p.kind === "smith") {
+            p.cyc += dt / 1.5;
+            const u = p.cyc % 1, prevHit = p.hitDone;
+            // raise slowly, slam down fast, rest
+            p.armR.rotation.x = u < 0.55 ? lerp(-0.5, -2.5, u / 0.55) : u < 0.65 ? lerp(-2.5, -0.35, (u - 0.55) / 0.1) : -0.35 - (u - 0.65) * 0.4;
+            p.armL.rotation.x = -0.4 + Math.sin(time * 1.5) * 0.05;
+            if (u >= 0.65 && !prevHit) { p.hitDone = true; p.hammer.getWorldPosition(npcV); if (d < 18 && state === "playing") { sfx(1400 + Math.random() * 200, 0.07, "square", 0.04 * (1 - d / 18), 0.5); sfx(520, 0.15, "triangle", 0.04 * (1 - d / 18), 0.7); } burst(npcV, 5, 3, [sparkMat, sparkMat2]); }
+            if (u < 0.6) p.hitDone = false;
+        } else {
+            if (d < 9) { p.armR.rotation.z = lerp(p.armR.rotation.z, 2.6 + Math.sin(time * 9) * 0.35, Math.min(1, 6 * dt)); p.armR.rotation.x = lerp(p.armR.rotation.x, 0, Math.min(1, 6 * dt)); }
+            else { p.armR.rotation.z = lerp(p.armR.rotation.z, 0.08, Math.min(1, 4 * dt)); p.armR.rotation.x = -0.35 + Math.sin(time * 1.1 + p.ph) * 0.1; }
+            p.armL.rotation.x = -0.35 + Math.sin(time * 1.1 + p.ph + 1) * 0.1;
+        }
+    }
+}
+const npcV = new THREE.Vector3(), sparkMat = new THREE.MeshBasicMaterial({ color: 0xffd060 }), sparkMat2 = new THREE.MeshBasicMaterial({ color: 0xff8a20 });
+
+function buildIsle2() {
+    isle2Built = true;
+    curBuild = 2;
+    const prevAdd = addTgt; addTgt = null;
+    colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
+    const gy = terrain2;
+
+    // ----- the land -----
+    {
+        const g = new THREE.PlaneGeometry(440, 440, 220, 220);
+        g.rotateX(-Math.PI / 2);
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) pos.setY(i, terrain2(pos.getX(i), pos.getZ(i)));
+        g.computeVertexNormals();
+        const nor = g.attributes.normal, col = [], c = new THREE.Color();
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), z = pos.getZ(i), y = pos.getY(i), ny = nor.getY(i), d = Math.hypot(x, z), inside = shoreAt2(x, z) - d, rn = Math.random();
+            if (y < -0.5) c.setHSL(0.1, 0.35, 0.15 + rn * 0.04);
+            else if (Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 5) c.setHSL(0.1, 0.3, 0.2 + rn * 0.04);
+            else if (inside < 12 && y < 2.4) c.setHSL(0.12, 0.5, 0.4 + rn * 0.06);
+            else if (d < SAFE_R + 1) c.setHSL(0.09, 0.28, 0.14 + rn * 0.05);
+            else if (y > 33 + (rn - 0.5) * 6) c.setHSL(0.58, 0.25, 0.8 + rn * 0.1);
+            else if (ny < 0.78 || y > 25) c.setHSL(0.62, 0.06, 0.28 + rn * 0.08 + Math.min(0.12, y * 0.003));
+            else c.setHSL(lerp(0.34, 0.2, clamp(y / 24, 0, 1)) + rn * 0.04, 0.34, 0.14 + rn * 0.06 + clamp(y / 24, 0, 1) * 0.04);
+            col.push(c.r, c.g, c.b);
+        }
+        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+        const wg = new THREE.PlaneGeometry(760, 760, 152, 152);
+        wg.rotateX(-Math.PI / 2);
+        const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x56d8d0), mid = new THREE.Color(0x2f86b8), deep = new THREE.Color(0x174a7a);
+        for (let i = 0; i < wp.count; i++) {
+            const x = wp.getX(i), z = wp.getZ(i), k = clamp((Math.hypot(x, z) - shoreAt2(x, z)) / 36, 0, 1);
+            cc.copy(shallow).lerp(mid, clamp(k * 2, 0, 1)).lerp(deep, clamp(k * 2 - 1, 0, 1));
+            wc.push(cc.r, cc.g, cc.b);
+        }
+        wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3));
+        isle2.waterGeo = wg;
+        // a foam line round the whole shore
+        const N = 300, fp = [], idx = [];
+        for (let i = 0; i <= N; i++) { const th = (i / N) * Math.PI * 2, r = shoreR2(th); fp.push(Math.cos(th) * (r - 3.5), -0.4, Math.sin(th) * (r - 3.5), Math.cos(th) * (r - 2.2), -0.4, Math.sin(th) * (r - 2.2)); if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } }
+        const fg = new THREE.BufferGeometry(); fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3)); fg.setIndex(idx);
+        isle2.foam = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+        scene.add(isle2.foam);
+        // the lake
+        const lake = new THREE.Mesh(new THREE.CircleGeometry(LAKE2.r + 2.5, 22), new THREE.MeshLambertMaterial({ color: 0x3a9ac0, emissive: 0x0a2a40, transparent: true, opacity: 0.88, flatShading: true }));
+        lake.rotation.x = -Math.PI / 2; lake.position.set(LAKE2.x, -0.3, LAKE2.z);
+        scene.add(lake);
+        circles.push({ x: LAKE2.x, z: LAKE2.z, r: LAKE2.r - 1.2 });
+    }
+
+    // ----- basecamp: fire, tents, depot, gunsmith -----
+    const stoneM = new THREE.MeshLambertMaterial({ color: 0x6a6660, flatShading: true });
+    const canvasM = new THREE.MeshLambertMaterial({ color: 0x8a7a58, flatShading: true, side: THREE.DoubleSide });
+    {
+        const stones = batch(stoneM);
+        for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); }
+        stones.build();
+        const lg = batch(woodDark);
+        for (let i = 0; i < 4; i++) lg.add(CYL6, 0, 0.25, -3, Math.PI / 2, i * 0.8, 0, 0.12, 1.3, 0.12);
+        lg.build();
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.5, 6), new THREE.MeshBasicMaterial({ color: 0xff9a2a })); flame.position.set(0, 1.0, -3);
+        const core = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 5), new THREE.MeshBasicMaterial({ color: 0xffe070 })); core.position.set(0, 0.7, -3);
+        const pool = new THREE.Mesh(new THREE.CircleGeometry(5, 16), new THREE.MeshBasicMaterial({ color: 0xff8a30, transparent: true, opacity: 0.16, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, depthWrite: false }));
+        pool.rotation.x = -Math.PI / 2; pool.position.set(0, 0.04, -3);
+        scene.add(flame, core, pool);
+        fires.push({ flame, core, ph: srand() * 6 });
+        const fl = new THREE.PointLight(0xff9a40, 18, 16, 1.6); fl.position.set(0, 2, -3); scene.add(fl); isle2.fireLight = fl;
+        circles.push({ x: 0, z: -3, r: 1.3 });
+        isle2.emit = [{ x: 0, y: 2.0, z: -3, rate: 1.0, acc: 0.3 }];
+        const seats = batch(wood);
+        for (const [dx, dz, r] of [[-2.6, -3.5, 0.2], [2.5, -2.4, -0.5], [0.4, -5.9, Math.PI / 2]]) seats.add(CYL6, dx, 0.28, dz, 0, r, Math.PI / 2, 0.22, 1.7, 0.22);
+        seats.build();
+        const cl = label("BASECAMP", "#ffb060", 3.4, 0.8); cl.position.set(0, 4.4, -3); cl.maxD = 90;
+    }
+    // bed: a lean-to with a cot
+    {
+        const g = new THREE.Group(); g.position.set(BED2.x, 0, BED2.z); g.rotation.y = Math.atan2(-BED2.x, -BED2.z);
+        const roof = new THREE.Mesh(BOX, canvasM); roof.scale.set(3.4, 0.08, 2.8); roof.position.set(0, 2.2, -0.3); roof.rotation.x = 0.28; g.add(roof);
+        for (const [px, pz] of [[-1.6, 0.9], [1.6, 0.9], [-1.6, -1.5], [1.6, -1.5]]) { const p = new THREE.Mesh(CYL6, woodDark); p.scale.set(0.07, px === 0 ? 2 : (pz > 0 ? 2.0 : 2.5), 0.07); p.position.set(px, pz > 0 ? 1.0 : 1.25, pz); g.add(p); }
+        const cot = new THREE.Mesh(BOX, wood); cot.scale.set(1.4, 0.3, 2.3); cot.position.set(0, 0.35, -0.2); g.add(cot);
+        const blanket = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: 0x8a2a2a, flatShading: true })); blanket.scale.set(1.3, 0.14, 1.5); blanket.position.set(0, 0.58, -0.55); g.add(blanket);
+        const pillow = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: 0xe8e0d0, flatShading: true })); pillow.scale.set(1.0, 0.14, 0.5); pillow.position.set(0, 0.58, 0.7); g.add(pillow);
+        scene.add(g);
+        circles.push({ x: BED2.x, z: BED2.z, r: 1.4 });
+        const bl = label("BED", "#b8c8ff", 2, 0.6); bl.position.set(BED2.x, 3.0, BED2.z);
+        // a second tent for flavour
+        const tg = new THREE.ConeGeometry(2.3, 2.4, 4); tg.rotateY(Math.PI / 4);
+        const tent = new THREE.Mesh(tg, new THREE.MeshLambertMaterial({ color: 0x5a6a48, flatShading: true, side: THREE.DoubleSide })); tent.position.set(12, 1.2, 9); tent.scale.z = 1.35; tent.rotation.y = 0.5;
+        scene.add(tent); circles.push({ x: 12, z: 9, r: 2 });
+    }
+    const stall = (at, signA, signB, signCol, mood) => {
+        const g = new THREE.Group(); g.position.set(at.x, 0, at.z); g.rotation.y = Math.atan2(-at.x, -at.z);
+        const counter = new THREE.Mesh(BOX, wood); counter.scale.set(4.2, 1.05, 1.1); counter.position.set(0, 0.52, 0.7); g.add(counter);
+        const top = new THREE.Mesh(BOX, woodDark); top.scale.set(4.5, 0.1, 1.4); top.position.set(0, 1.08, 0.7); g.add(top);
+        for (const sx of [-2.1, 2.1]) { const p = new THREE.Mesh(CYL6, woodDark); p.scale.set(0.1, 3.2, 0.1); p.position.set(sx, 1.6, 0.1); g.add(p); const q = new THREE.Mesh(CYL6, woodDark); q.scale.set(0.1, 3.2, 0.1); q.position.set(sx, 1.6, -2.0); g.add(q); }
+        const roof = new THREE.Mesh(BOX, canvasM); roof.scale.set(5, 0.12, 3.4); roof.position.set(0, 3.25, -0.9); roof.rotation.x = 0.08; g.add(roof);
+        const back = new THREE.Mesh(BOX, wood); back.scale.set(4.2, 3, 0.12); back.position.set(0, 1.5, -2.0); g.add(back);
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.28), new THREE.MeshBasicMaterial({ map: signTex(signA, signB, signCol), side: THREE.DoubleSide })); sign.position.set(0, 4.15, 0.95); g.add(sign);
+        scene.add(g);
+        colliders.push([at.x - 2.6, at.x + 2.6, at.z - 2.6, at.z + 2.6]);
+        return g;
+    };
+    {   // lumber depot
+        const g = stall(DEPOT, "TRADING POST", "SELL MATERIALS", "#ffd040");
+        const pile = batch(new THREE.MeshLambertMaterial({ color: 0x8a5a34, flatShading: true }));
+        for (let r = 0; r < 3; r++) for (let k = 0; k < 4 - r; k++) pile.add(CYL6, DEPOT.x + 3.3 + (r * 0.3), 0.3 + r * 0.45, DEPOT.z + k * 0.62 - 0.9 + r * 0.3, Math.PI / 2, 0, 0, 0.26, 1.4, 0.26);
+        pile.build();
+        circles.push({ x: DEPOT.x + 3.4, z: DEPOT.z, r: 1.6 });
+        const clerk = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0xe8e0c8, vest: 0x2a5a3a, pants: 0x4a3a28, hair: 0x8a5a2a, hat: "cap", hatCol: 0x2a4a8a });
+        clerk.g.position.set(0, 0, -0.6); g.add(clerk.g);
+        clerk.yaw = g.rotation.y; npcs.push(clerk); clerkMesh = clerk.g;
+        { const sc = new THREE.Group(); sc.position.set(-1.3, 1.13, 0.7); part(sc, CYL8, lamb(0x6a6a74), 0, 0.25, 0, 0.04, 0.5, 0.04); part(sc, BOX, lamb(0x6a6a74), 0, 0.5, 0, 0.9, 0.04, 0.04); for (const sd of [-1, 1]) part(sc, CYL8, lamb(0xc8a040), sd * 0.42, 0.36, 0, 0.18, 0.03, 0.18); g.add(sc); }
+        const l = label("TRADING POST", "#ffd040", 3.6, 0.8); l.position.set(DEPOT.x, 6.2, DEPOT.z);
+    }
+    {   // gunsmith
+        const g = stall(SMITH, "THE FORGE", "CRAFT AXES · GUNS", "#ff9a5a");
+        const rackM = lamb(0x3a3a44);
+        for (let k = 0; k < 4; k++) { const r = new THREE.Mesh(BOX, rackM); r.scale.set(0.9, 0.12, 0.1); r.position.set(-1.4 + k * 0.95, 2.2 + (k % 2) * 0.3, -1.85); g.add(r); const b = new THREE.Mesh(BOX, lamb(0x6a4a2a)); b.scale.set(0.18, 0.5, 0.1); b.position.set(-1.4 + k * 0.95 - 0.3, 1.95 + (k % 2) * 0.3, -1.8); g.add(b); }
+        const anvil = new THREE.Mesh(BOX, lamb(0x2a2a30)); anvil.scale.set(0.7, 0.5, 0.45); anvil.position.set(2.7, 0.25, 0.9); g.add(anvil);
+        const crates = batch(lamb(0x5a4430)); crates.add(BOX, SMITH.x - 3.3, 0.45, SMITH.z + 0.2, 0, 0.2, 0, 0.9, 0.9, 0.9); crates.add(BOX, SMITH.x - 3.4, 1.2, SMITH.z + 0.3, 0, 0.5, 0, 0.7, 0.6, 0.7); crates.build();
+        const smith = makeHumanoid({ face: "smith", skin: 0xd09a72, shirt: 0x8a2a22, pants: 0x2a2a34, apron: 0x5a3a22, beard: 0x5a2a12, hat: "mask", wide: 1.25, belly: true });
+        smith.g.position.set(0, 0, -0.6); g.add(smith.g);
+        smith.yaw = g.rotation.y; npcs.push(smith); smithMesh = smith.g;
+        // the hammer, held in the right hand
+        const hm = new THREE.Group(); hm.position.set(0, -0.64, 0.05); smith.armR.add(hm);
+        part(hm, BOX, lamb(0x6a4a2a), 0, 0, 0.22, 0.05, 0.05, 0.5); const hh = part(hm, BOX, lamb(0x3a3a44), 0, 0, 0.48, 0.24, 0.13, 0.13); smith.hammer = hh;
+        // a glowing ingot on the counter and the forge fire behind
+        part(g, BOX, new THREE.MeshBasicMaterial({ color: 0xff7a2a }), 0, 1.16, 0.5, 0.36, 0.06, 0.14);
+        const furnace = new THREE.Group(); furnace.position.set(1.4, 0, -1.4); g.add(furnace);
+        part(furnace, BOX, lamb(0x4a4a52), 0, 0.6, 0, 1.0, 1.2, 0.8); part(furnace, BOX, new THREE.MeshBasicMaterial({ color: 0xff8a2a }), 0, 0.55, 0.41, 0.5, 0.35, 0.02); part(furnace, CYL8, lamb(0x3a3a42), 0, 1.6, -0.1, 0.18, 1.0, 0.18);
+        isle2.emit.push({ x: SMITH.x, y: 3.2, z: SMITH.z - 1.2, rate: 0.6, acc: 0.5 });
+        const l = label("THE FORGE", "#ff9a5a", 3.2, 0.8); l.position.set(SMITH.x, 6.2, SMITH.z);
+    }
+    // sign: ferry this way
+    {
+        const sp = batch(woodDark); sp.add(CYL6, 4, 1.2, 16, 0, 0, 0, 0.09, 2.4, 0.09); sp.build();
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("FERRY", "↓ SOUTH", "#9fe8ff"), side: THREE.DoubleSide })); board.position.set(4, 2.6, 16); scene.add(board);
+        const bk = board.clone(); bk.rotation.y = Math.PI; bk.position.z += 0.03; scene.add(bk);
+    }
+
+    // ----- dock, ferry 2 ("coming soon"), ferryman -----
+    {
+        const yaw = Math.atan2(D2DIR.x, D2DIR.z);
+        const planks = batch(new THREE.MeshLambertMaterial({ color: 0x6a5240, flatShading: true }));
+        for (let i = 0; i < D2LEN; i++) { const p = dock2Pt(i + 0.5); planks.add(BOX, p.x, 0.22, p.z, 0, yaw, 0, 3.6, 0.14, 0.92); }
+        planks.build();
+        const posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(new THREE.MeshBasicMaterial({ color: 0xc8a0ff }));
+        for (let i = 0; i <= D2LEN; i += 3) for (const s of [-1.9, 1.9]) { const p = dock2Pt(i, s); posts.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) bulbs.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
+        for (let i = 0; i < D2LEN; i++) for (const s of [-1.9, 1.9]) { const p = dock2Pt(i + 0.5, s, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
+        posts.build(); rails.build(); bulbs.build();
+        for (const s of [-2.0, 2.0]) { const p = dock2Pt(3.5, s); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 2", "COMING SOON", "#c8a0ff"), side: THREE.DoubleSide }));
+        board.position.copy(dock2Pt(3.5, 0, 3.3)); board.rotation.y = yaw; scene.add(board);
+        const board2 = board.clone(); board2.rotation.y = yaw + Math.PI; board2.position.add(V3(D2DIR.x * 0.03, 0, D2DIR.z * 0.03)); scene.add(board2);
+        const fl = label("THE FERRY", "#c8a0ff", 3.2, 0.7); fl.position.copy(dock2Pt(3.5, 0, 4.6)); fl.maxD = 70;
+        // boat
+        ferryBoat2 = new THREE.Group(); ferryBoat2.position.copy(dock2Pt(D2LEN - 7, 4.4, -0.15)); ferryBoat2.rotation.y = yaw; scene.add(ferryBoat2);
+        const hullM = lamb(0x2a2a4a), trimM = lamb(0x6a5a9a);
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(2.7, 1.0, 7.6), hullM); hull.position.y = 0.2;
+        const bowG = new THREE.ConeGeometry(1.35, 2.4, 4); bowG.rotateX(Math.PI / 2); bowG.rotateZ(Math.PI / 4);
+        const bow = new THREE.Mesh(bowG, hullM); bow.position.set(0, 0.2, 5.0); bow.scale.y = 0.75;
+        const trim = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.18, 7.8), trimM); trim.position.y = 0.72;
+        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.3, 2.6), trimM); cabin.position.set(0, 1.5, -1.3);
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 5, 6), woodDark); mast.position.set(0, 3.0, 1.6);
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 5), new THREE.MeshBasicMaterial({ color: 0xc8a0ff })); lamp.position.set(0, 5.6, 1.6);
+        ferryBoat2.add(hull, bow, trim, cabin, mast, lamp);
+        // ferryman
+        ferryman2 = new THREE.Group(); const fp = dock2Pt(D2LEN - 3.5, -0.9, 0.3); ferryman2.position.copy(fp); ferryman2.rotation.y = yaw + Math.PI; scene.add(ferryman2);
+        const coatM = lamb(0x22163a), trimM2 = lamb(0x6a4a9a);
+        const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.95, 2.3, 8), coatM); coat.position.y = 1.15;
+        const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.97, 0.99, 0.12, 8), trimM2); hem.position.y = 0.06;
+        const shm = new THREE.Mesh(new THREE.SphereGeometry(0.62, 8, 5), coatM); shm.scale.set(1.15, 0.55, 0.85); shm.position.y = 2.2;
+        const hood = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), coatM); hood.scale.set(1, 1.15, 1.1); hood.position.y = 2.6;
+        const peak = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.8, 7), coatM); peak.position.set(0, 3.15, -0.2); peak.rotation.x = -0.55;
+        const ff = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.7), new THREE.MeshBasicMaterial({ map: ferrymanTex(), transparent: true })); ff.position.set(0, 2.58, 0.56);
+        const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.2, 0.9, 6), coatM); sleeve.position.set(0.62, 1.95, 0.3); sleeve.rotation.set(0.6, 0, 0.75);
+        const hand = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), lamb(0xb8c8d8)); hand.position.set(0.95, 1.7, 0.55);
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 3.2, 5), woodDark); pole.position.set(0.95, 1.6, 0.55);
+        const orb = new THREE.Mesh(new THREE.SphereGeometry(0.22, 7, 6), new THREE.MeshBasicMaterial({ color: 0xe8d8ff })); orb.position.set(0.95, 3.25, 0.55);
+        const cage = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), new THREE.MeshBasicMaterial({ color: 0x2a1a3e, wireframe: true })); cage.position.copy(orb.position);
+        ferryman2.add(coat, hem, shm, hood, peak, ff, sleeve, hand, pole, orb, cage);
+        const fm = label("FERRYMAN", "#c8a0ff", 2.6, 0.6); fm.position.set(fp.x, 4.7, fp.z); fm.maxD = 60;
+        // far beacon: the next rebirth
+        const FI = dock2Pt(D2LEN + 90, 0, 0);
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 200, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xc8a0ff, transparent: true, opacity: 0.18, fog: false, depthWrite: false, side: THREE.DoubleSide }));
+        beam.position.set(FI.x, 100, FI.z); scene.add(beam); isle2.beam = beam;
+        const bl = label("REBIRTH 2", "#c8a0ff", 5.2, 1.2); bl.position.set(FI.x, 30, FI.z); bl.maxD = 420; bl.blurK = 0.25;
+        const bl2 = label("COMING SOON", "#ffffff", 4.2, 1.0); bl2.position.set(FI.x, 25, FI.z); bl2.maxD = 420; bl2.blurK = 0.25;
+    }
+
+    // ----- landmarks -----
+    const place = (obj, x, z, extra = 0) => { obj.position.set(x, terrain2(x, z) + extra, z); scene.add(obj); return obj; };
+    const chestAt = (x, z, special) => { const c = makeChest(x, z, srand() * 6, special); const y = terrain2(x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; c.y = y; return c; };
+    {   // crystal grove
+        const lm = LM2[2], y0 = terrain2(lm.x, lm.z);
+        const cr1 = batch(new THREE.MeshBasicMaterial({ color: 0x6dffe0 })), cr2 = batch(new THREE.MeshBasicMaterial({ color: 0xff7ad8 })), cr3 = batch(new THREE.MeshBasicMaterial({ color: 0x9a8aff }));
+        for (let i = 0; i < 22; i++) {
+            const a = srand() * 6.283, d = srange(0.5, lm.r - 2), x = lm.x + Math.cos(a) * d, z = lm.z + Math.sin(a) * d, s = srange(0.5, 2.4), b = [cr1, cr2, cr3][i % 3];
+            b.add(CONE6, x, terrain2(x, z) + s * 0.9, z, srange(-0.3, 0.3), srand() * 3, srange(-0.3, 0.3), 0.35 * s, 1.8 * s, 0.35 * s);
+            if (s > 1.7) circles.push({ x, z, r: 0.5 });
+        }
+        cr1.build(); cr2.build(); cr3.build();
+        const gl = new THREE.PointLight(0x6dffe0, 14, 22, 1.6); gl.position.set(lm.x, y0 + 3, lm.z); scene.add(gl);
+        chestAt(lm.x + 3, lm.z - 2, true);
+        const l = label(lm.name, lm.col, 3.4, 0.8); l.position.set(lm.x, y0 + 7, lm.z);
+    }
+    {   // the golden peak
+        const lm = LM2[3], y0 = terrain2(lm.x, lm.z);
+        const cairn = batch(new THREE.MeshLambertMaterial({ color: 0xd8e0ee, flatShading: true }));
+        for (let i = 0; i < 9; i++) cairn.add(ICO, lm.x + srange(-1.4, 1.4), y0 + 0.4 + i * 0.12, lm.z + srange(-1.4, 1.4), srand() * 3, srand() * 3, 0, srange(0.5, 1.1), srange(0.4, 0.8), srange(0.5, 1.1));
+        cairn.build();
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 6, 6), woodDark); place(pole, lm.x + 2.5, lm.z, 3);
+        const flag = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.0, 0.05), new THREE.MeshBasicMaterial({ color: 0xff4a4a, side: THREE.DoubleSide })); place(flag, lm.x + 3.4, lm.z, 5.4);
+        chestAt(lm.x - 2.2, lm.z + 1.5, true);
+        // the Golden Tree: the glow you saw from the ferry
+        const gt = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.6, 12, 8), new THREE.MeshLambertMaterial({ color: 0x8a6a2a, flatShading: true, emissive: 0x3a2a08 })); place(gt, lm.x + 4, lm.z - 3, 5.5);
+        const gm = new THREE.MeshBasicMaterial({ color: 0xffd860, fog: false });
+        for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(8 - i * 2, 6.5, 8), gm); place(c, lm.x + 4, lm.z - 3, 13 + i * 3.4); }
+        const gb2 = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 200, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe080, transparent: true, opacity: 0.16, fog: false, depthWrite: false, side: THREE.DoubleSide })); place(gb2, lm.x + 4, lm.z - 3, 100);
+        circles.push({ x: lm.x + 4, z: lm.z - 3, r: 1.8 });
+        const l = label(lm.name, lm.col, 3.4, 0.8); l.position.set(lm.x, y0 + 25, lm.z);
+        const lg = label("THE GOLDEN TREE", "#ffe080", 3.2, 0.7); lg.position.set(lm.x + 4, y0 + 22, lm.z - 3); lg.maxD = 260; lg.blurK = 0.4;
+    }
+    {   // ruined temple + shrine
+        const lm = LM2[4], y0 = terrain2(lm.x, lm.z);
+        const slab = new THREE.Mesh(new THREE.CylinderGeometry(7.5, 8, 0.5, 8), lamb(0x7a7a84)); place(slab, lm.x, lm.z, 0.1);
+        const col = batch(lamb(0x9a9aa6));
+        for (let i = 0; i < 8; i++) { const a = (i / 8) * 6.283, h = srand() < 0.35 ? srange(1, 2.2) : srange(3.4, 5), x = lm.x + Math.cos(a) * 6, z = lm.z + Math.sin(a) * 6; col.add(CYL8, x, y0 + h / 2 + 0.3, z, 0, 0, 0, 0.5, h, 0.5); circles.push({ x, z, r: 0.6 }); }
+        col.build();
+        const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.0, 0.1, 14), new THREE.MeshBasicMaterial({ color: 0xffd860, transparent: true, opacity: 0.5, depthWrite: false })); place(glow, lm.x, lm.z, 1.55);
+        const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 1.3, 8), lamb(0x8a8a96)); place(pedestal, lm.x, lm.z, 0.85);
+        altar = { x: lm.x, z: lm.z, glow };
+        circles.push({ x: lm.x, z: lm.z, r: 1.3 });
+        chestAt(lm.x + 4, lm.z + 3.5, false);
+        const l = label(lm.name, lm.col, 3.4, 0.8); l.position.set(lm.x, y0 + 7, lm.z);
+        const l2 = label("SHRINE", "#ffe080", 2, 0.6); l2.position.set(lm.x, y0 + 3.4, lm.z);
+    }
+    {   // old mine
+        const lm = LM2[5], y0 = terrain2(lm.x, lm.z), st = batch(lamb(0x6a6a74)), tb = batch(woodDark);
+        st.add(BOX, lm.x - 2, y0 + 1.6, lm.z, 0, 0, 0, 1.0, 3.4, 1.4); st.add(BOX, lm.x + 2, y0 + 1.6, lm.z, 0, 0, 0, 1.0, 3.4, 1.4); st.add(BOX, lm.x, y0 + 3.6, lm.z, 0, 0, 0, 5.2, 1.0, 1.6);
+        tb.add(BOX, lm.x - 1.2, y0 + 1.5, lm.z + 0.3, 0, 0, 0, 0.25, 3, 0.25); tb.add(BOX, lm.x + 1.2, y0 + 1.5, lm.z + 0.3, 0, 0, 0, 0.25, 3, 0.25); tb.add(BOX, lm.x, y0 + 3.0, lm.z + 0.3, 0, 0, 0, 2.7, 0.25, 0.25);
+        for (let i = 0; i < 6; i++) tb.add(BOX, lm.x + 5, y0 + 0.08, lm.z + 2 + i * 1.2, 0, 0, 0, 1.7, 0.08, 0.2);
+        st.build(); tb.build();
+        const door = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 3), new THREE.MeshBasicMaterial({ color: 0x010204 })); place(door, lm.x, lm.z + 0.75, 1.5);
+        const cart = new THREE.Mesh(BOX, lamb(0x5a3a22)); cart.scale.set(1.3, 0.8, 1.9); place(cart, lm.x + 5, lm.z + 5, 0.6); circles.push({ x: lm.x + 5, z: lm.z + 5, r: 1.2 });
+        colliders.push([lm.x - 2.5, lm.x + 2.5, lm.z - 0.7, lm.z + 0.7]);
+        chestAt(lm.x - 5, lm.z + 3, true);
+        const l = label(lm.name, lm.col, 3.2, 0.8); l.position.set(lm.x, y0 + 6.2, lm.z);
+    }
+    {   // hunter's lodge
+        const lm = LM2[6], y0 = terrain2(lm.x, lm.z);
+        const g = new THREE.Group(); g.position.set(lm.x, y0, lm.z); g.rotation.y = 0.5;
+        const walls = new THREE.Mesh(BOX, wood); walls.scale.set(5, 2.6, 4); walls.position.y = 1.3; g.add(walls);
+        const rg = new THREE.ConeGeometry(4.2, 1.6, 4); rg.rotateY(Math.PI / 4);
+        const roof = new THREE.Mesh(rg, woodDark); roof.position.y = 3.4; roof.scale.z = 0.85; g.add(roof);
+        const door = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ color: 0x1a0e08 })); door.scale.set(1, 1.8, 0.1); door.position.set(0, 0.9, 2.02); g.add(door);
+        const win = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ color: 0xffc060 })); win.scale.set(0.8, 0.6, 0.1); win.position.set(1.6, 1.5, 2.02); g.add(win);
+        scene.add(g);
+        const rad = 3.2; colliders.push([lm.x - rad, lm.x + rad, lm.z - rad, lm.z + rad]);
+        isle2.emit.push({ x: lm.x + 1.2, y: y0 + 5, z: lm.z - 0.6, rate: 0.7, acc: 0.1 });
+        chestAt(lm.x + 5.5, lm.z + 4.5, false);
+        const l = label(lm.name, lm.col, 3.4, 0.8); l.position.set(lm.x, y0 + 6.4, lm.z);
+    }
+    { const ll = label("HIGHLAND LAKE", "#7fd8ff", 3.6, 0.8); ll.position.set(LAKE2.x, 4, LAKE2.z); }
+    // scattered chests across the island
+    for (const [x, z] of [[34, 46], [-74, -32], [-44, -86], [64, 106], [76, 82], [-104, 88], [88, -32], [46, -44]]) chestAt(x, z, false);
+
+    // ----- scenery -----
+    const okSpot2 = (x, z, margin = 0) => {
+        const d = Math.hypot(x, z);
+        if (d < SAFE_R + 1 || d > shoreAt2(x, z) - 8) return false;
+        if (Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 3) return false;
+        for (let k = 1; k < LM2.length; k++) { const lm = LM2[k]; if (Math.hypot(x - lm.x, z - lm.z) < lm.r + margin) return false; }
+        return true;
+    };
+    const scatter2 = (count, fn, margin = 0) => {
+        let made = 0, guard = 0;
+        while (made < count && guard++ < count * 40) {
+            const a = srand() * 6.283, d = srange(SAFE_R + 1, shoreR2(a) - 9), x = Math.cos(a) * d, z = Math.sin(a) * d;
+            if (!okSpot2(x, z, margin)) continue;
+            fn(x, z, terrain2(x, z)); made++;
+        }
+    };
+    {
+        const rocks = batch(lamb(0x6a6a74)), bigR = batch(lamb(0x56565e));
+        scatter2(130, (x, z, y) => { const s = srange(0.4, 1.6); rocks.add(ICO, x, y + s * 0.4, z, srand() * 3, srand() * 3, 0, s, s * srange(0.6, 1), s); if (s > 1.15) circles.push({ x, z, r: s * 0.85 }); });
+        scatter2(26, (x, z, y) => { const s = srange(2.2, 4.4); bigR.add(ICO, x, y + s * 0.35, z, srand() * 3, srand() * 3, 0, s, s * srange(0.6, 0.9), s * srange(0.8, 1.2)); circles.push({ x, z, r: s * 0.85 }); });
+        rocks.build(); bigR.build();
+        const bushes = batch(lamb(0x3a6a3a)), fern = batch(lamb(0x4a8a42)), g2 = batch(lamb(0x6a9a42));
+        scatter2(110, (x, z, y) => { const s = srange(0.6, 1.3); if (y < 24) bushes.add(ICO, x, y + s * 0.4, z, 0, srand() * 3, 0, s, s * 0.8, s); });
+        scatter2(240, (x, z, y) => { if (y > 26) return; for (let i = 0; i < 4; i++) (srand() < 0.5 ? fern : g2).add(CONE6, x + srange(-0.3, 0.3), y + 0.3, z + srange(-0.3, 0.3), srange(-0.25, 0.25), 0, srange(-0.25, 0.25), 0.05, srange(0.45, 0.85), 0.05); });
+        bushes.build(); fern.build(); g2.build();
+        const snow = batch(lamb(0xeef4ff));
+        scatter2(70, (x, z, y) => { if (y < 30) return; const s = srange(0.8, 2.2); snow.add(ICO, x, y + s * 0.15, z, 0, srand() * 3, 0, s, s * 0.3, s * 1.2); });
+        snow.build();
+        const cols = [0xff7aa8, 0xffe060, 0xf4f4f4, 0x8ab8ff, 0xc08aff], heads = cols.map(c => batch(lamb(c))), stems = batch(lamb(0x4a7a3a));
+        scatter2(44, (x, z, y) => {
+            if (y > 18) return;
+            const a = Math.floor(srand() * cols.length), b = Math.floor(srand() * cols.length), n = 10 + Math.floor(srand() * 8);
+            for (let i = 0; i < n; i++) { const fx = x + srange(-2.6, 2.6), fz = z + srange(-2.6, 2.6), fy = terrain2(fx, fz); stems.add(CYL6, fx, fy + 0.22, fz, 0, 0, 0, 0.02, 0.44, 0.02); heads[srand() < 0.6 ? a : b].add(ICO, fx, fy + 0.5, fz, 0, 0, 0, 0.12, 0.1, 0.12); }
+        });
+        heads.forEach(h => h.build()); stems.build();
+        const stumps = batch(lamb(0x4a3322));
+        scatter2(30, (x, z, y) => { const s = srange(0.35, 0.75); stumps.add(CYL8, x, y + s * 0.5, z, 0, 0, 0, s, srange(0.5, 1.1), s); });
+        scatter2(16, (x, z, y) => { stumps.add(CYL6, x, y + 0.3, z, Math.PI / 2, srand() * 3, 0, 0.3, srange(2, 3.4), 0.3); });
+        stumps.build();
+        // the beach: palms, driftwood, shells
+        const beachSpot = (n, min, max, fn) => { for (let i = 0; i < n; i++) { const a = srand() * 6.283, d = shoreR2(a) - srange(min, max), x = Math.cos(a) * d, z = Math.sin(a) * d, dx = x - D2B.x, dz = z - D2B.z; if (Math.hypot(dx, dz) < 12) continue; if (Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 4) continue; fn(x, z, Math.max(0, terrain2(x, z))); } };
+        const palmT = batch(lamb(0x7a5a3a)), palmL = batch(lamb(0x3a8a4a)), drift = batch(lamb(0x9a8a78)), shells = batch(new THREE.MeshBasicMaterial({ color: 0xf2e8d8 }));
+        beachSpot(40, 5, 12, (x, z, y) => { const lean = srange(-0.25, 0.25); palmT.add(CYL6, x - lean * 1.1, y + 2.2, z, 0, 0, lean, 0.16, 4.4, 0.16); for (let k = 0; k < 6; k++) { const a2 = k * 1.047 + srand() * 0.3; palmL.add(BOX, x - lean * 2.2 + Math.cos(a2) * 0.95, y + 4.25, z + Math.sin(a2) * 0.95, 0, -a2, -0.4, 2.0, 0.07, 0.5); } circles.push({ x, z, r: 0.35 }); });
+        beachSpot(30, 3, 11, (x, z, y) => drift.add(CYL6, x, y + 0.14, z, Math.PI / 2, 0, srand() * 3, 0.12, srange(1.5, 3.2), 0.12));
+        beachSpot(90, 2, 12, (x, z, y) => shells.add(ICO, x, y + 0.06, z, 0, srand() * 3, 0, 0.13, 0.08, 0.13));
+        palmT.build(); palmL.build(); drift.build(); shells.build();
+    }
+    isle2.emit.forEach(e => smokeEmit.push(e));
+    addTgt = prevAdd; curBuild = 1;
+}
+const isle2 = { waterGeo: null, foam: null, emit: [], beam: null, fireLight: null };
+
+function clampIsle2(p) {
+    const dx = p.x - D2B.x, dz = p.z - D2B.z, along = dx * D2DIR.x + dz * D2DIR.z, side = dx * D2PERP.x + dz * D2PERP.z;
+    if (along > 4.5 && along < D2LEN + 3 && Math.abs(side) < 6) {
+        const a = Math.min(along, D2LEN - 0.7), s = clamp(side, -1.65, 1.65);
+        p.x = D2B.x + D2DIR.x * a + D2PERP.x * s; p.z = D2B.z + D2DIR.z * a + D2PERP.z * s;
+        return;
+    }
+    const lim = shoreAt2(p.x, p.z) - 3, d = Math.hypot(p.x, p.z);
+    if (d > lim) { p.x *= lim / d; p.z *= lim / d; }
+}
+
+// ---------- the ground, once you're on the Highland Isle ----------
+function groundY2(x, z) {
+    const dx = x - D2B.x, dz = z - D2B.z, along = dx * D2DIR.x + dz * D2DIR.z, side = dx * D2PERP.x + dz * D2PERP.z;
+    if (along > 4 && along < D2LEN + 3 && Math.abs(side) < 3) return 0;
+    return Math.max(-0.4, terrain2(x, z));
+}
+function enterIsle2() {
+    if (!isle2Built) buildIsle2();
+    isle = 2; save.isle = 2;
+    isle1.visible = false;
+    groundFn = groundY2;
+    waterMesh.geometry = isle2.waterGeo; waterMesh.material.needsUpdate = true;
+    for (const p of smokePuffs) if (p.m.parent === isle1) { isle1.remove(p.m); scene.add(p.m); }
+    smokeEmit.length = 0; isle2.emit.forEach(e => smokeEmit.push(e));
+    RESPAWN.x = 3; RESPAWN.z = 4;
+    for (const t of trees) { scene.remove(t.g); t.gone = true; if (t.bar) { t.bar.remove(); t.bar = null; } }
+    trees.length = 0;
+    for (const l of logs) scene.remove(l.m);
+    logs.length = 0;
+    for (const q of sending) scene.remove(q.m);
+    sending.length = 0; sendVals.length = 0;
+    save.ghosts = 0; syncGhosts();
+    for (let i = 0; i < 90; i++) spawnTree(false);
+    resetChests();
+}
+function updateIsle2Anim(dt) {
+    if (!isle2Built) return;
+    if (isle2.foam) { isle2.foam.scale.setScalar(1 + Math.sin(time * 0.8) * 0.004); isle2.foam.material.opacity = 0.38 + Math.sin(time * 0.8) * 0.14; }
+    if (isle2.beam) isle2.beam.material.opacity = 0.14 + Math.sin(time * 1.5) * 0.05;
+    if (isle2.fireLight) isle2.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
+    if (ferryBoat2) { ferryBoat2.position.y = -0.15 + Math.sin(time * 1.1) * 0.07; ferryBoat2.rotation.z = Math.sin(time * 0.9) * 0.03; }
+    if (ferryman2) {
+        ferryman2.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
+        const base = Math.atan2(D2DIR.x, D2DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN2.x, player.pos.z - FERRYMAN2.z) < 14;
+        const tg = near ? base + clamp(angDiff(Math.atan2(player.pos.x - FERRYMAN2.x, player.pos.z - FERRYMAN2.z), base), -0.9, 0.9) : base;
+        ferryman2.rotation.y += angDiff(tg, ferryman2.rotation.y) * Math.min(1, 3 * dt);
+    }
+    updateNpcs(dt);
+}
+
+// ---------- island 2: shops, talking, selling ----------
+const FERRY2_LINES = [
+    "You made it across. Most people just stare at the glow and never buy the ticket.",
+    "There is another light out there, past the horizon. A third life. Bigger than this one, and worse.",
+    "But the second ferry isn't finished. The planks are still standing in the forest, hating me.",
+    "Rebirth 2 is coming soon. Keep your pockets heavy."
+];
+const FERRY2_QUIPS = ["Not yet, woodcutter. Not yet.", "The next ferry is still being cut and nailed.", "I can see it out there, in the dark. It's coming.", "Chop. Save. Wait. That's the whole job."];
+const SMITH_SAY = ["Bring me the trees' insides and I'll make you something that hurts.", "Iron from Ironbark, powder from Powderwood. Copper makes bullets.", "Nothing here is for sale. Everything here is earned.", "Hammer's hot. What are we making?", "Gold makes it pretty. Magma makes it scary."];
+const costOf = (base, g, n) => Math.floor(base * Math.pow(g, n));
+const vestCost = () => costOf(6000, 2.2, save.vestLvl || 0), magCost = () => costOf(4000, 2.4, save.magLvl || 0), whetCost = () => costOf(5000, 2, save.whetLvl || 0);
+const powderCost = () => costOf(7000, 2, save.powderLvl || 0), magnetCost = () => costOf(3000, 2.3, save.magnetLvl || 0);
+function gunItems() {
+    const out = [];
+    GUNS.forEach((g, i) => out.push({ name: g.name, col: g.col, desc: `${g.pel > 1 ? g.pel + " pellets × " : ""}${g.dmg} dmg · ${g.auto ? "full auto" : "semi-auto"} · ${g.mag} rounds · ${g.range}m`, cost: g.cost, owned: !!save.gunOwned[i], gun: i, buy() { save.gunOwned[i] = 1; const am = gunAm(i); am.mag = magSize(i); am.res = g.pack; equipGun(i); } }));
+    GUNS.forEach((g, i) => {
+        if (!save.gunOwned[i]) return;
+        const am = gunAm(i);
+        out.push({ name: g.name + " ammo", col: g.col, desc: `+${g.pack} rounds · you have ${am.mag} + ${am.res} (max ${resCap(i)} spare)`, cost: g.packCost, maxed: am.res >= resCap(i), buy() { am.res = Math.min(resCap(i), am.res + g.pack); if (holdingGun() && save.gunEq === i && am.mag === 0) startReload(); } });
+    });
+    return out;
+}
+function gearItems2() {
+    return [
+        { name: "Bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
+        { name: "Better Log Price", desc: `Each log sells for $${logValue()} → $${logValue() + 5}`, cost: priceCost(), buy() { save.priceLvl++; } },
+        { name: "Vitality", desc: `+20 max health (${save.hpLvl}/5)`, cost: hpCost(), maxed: save.hpLvl >= 5, buy() { save.hpLvl++; player.maxHp = maxHpNow(); player.hp = player.maxHp; } },
+        { name: "Swift Boots", desc: `+7% move speed (${save.bootLvl}/4)`, cost: bootCost(), maxed: save.bootLvl >= 4, buy() { save.bootLvl++; } },
+        { name: "Lantern Oil", desc: `A brighter, longer-reaching lantern (${save.oilLvl}/3)`, cost: oilCost(), maxed: save.oilLvl >= 3, buy() { save.oilLvl++; } },
+        { name: "Kevlar Vest", desc: `Take 10% less damage from trees (${save.vestLvl || 0}/4)`, cost: vestCost(), maxed: (save.vestLvl || 0) >= 4, buy() { save.vestLvl = (save.vestLvl || 0) + 1; } },
+        { name: "Extended Mags", desc: `+25% magazine size for every gun (${save.magLvl || 0}/3)`, cost: magCost(), maxed: (save.magLvl || 0) >= 3, buy() { save.magLvl = (save.magLvl || 0) + 1; } },
+        { name: "Whetstone", desc: `+10% axe damage (${save.whetLvl || 0}/5)`, cost: whetCost(), maxed: (save.whetLvl || 0) >= 5, buy() { save.whetLvl = (save.whetLvl || 0) + 1; } },
+        { name: "Gunpowder Mix", desc: `+10% gun damage (${save.powderLvl || 0}/5)`, cost: powderCost(), maxed: (save.powderLvl || 0) >= 5, buy() { save.powderLvl = (save.powderLvl || 0) + 1; } },
+        { name: "Log Magnet", desc: `Logs fly to you from further away (${save.magnetLvl || 0}/3)`, cost: magnetCost(), maxed: (save.magnetLvl || 0) >= 3, buy() { save.magnetLvl = (save.magnetLvl || 0) + 1; } }
+    ];
+}
+function sellAtDepot() {
+    if (save.logs <= 0) { toast("You're not carrying any logs.", "bad"); return; }
+    const n = save.logs, total = Math.round(logValue() * n + save.logBonus);
+    save.money += total; save.sold += n; save.logs = 0; save.logBonus = 0;
+    contractProgress("sell", n);
+    toast(`Sold ${n} logs for +${money(total)}`, "cash");
+    sfx(900, 0.1, "triangle", 0.09, 1.4); setTimeout(() => sfx(1200, 0.12, "triangle", 0.08, 1.4), 90);
+    writeSave();
+}
+function nearest2() {
+    const px = player.pos.x, pz = player.pos.z;
+    if (Math.hypot(px - SMITH_AT.x, pz - SMITH_AT.z) < 3.4) return { k: "smith" };
+    if (Math.hypot(px - DEPOT_AT.x, pz - DEPOT_AT.z) < 3.4) return { k: "depot" };
+    if (Math.hypot(px - BED2.x, pz - BED2.z) < 3.2) return { k: "bed" };
+    if (Math.hypot(px - FERRYMAN2.x, pz - FERRYMAN2.z) < 3.4) return { k: "ferry2" };
+    for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
+    if (altar && Math.hypot(px - altar.x, pz - altar.z) < 3.2) return { k: "altar" };
+    return null;
+}
+
+// ---------- map of the Highland Isle ----------
+function drawMap2() {
+    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 172;
+    if (!mapBg2) {
+        const N = 320, oc = document.createElement("canvas"); oc.width = oc.height = N;
+        const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color();
+        for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+            const x = ((px + 0.5) / N - 0.5) * 344, z = ((py + 0.5) / N - 0.5) * 344, d = Math.hypot(x, z), inside = shoreAt2(x, z) - d, i = (py * N + px) * 4;
+            let r, gg, b;
+            if (inside < 0) { r = 11; gg = 34; b = 54; }
+            else if (inside < 5) { r = 90; gg = 150; b = 170; }
+            else {
+                const y = terrain2(x, z), sh = clamp((terrain2(x - 2, z - 2) - terrain2(x + 2, z + 2)) * 0.06, -0.5, 0.5);
+                if (Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r) col.setRGB(0.2, 0.5, 0.7);
+                else if (y > 33) col.setRGB(0.9, 0.94, 1);
+                else if (y > 22) col.setRGB(0.5, 0.5, 0.54);
+                else if (inside < 12 && y < 2.4) col.setRGB(0.72, 0.64, 0.4);
+                else col.setHSL(lerp(0.34, 0.2, clamp(y / 24, 0, 1)), 0.4, 0.22 + clamp(y / 24, 0, 1) * 0.1);
+                r = clamp((col.r + sh) * 255, 0, 255); gg = clamp((col.g + sh) * 255, 0, 255); b = clamp((col.b + sh) * 255, 0, 255);
+            }
+            img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255;
+        }
+        og.putImageData(img, 0, 0);
+        mapBg2 = oc;
+    }
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#0b2236"; g.beginPath(); g.arc(c, c, c - 6, 0, 7); g.fill();
+    g.strokeStyle = "rgba(255,208,64,.4)"; g.lineWidth = 3; g.stroke();
+    g.save(); g.beginPath(); g.arc(c, c, c - 8, 0, 7); g.clip();
+    g.imageSmoothingEnabled = false; g.drawImage(mapBg2, c - 172 * sc, c - 172 * sc, 344 * sc, 344 * sc);
+    g.restore();
+    g.fillStyle = "rgba(255,170,60,.12)"; g.beginPath(); g.arc(c, c, SAFE_R * sc, 0, 7); g.fill();
+    g.setLineDash([6, 6]); g.strokeStyle = "rgba(255,200,90,.8)"; g.lineWidth = 2; g.beginPath(); g.arc(c, c, SAFE_R * sc, 0, 7); g.stroke(); g.setLineDash([]);
+    const X = x => c + x * sc, Z = z => c + z * sc;
+    g.font = "bold 11px Consolas"; g.textAlign = "center";
+    for (const lm of LM2) {
+        if (lm.camp) continue;
+        g.strokeStyle = lm.col; g.lineWidth = 1.5; g.beginPath(); g.arc(X(lm.x), Z(lm.z), lm.r * sc * 0.7, 0, 7); g.stroke();
+        g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4); g.fillStyle = lm.col; g.fillText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4);
+    }
+    { const de = dock2Pt(D2LEN); g.strokeStyle = "#c8a0ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D2B.x), Z(D2B.z)); g.lineTo(X(de.x), Z(de.z)); g.stroke(); g.fillStyle = "#c8a0ff"; g.font = "bold 12px Consolas"; g.fillText("FERRY", X(de.x), Z(de.z) - 8); }
+    for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); g.strokeStyle = "#000"; g.lineWidth = 1; g.strokeRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
+    for (const t of trees) {
+        if (t.gone || t.dying) continue;
+        const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14;
+        g.fillStyle = near ? "#ff4a3a" : t.type.rare ? t.type.col : "rgba(20,70,40,.95)";
+        g.beginPath(); g.arc(X(t.x), Z(t.z), (t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill();
+    }
+    g.font = "bold 12px Consolas"; g.fillStyle = "#ffd040"; g.textAlign = "center";
+    g.strokeStyle = "#000"; g.lineWidth = 3;
+    for (const [t, x, z] of [["BASECAMP", 0, 8.4], ["TRADING", DEPOT.x + 9, DEPOT.z - 1], ["FORGE", SMITH.x - 7, SMITH.z - 1], ["BED", BED2.x - 4, BED2.z + 2]]) { g.strokeText(t, X(x), Z(z)); g.fillText(t, X(x), Z(z)); }
+    g.fillStyle = "#fff"; g.fillText("N", c, 22);
+    g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw);
+    g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke();
+    g.restore();
+}
+
+// ---------- the rebirth ride: walk onto the ferry, sail into the light, wake on a new island ----------
+let ride = null;
+const BOAT_A = DOCK_LEN - 7, BOAT_S = 4.4, RIDE_T = 17;
+const DECK = V3(0.55, 2.55, 3.0), deckV = new THREE.Vector3(); // where you stand on the ferry (boat-local): beside the bow, clear of the cabin and mast
+const deckEye = () => { ferryBoat.updateMatrixWorld(); return deckV.copy(DECK).applyMatrix4(ferryBoat.matrixWorld); };
+function say(t) { const e = $("rideCap"); e.textContent = t; e.classList.toggle("show", !!t); }
+function startRebirthRide() {
+    if (ride || save.money < rebirthCost()) return;
+    closePanel();
+    ride = { phase: "walk", t: 0, from: player.pos.clone(), fx: false, done: false };
+    mouseDown = false; endFishing();
+    player.invuln = 99999; player.vel.set(0, 0, 0);
+    const fl = labelList.find(l => l.el.textContent === "FERRYMAN"); if (fl) fl.visible = false;
+    $("rbSmall").textContent = "REBIRTH #" + ((save.rebirths || 0) + 1);
+    say("All aboard.");
+    sfx(200, 0.9, "sine", 0.1, 2);
+    writeSave();
+}
+const eio = u => u * u * (3 - 2 * u);
+function updateRide(dt) {
+    const r = ride;
+    r.t += dt;
+    player.vel.set(0, 0, 0); player.invuln = 99999; mouseDown = false;
+    const lookAt = (tx, tz) => { player.yaw += angDiff(Math.atan2(-(tx - player.pos.x), -(tz - player.pos.z)), player.yaw) * Math.min(1, 5 * dt); player.pitch += (0 - player.pitch) * Math.min(1, 3 * dt); };
+    if (r.phase === "walk") {
+        const A = dockPt(BOAT_A + DECK.z, 1.3), B = deckEye().clone(), t1 = 2.6, t2 = 1.4, by = B.y;
+        if (r.t < t1) { const u = eio(r.t / t1); player.pos.set(lerp(r.from.x, A.x, u), 1.75, lerp(r.from.z, A.z, u)); lookAt(B.x, B.z); player.bob += dt * 6; }
+        else if (r.t < t1 + t2) { const u = (r.t - t1) / t2; player.pos.set(lerp(A.x, B.x, u), lerp(1.75, by, eio(u)) + Math.sin(u * Math.PI) * 0.55, lerp(A.z, B.z, u)); lookAt(B.x, B.z); if (!r.hop && u > 0.8) { r.hop = true; sfx(140, 0.2, "square", 0.12, 0.4); } }
+        else {
+            r.phase = "sail"; r.t = 0; sfx(110, 0.5, "sawtooth", 0.1, 0.5);
+            ferryBoat.add(ferryman); ferryman.position.set(0.35, 0.8, -3.0); ferryman.rotation.y = 0;
+            player.yaw = Math.atan2(-FDIR.x, -FDIR.z); player.pitch = 0.04;
+            say("The ferry pulls away...");
+        }
+    } else {
+        const u = clamp(r.t / RIDE_T, 0, 1), s = BOAT_A + 125 * u * u, p = dockPt(s, BOAT_S);
+        ferryBoat.position.x = p.x; ferryBoat.position.z = p.z;
+        player.pos.copy(deckEye());
+        player.bob += dt * 0.6;
+        if (r.t > 6 && !r.c2) { r.c2 = true; say("The golden light grows closer..."); }
+        if (r.t > 11 && !r.c3) { r.c3 = true; say("A new life awaits."); }
+        if (r.t > 12.8 && !r.fx) { r.fx = true; $("rebirthFx").classList.add("show"); sfx(200, 1.6, "sine", 0.1, 3); setTimeout(() => sfx(400, 1.6, "sine", 0.08, 2.5), 500); }
+        if (r.t > 0.5 && r.t < 12 && Math.random() < dt * 0.9) sfx(90 + Math.random() * 40, 0.5, "sine", 0.03, 0.8);
+        if (r.t >= RIDE_T && !r.done) { r.done = true; finishRebirth(); }
+    }
+}
+function finishRebirth() {
+    save.money -= rebirthCost();
+    save.rebirths = (save.rebirths || 0) + 1;
+    save.money = 0; save.logs = 0; save.logBonus = 0;
+    save.owned = new Array(N_AXES).fill(0); save.owned[0] = 1; save.equipped = 0; save.gunOwned = []; save.gunEq = -1; save.gunAmmo = {};
+    save.bandages = 1; save.priceLvl = 0; save.hpLvl = 0; save.bootLvl = 0; save.oilLvl = 0; save.rodLvl = 0;
+    save.vestLvl = 0; save.magLvl = 0; save.whetLvl = 0; save.powderLvl = 0; save.magnetLvl = 0;
+    save.fishBag = []; save.day = 1; save.altarDay = 0; save.contract = null; save.ghosts = 0;
+    save.mats = {}; save.hotbar = ["a0", null, null, null, null];
+    applyAxeLook(); syncGhosts();
+    clockT = (8 / 24) * DAY_LEN; bmFelled = 0; setWeather("clear", false);
+    enterIsle2(); newContract();
+    holdingReset();
+    player.maxHp = maxHpNow(); player.hp = player.maxHp;
+    const a = dock2Pt(D2LEN - 10, 0);
+    player.pos.set(a.x, 1.75, a.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(D2DIR.x, D2DIR.z); player.pitch = 0;
+    player.invuln = 6;
+    ride = null;
+    writeSave();
+    say("");
+    setTimeout(() => { $("rebirthFx").classList.remove("show"); say("THE HIGHLAND ISLE"); setTimeout(() => say(""), 3600); toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage.", "cash"); toast("Walk inland to Basecamp. Trees here drop materials: sell them at the Trading Post, craft axes and guns at the Forge.", "good"); }, 2200);
+}
+function holdingReset() { reloading = false; reloadT = 0; gun.visible = false; axe.visible = true; }
+
+if (save.isle === 2) enterIsle2();
+
 // ---------- HUD ----------
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
     shop: () => "[F] Talk to the Reaper", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
-    ferry: () => "[F] Talk to the Ferryman",
+    ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", smith: () => "[F] Use the Forge",
+    depot: () => "[F] Trade at the Trading Post",
     fish: n => (n.spot.blocked ? "Face the water to fish" : "[F] Cast your line"),
     chest: n => (n.c.special ? "[F] Open the cursed chest" : "[F] Open chest"), altar: () => (save.altarDay === save.day ? "The altar is quiet today" : "[F] Pray at the altar")
 };
@@ -2965,29 +4223,34 @@ function hud(dt) {
     const c = Math.floor(save.money);
     el.cash.textContent = money(c);
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
-    el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = inSafe() ? "SAFE ZONE" : "THE WOODS";
+    if (isle === 2) { const mh = Object.keys(MATS).filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
+    else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
+    el.zone.textContent = inSafe() ? (isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
     el.zone.className = inSafe() ? "safe" : "danger";
-    el.clock.textContent = (isBlood() ? "🩸 BLOOD MOON " : isNight() ? "🌙 " : "☀ ") + fmtClock() + " · DAY " + save.day + "  " + WX_ICON[wx.type];
+    el.clock.textContent = (isBlood() ? "🩸 BLOOD MOON " : isNight() ? "🌙 " : "☀ ") + fmtClock() + " · DAY " + save.day + "  " + WX_ICON[wx.type] + (save.rebirths ? "  ★" + save.rebirths : "");
     el.clock.classList.toggle("blood", isBlood());
     const k = save.contract;
     el.contract.innerHTML = k ? `<b>CONTRACT</b> <i>${money(k.reward)}</i><br>${k.text} — ${Math.min(k.prog, k.goal)}/${k.goal}` : "";
     el.contract.style.display = k ? "" : "none";
     const n = panel ? null : nearest();
-    const pr = fishing.on ? fishPrompt() : n ? PROMPTS[n.k](n) : "";
+    const pr = ride ? "" : fishing.on ? fishPrompt() : n ? PROMPTS[n.k](n) : "";
     el.prompt.textContent = pr;
     el.prompt.classList.toggle("show", !!pr);
     el.prompt.classList.toggle("alert", fishing.on && fishing.phase === "bite");
-    const hot = ownedList().map((i, slot) => {
-        const a = AXES[i], sel = save.equipped === i;
-        return `<div class="slot ${sel ? "sel" : ""}" style="--c:${a.rarity}"><span class="k">${slot + 1}</span><span class="ic">🪓</span><span class="nm">${a.name}</span><span class="ct">${axeDmgFor(i)} dmg</span>${sel ? '<span class="eqtag">EQUIPPED</span>' : ""}</div>`;
+    ensureHotbar();
+    const hot = save.hotbar.map((id, slot) => {
+        if (!id) return `<div class="slot empty"><span class="k">${slot + 1}</span></div>`;
+        const sel = wEquipped(id), dm = id[0] === "a" ? axeDmgFor(+id.slice(1)) : gunDmg(+id.slice(1));
+        return `<div class="slot ${sel ? "sel" : ""}" style="--c:${wCol(id)}"><span class="k">${slot + 1}</span><img class="ic" src="${iconURL(id)}"><span class="nm">${wName(id)}</span><span class="ct">${dm} dmg</span>${sel ? '<span class="eqtag">EQUIPPED</span>' : ""}</div>`;
     }).join("");
+    { const am = holdingGun() ? gunAm(save.gunEq) : null, ae = $("ammo"); ae.style.display = am ? "" : "none"; if (am) ae.innerHTML = `<small>${GUNS[save.gunEq].name.toUpperCase()}</small><b>${am.mag}</b> / ${am.res}${reloading ? "<em>RELOADING</em>" : am.mag === 0 && am.res === 0 ? "<em>NO AMMO</em>" : ""}`; }
     if (el.hot.dataset.h !== hot) { el.hot.innerHTML = hot; el.hot.dataset.h = hot; }
     if (panel === "inv") renderInv();
     if (panel === "shop") renderShop();
     if (panel === "map") drawMap();
+    if (panel === "ferry") renderFerry();
 }
-const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1)); };
+const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0))); };
 
 // ---------- loop ----------
 let last = performance.now();
@@ -2999,6 +4262,7 @@ function frame(now) {
     if (state === "playing") {
         if (panel !== "inv" && panel !== "map") update(dt);
         animateAxe();
+        if (holdingGun()) animateGun(real);
         updateBars(real);
     } else if (state === "dead") {
         deadT += real;
@@ -3011,7 +4275,7 @@ function frame(now) {
         camera.position.set(Math.cos(orbit) * 15, 4.5, Math.sin(orbit) * 15 - 4);
         camera.lookAt(0, 2.2, -3);
         camera.fov = 70; camera.updateProjectionMatrix();
-        updateWorldAnim(real); updateWeather(real); updateEcosystem(real);
+        updateWorldAnim(real); updateIsle2Anim(real); updateWeather(real); updateEcosystem(real);
         applySky();
     }
     camera.updateMatrixWorld();
@@ -3035,7 +4299,7 @@ requestAnimationFrame(frame);
 
 // debug/test handle (used by automated checks, harmless in play)
 if (DEBUG) window.__ts4 = {
-    save, player, trees, camera, chests, LANDMARKS,
+    save, player, trees, camera, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,
     get state() { return state; },
     get hour() { return hourNow(); },
     play() { state = "playing"; renderMenu(); },
@@ -3048,5 +4312,5 @@ if (DEBUG) window.__ts4 = {
     respawn,
     send() { return sendLogs(); },
     setState(s) { state = s; renderMenu(); },
-    interact, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
+    interact, writeSave, doRebirth, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
 };

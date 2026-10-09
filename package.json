@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -53,7 +53,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.0.1 (the living island update)\n\n- BLOOD MOON: every 3rd night the sky turns red. Trees come out in force and hit harder, but logs, chests and fishing all pay double. Survive until dawn for a bonus.\n- GHOST LUMBERJACKS are real now: they float out into the woods, chop trees, and pay you cash for every one they fell.\n- FISHING: press F at the pond, on any beach or on the ferry dock. Time the reel in the green zone, catch 20+ species (rarer at night, in the rain and on a blood moon), sell them to the Reaper, and fill your Fish Journal (J). New shop item: Better Fishing Rod.\n- WEATHER: clear skies, clouds, rain, thunderstorms with lightning, and thick fog roll across the island.\n- A LIVING ISLAND: deer, rabbits, crabs, seagulls, frogs, birds and butterflies. Fish jump in the pond, chimneys smoke, flowers and tall grass fill the meadows, clouds drift by, and the sea has shallows and a foamy shore.\n- New sounds: surf, rain, birdsong, crickets, frogs and footsteps."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.1.0 (the REBIRTH update)\n\n- REBIRTH IS HERE: buy a ticket from the Ferryman ($250,000), walk onto the ferry and sail across to a brand new life. Every rebirth gives +50% cash and +10% damage, forever.\n- THE HIGHLAND ISLE: a huge new island with hills, snowy mountains, a lake, the Golden Peak, Crystal Grove, a Ruined Temple, an Old Mine and a Hunter's Lodge.\n- MATERIALS + CRAFTING: Highland trees drop Wood, Stone, Copper, Iron, Gunpowder, Gold, Crystal and Magma. Craft new axes and GUNS at the Forge, make bullets from Copper and Gunpowder, and sell the rest at the Trading Post.\n- GUNS: Revolver, Pump Shotgun, SMG, Timber Rifle and the Lumberjack Minigun. R reloads, the mouse wheel switches weapon.\n- 3 new axes, 11 new tree species, new upgrades (Kevlar Vest, Extended Mags, Whetstone, Gunpowder Mix, Log Magnet).\n- New 5-slot hotbar: drag weapons onto it from the inventory (E).\n- Real item pictures instead of emojis, shop pages, better-looking trees and new characters.\n- Rebirth 2 is coming soon..."
     }
   }
 }
