@@ -39,11 +39,11 @@ scene.add(isle1);
 let curBuild = 1; // which island labels are being built for
 let addTgt = null; // while set, scene.add puts new objects in this group
 { const _add = scene.add.bind(scene); scene.add = function (...o) { if (addTgt) { for (const x of o) addTgt.add(x); return this; } return _add(...o); }; }
-let isle = 1; // 1 = Pine Island, 2 = the Highland Isle
+let isle = 1; // 1 = Pine Island, 2 = the Highland Isle, 3 = Mooncap Isle
 let groundFn = null;
 const groundY = (x, z) => (groundFn ? groundFn(x, z) : 0);
-const curShoreAt = (x, z) => (isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
-const curShoreR = a => (isle === 2 ? shoreR2(a) : shoreR(a));
+const curShoreAt = (x, z) => (isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
+const curShoreR = a => (isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
 
 // viewmodel (axe) gets its own scene + depth pass so it never clips into trees
 const viewScene = new THREE.Scene();
@@ -86,7 +86,7 @@ const shoreAt = (x, z) => shoreR(Math.atan2(z, x));
 const BED = { x: 2.75, z: 1.7 }, HOPPER = { x: 5, z: -7 };
 const MILL = { x: 17.5, z: -12.5 };
 const RESPAWN = { x: 1.0, z: 0.0 };
-const N_AXES = 11;
+const N_AXES = 14;
 
 // ---------- save ----------
 const SAVE_KEY = "ts4_save_v1";
@@ -96,7 +96,8 @@ const save = {
     hpLvl: 0, bootLvl: 0, oilLvl: 0, felled: 0, rareFelled: 0, deaths: 0, sold: 0, seconds: 0, day: 1, clock: 8,
     contract: null, chestsDay: 0, altarDay: 0, chestsOpened: 0,
     rodLvl: 0, fishBag: [], fishDex: {}, fishSold: 0, ghostCash: 0, ghostFelled: 0, bmSurvived: 0, rebirths: 0,
-    isle: 1, gunOwned: [], gunEq: -1, gunAmmo: {}, vestLvl: 0, magLvl: 0, whetLvl: 0, powderLvl: 0, magnetLvl: 0, ferryTalks: 0, ferry2Talk: 0, mats: {}, hotbar: null, relic: [0, 0, 0, 0, 0, 0], caveFound: 0
+    isle: 1, gunOwned: [], gunEq: -1, gunAmmo: {}, vestLvl: 0, magLvl: 0, whetLvl: 0, powderLvl: 0, magnetLvl: 0, ferryTalks: 0, ferry2Talk: 0, mats: {}, hotbar: null, relic: [0, 0, 0, 0, 0, 0], caveFound: 0,
+    ferry3Talk: 0, bossKills: 0, bossDay: 0, buffs: {}, phoenix: 0, wellDay: 0, scopeDay: 0, starsCaught: 0
 };
 try { Object.assign(save, JSON.parse(localStorage.getItem(SAVE_KEY) || localStorage.getItem("ts4_test3_save") || "{}")); } catch (e) { /* fresh save */ }
 if (!Array.isArray(save.owned)) save.owned = [1, 0, 0, 0, 0, 0, 0, 0];
@@ -109,13 +110,19 @@ if (!save.gunAmmo || typeof save.gunAmmo !== "object") save.gunAmmo = {};
 if (typeof save.gunEq !== "number" || !save.gunOwned[save.gunEq]) save.gunEq = -1;
 if (!save.mats || typeof save.mats !== "object") save.mats = {};
 if (!Array.isArray(save.relic) || save.relic.length !== 6) save.relic = [0, 0, 0, 0, 0, 0];
-function writeSave() { save.clock = hourNow(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
+if (!save.buffs || typeof save.buffs !== "object") save.buffs = {};
+let savesFrozen = false; // the dev panel sets this right before it swaps the save and reloads
+function writeSave() { if (savesFrozen) return; save.clock = hourNow(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
 // difficulty follows your best axe, so a strong axe never one-shots everything
 const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; }); return b; };
 const gunPow = () => { let p = 0; (save.gunOwned || []).forEach((o, i) => { if (o) p = Math.max(p, GUNS[i].pow); }); return p; };
 const gunTier = () => (save.gunOwned || []).filter(Boolean).length * 2;
 const bestDmg = () => Math.max(AXES[bestIdx()].dmg, gunPow());
-const isleHp = () => (isle === 2 ? 2.2 : 1), isleRw = () => (isle === 2 ? 1.6 : 1), isleDm = () => (isle === 2 ? 1.5 : 1);
+const isleHp = () => (isle === 3 ? 3 : isle === 2 ? 2.2 : 1), isleRw = () => (isle === 3 ? 2.1 : isle === 2 ? 1.6 : 1), isleDm = () => (isle === 3 ? 1.9 : isle === 2 ? 1.5 : 1);
+// timed buffs from the Apothecary and the Moonwell (they tick on play time, so pausing doesn't waste them)
+const buffOn = k => (save.buffs[k] || 0) > save.seconds;
+const dmgBuff = () => (buffOn("fury") ? 1.4 : 1) * (buffOn("blessed") ? 1.25 : 1);
+let godMode = false, devSpeed = 1; // dev panel only
 const hpScale = () => 1 + (bestDmg() - 1) * 0.7;
 const rewardScale = () => 1 + (bestDmg() - 1) * 0.14;
 const dmgScale = () => 1 + bestIdx() * 0.1;
@@ -128,7 +135,7 @@ const BANDAGE_COST = 25;
 // rebirth: each trip on the ferry costs 3x more and gives +50% log/fish value and +10% axe damage, forever
 const rebirthCost = () => Math.round(250000 * Math.pow(3, save.rebirths || 0));
 const rebirthMult = () => 1 + 0.5 * (save.rebirths || 0);
-const logValue = () => Math.round((4 + save.priceLvl * 2) * rebirthMult() * (isle === 2 ? 2.5 : 1));
+const logValue = () => Math.round((4 + save.priceLvl * 2) * rebirthMult() * (isle === 3 ? 4 : isle === 2 ? 2.5 : 1));
 const ghostIncome = () => 0; // ghosts now earn by really chopping trees
 const maxHpNow = () => 100 + save.hpLvl * 20;
 
@@ -207,11 +214,14 @@ const wisps = (() => {
 const cNightFog = new THREE.Color(0x21143a), cDayFog = new THREE.Color(0x8ecae6), cDusk = new THREE.Color(0xff8f5a);
 const cNightAmb = new THREE.Color(0x6a5fa0), cDayAmb = new THREE.Color(0xdde6ff);
 const cNightSun = new THREE.Color(0x9fb0ff), cDaySun = new THREE.Color(0xfff2d8);
+// Mooncap Isle has its own sky: periwinkle days, pink dusks, deep violet nights
+const cNightFog3 = new THREE.Color(0x150a30), cDayFog3 = new THREE.Color(0xa6b4f2), cDusk3 = new THREE.Color(0xff7ab4);
+const cNightAmb3 = new THREE.Color(0x7a5ab8), cDayAmb3 = new THREE.Color(0xe6dcff);
 const tmpC = new THREE.Color();
 function applySky() {
-    const d = dayAmt(), el = sunElev();
+    const d = dayAmt(), el = sunElev(), m3 = isle === 3;
     const dusk = clamp(1 - Math.abs(el) * 4.5, 0, 1) * 0.65;
-    tmpC.copy(cNightFog).lerp(cDayFog, d).lerp(cDusk, dusk * 0.7);
+    tmpC.copy(m3 ? cNightFog3 : cNightFog).lerp(m3 ? cDayFog3 : cDayFog, d).lerp(m3 ? cDusk3 : cDusk, dusk * 0.7);
     const gray = clamp(wx.rain * 0.8 + wx.cloud * 0.25 + wx.fog * 0.6, 0, 1), blood = isBlood() ? 1 - d : 0;
     tmpC.lerp(cGray, gray * (0.25 + 0.5 * d)).lerp(cBlood, blood * 0.7);
     if (wx.light > 0) tmpC.lerp(cLightning, wx.light * 0.6);
@@ -219,7 +229,7 @@ function applySky() {
     scene.fog.color.copy(tmpC);
     scene.fog.near = lerp(6, 16, d) * (1 - wx.fog * 0.75) * (1 - wx.rain * 0.25);
     scene.fog.far = lerp(lerp(56, 120, d), 34, wx.fog) * (1 - wx.rain * 0.25) * (1 - blood * 0.25);
-    ambL.color.copy(cNightAmb).lerp(cDayAmb, d).lerp(cRed, blood * 0.45);
+    ambL.color.copy(m3 ? cNightAmb3 : cNightAmb).lerp(m3 ? cDayAmb3 : cDayAmb, d).lerp(cRed, blood * 0.45);
     ambL.intensity = lerp(1.5, 2.0, d) * (1 - 0.3 * gray) + wx.light * 3;
     sunL.color.copy(cNightSun).lerp(cDaySun, d).lerp(cDusk, dusk * 0.5).lerp(cRed, blood * 0.6);
     sunL.intensity = lerp(1.1, 2.6, d) * (1 - 0.65 * gray) * (1 + blood * 0.5);
@@ -243,6 +253,7 @@ function applySky() {
     viewAmb.intensity = lerp(1.1, 1.6, d);
     lantern.intensity = (lerp(26, 8, d) + save.oilLvl * 6) * (player && player.lantern ? 1 : 0);
     lantern.distance = 24 + save.oilLvl * 6;
+    if (m3) sky3(d);
     if (inCave()) caveSky();
 }
 
@@ -790,7 +801,7 @@ function ferrymanTex() {
 
     // the arch sign over the start of the dock
     for (const s of [-2.0, 2.0]) { const p = dockPt(3.5, s); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH FERRY", "FROM $250,000", "#ffe080"), side: THREE.DoubleSide }));
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 1", "HIGHLAND ISLE", "#ffe080"), side: THREE.DoubleSide }));
     const bp = dockPt(3.5, 0, 3.3);
     board.position.copy(bp); board.rotation.y = yaw + Math.PI;
     scene.add(board);
@@ -854,6 +865,7 @@ function ferrymanTex() {
     farGlow = canopyM;
 }
 function clampToIsland(p) {
+    if (isle === 3) { clampIsle3(p); return; }
     if (isle === 2) { clampIsle2(p); return; }
     const dx = p.x - FB.x, dz = p.z - FB.z;
     const along = dx * FDIR.x + dz * FDIR.z, side = dx * FPERP.x + dz * FPERP.z;
@@ -1193,7 +1205,18 @@ const TYPES = {
     snowpine: { name: "Snowcap Pine",   leaf: [0xe8f4ff, 0xcfe4f4],           trunk: 0x4a4a52, hp: 2.8, logs: 2.4, dmg: 1.4, speed: 1,    bonus: 14, wd: 0.5,  wn: 0.35, col: "#d8f0ff", glow: 0x203040, isl: [2], minTier: 3, alt: [15, 70], mat: "iron" },
     crystal:  { name: "Crystal Tree",   leaf: [0x7affef, 0xff7ad8],           trunk: 0x3a4a6a, hp: 3.4, logs: 3,   dmg: 1.5, speed: 1.25, bonus: 30, wd: 0.05, wn: 0.4,  col: "#7affef", glow: 0x1a6a6a, isl: [2], rare: true, night: true, minTier: 4, mat: "crystal" },
     magma:    { name: "Magma Oak",      leaf: [0xff5a1a, 0xd03a10],           trunk: 0x2a1a14, hp: 4.5, logs: 3.4, dmg: 1.9, speed: 1.1, bonus: 45, wd: 0.14, wn: 0.14, col: "#ff7a3a", glow: 0x7a2000, isl: [2], minTier: 5, alt: [6, 70], mat: "magma" },
-    colossus: { name: "Colossus Tree",  leaf: [0x1f5a3a, 0x2a4a6a],           trunk: 0x5a4a38, hp: 9,   logs: 8,   dmg: 2.6, speed: 0.6,  bonus: 80, wd: 0.05, wn: 0.05, col: "#ffe0a0", isl: [2], minTier: 8, titan: true, mat: "gold" }
+    colossus: { name: "Colossus Tree",  leaf: [0x1f5a3a, 0x2a4a6a],           trunk: 0x5a4a38, hp: 9,   logs: 8,   dmg: 2.6, speed: 0.6,  bonus: 80, wd: 0.05, wn: 0.05, col: "#ffe0a0", isl: [2], minTier: 8, titan: true, mat: "gold" },
+    // ---- Mooncap Isle ----
+    glowcap:     { name: "Glowcap",         leaf: [0x8a5ae0, 0x5a7ae8, 0xc06ad8], trunk: 0xe0d4c0, hp: 1.3, logs: 1.6, dmg: 1.1,  speed: 1,   bonus: 6,  wd: 0.9,  wn: 0.7,  col: "#c8a0ff", glow: 0x1a0a30, isl: [3], mat: "spore" },
+    silverbirch: { name: "Silver Birch",    leaf: [0xb8e0c8, 0xd0ecf4, 0x9ad0b8], trunk: 0xe8e4f0, hp: 1.6, logs: 1.4, dmg: 1.15, speed: 1,   bonus: 8,  wd: 0.7,  wn: 0.4,  col: "#dfe8ff", isl: [3], mat: "silver" },
+    amberpine:   { name: "Amber Pine",      leaf: [0x2a5a4a, 0x2a4a5a],           trunk: 0x6a3a1a, hp: 2.0, logs: 1.3, dmg: 1.2,  speed: 1,   bonus: 10, wd: 0.5,  wn: 0.35, col: "#ffb040", isl: [3], minTier: 2, mat: "amber" },
+    moonbloom:   { name: "Moonbloom",       leaf: [0xe8d8ff, 0xd0c4f8],           trunk: 0x4a3a5a, hp: 2.4, logs: 1.3, dmg: 1.25, speed: 1,   bonus: 14, wd: 0.25, wn: 0.5,  col: "#9fd8ff", glow: 0x2a2a5a, isl: [3], minTier: 4, mat: "moonstone" },
+    gloomwood:   { name: "Gloomwood",       leaf: [0x2a1a4a],                     trunk: 0x1a1024, hp: 3.0, logs: 1.5, dmg: 1.5,  speed: 1.2, bonus: 20, wd: 0,    wn: 0.22, col: "#a070ff", glow: 0x200a40, isl: [3], rare: true, night: true, minTier: 5, mat: "void" },
+    voidspire:   { name: "Voidspire",       leaf: [0x6a3aff, 0x3a1a8a],           trunk: 0x1a1430, hp: 3.6, logs: 1.8, dmg: 1.6,  speed: 1.1, bonus: 30, wd: 0.08, wn: 0.18, col: "#8a5aff", glow: 0x3a10a0, isl: [3], minTier: 7, mat: "void" },
+    starwisp:    { name: "Starwisp",        leaf: [0xfff2a0],                     trunk: 0xd8c8a0, hp: 2,   logs: 0.3, dmg: 0,    speed: 1,   bonus: 40, wd: 0.02, wn: 0.06, col: "#fff6a0", glow: 0x6a5a10, isl: [3], rare: true, flee: true, mat: "star" },
+    mooncap:     { name: "Ancient Mooncap", leaf: [0x6a4ae0, 0x9a5ad8],           trunk: 0xd8ccb8, hp: 8,   logs: 6,   dmg: 2.4,  speed: 0.6, bonus: 90, wd: 0.05, wn: 0.06, col: "#e0c8ff", glow: 0x200a40, isl: [3], minTier: 8, titan: true, mat: "moonstone" },
+    // the Elder Heart's children: they never spawn on their own, and they don't care if you're looking
+    thornling:   { name: "Thornling",       leaf: [0x6a1a3a, 0x8a2a4a],           trunk: 0x2a0a18, hp: 0.6, logs: 0.6, dmg: 0.8,  speed: 2.4, bonus: 0,  wd: 0,    wn: 0,    col: "#ff5a8a", glow: 0x3a0018, isl: [], rush: true, mat: "spore" }
 };
 const typeMats = {};
 for (const [k, T] of Object.entries(TYPES)) {
@@ -1209,7 +1232,10 @@ const TREE_STYLE = {
     frostbark: { s: "conifer", snow: true }, emberwood: { s: "round", dots: 0xffa040 }, titan: { s: "conifer" }, gold: { s: "round", dots: 0xfff4b0 },
     larch: { s: "round" }, stonebark: { s: "round", rocks: true }, copperleaf: { s: "round", dots: 0xffb070 }, ironbark: { s: "conifer" },
     powderwood: { s: "spiky", dots: 0xff3a2a }, goldleaf: { s: "round", dots: 0xfff4b0 }, redwood: { s: "tall" }, snowpine: { s: "conifer", snow: true },
-    crystal: { s: "crystal", dots: 0xbffff6 }, magma: { s: "round", dots: 0xffa030 }, colossus: { s: "conifer" }
+    crystal: { s: "crystal", dots: 0xbffff6 }, magma: { s: "round", dots: 0xffa030 }, colossus: { s: "conifer" },
+    glowcap: { s: "shroom", dots: 0xfff0ff }, silverbirch: { s: "birch", dots: 0x2a2a34 }, amberpine: { s: "conifer", dots: 0xffb040 }, moonbloom: { s: "round", dots: 0xf4f6ff },
+    gloomwood: { s: "dead", dots: 0xb07aff }, voidspire: { s: "crystal", dots: 0xd8b0ff }, starwisp: { s: "round", dots: 0xffffff }, mooncap: { s: "shroom", dots: 0xfff0ff },
+    thornling: { s: "spiky", dots: 0xff4a8a }
 };
 const snowMat = new THREE.MeshLambertMaterial({ color: 0xf2f6ff, flatShading: true }), rockMat = new THREE.MeshLambertMaterial({ color: 0x7a7a84, flatShading: true });
 const dotMats = {};
@@ -1255,6 +1281,17 @@ function treeShape(key, r, h) {
         mk(0, h * 0.62, 0, r * 1.1, h * 0.7, 0, 0);
         for (let i = 0; i < 7; i++) { const a = (i / 7) * 6.283; mk(Math.cos(a) * r * 0.6, h * (0.6 + R() * 0.2), Math.sin(a) * r * 0.6, r * (0.5 + R() * 0.3), h * (0.3 + R() * 0.25), Math.sin(a) * 0.7, -Math.cos(a) * 0.7); }
         for (let d = 0; d < 6; d++) dot((R() - 0.5) * r * 3, h * (0.7 + R() * 0.5), (R() - 0.5) * r * 3, 0.1);
+    } else if (st.s === "shroom") {
+        // a giant living mushroom: one wide domed cap, gills underneath, a skirt round the stem and glowing spots on top
+        const R2 = r * (3.1 + R() * 0.6), top = h * 0.98, tilt = (R() - 0.5) * 0.18;
+        const cap = new THREE.SphereGeometry(R2, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.5); cap.scale(1, 0.52, 1); cap.rotateZ(tilt); cap.translate(0, top, 0); leaf.push(ni(cap));
+        const gill = new THREE.CylinderGeometry(R2 * 0.97, r * 0.9, R2 * 0.22, 12, 1, true); gill.rotateZ(tilt); gill.translate(0, top - R2 * 0.1, 0); deco.push(ni(gill));
+        const skirt = new THREE.CylinderGeometry(r * 1.05, r * 1.35, r * 0.5, 10, 1, true); skirt.translate(0, h * 0.72, 0); deco.push(ni(skirt));
+        for (let d = 0; d < 9; d++) { const a = R() * 6.283, e = 0.25 + R() * 1.1; dot(Math.cos(a) * Math.cos(e) * R2 * 0.98, top + Math.sin(e) * R2 * 0.5, Math.sin(a) * Math.cos(e) * R2 * 0.98, 0.16 + R() * 0.1); }
+    } else if (st.s === "birch") {
+        // tall pale trunk with dark bark marks and small airy leaf clumps up high
+        for (let i = 0; i < 7; i++) { const a = (i / 7) * 6.283 + R(), y = h * (0.62 + R() * 0.42), d = r * (0.6 + R() * 1.4), b = new THREE.IcosahedronGeometry(r * (1.2 + R() * 0.7), 0); b.scale(1, 1.25, 1); b.translate(Math.cos(a) * d, y, Math.sin(a) * d); leaf.push(b); }
+        for (let i = 0; i < 10; i++) { const a = R() * 6.283, y = h * (0.08 + R() * 0.62), rr = r * (1.0 - 0.32 * (y / h)) * 0.97, m = new THREE.BoxGeometry(r * 0.5, r * 0.12, r * 0.08); m.rotateY(-a + Math.PI / 2); m.translate(Math.cos(a) * rr, y, Math.sin(a) * rr); dots.push(m); }
     }
     const merge = a => (a.length ? mergeGeometries(a) : null);
     return { leaf: merge(leaf), deco: merge(deco), snow: merge(snow), dots: merge(dots), rocks: merge(rocks), dotCol: st.dots };
@@ -1336,7 +1373,7 @@ function makeTree(x, z, h, key = "pine") {
     const r = 0.42 + h * 0.075;
     const g = new THREE.Group();
     const gy0 = groundY(x, z);
-    g.position.set(x, gy0 - (isle === 2 ? 0.25 : 0), z);
+    g.position.set(x, gy0 - (isle >= 2 ? 0.25 : 0), z);
     const body = new THREE.Group();
     g.add(body);
     // a slightly bent, knobbly trunk
@@ -1382,14 +1419,14 @@ function makeTree(x, z, h, key = "pine") {
 }
 
 function pickType(px = 0, pz = 0) {
-    const night = isNight(), here = isle === 2 ? groundY(px, pz) : 0;
+    const night = isNight(), here = isle >= 2 ? groundY(px, pz) : 0;
     let total = 0;
     const tier = Math.max(bestIdx(), gunTier()), blood = isBlood(), tw = T => (night ? T.wn : T.wd) * (blood && T.rare ? 2.2 : 1);
     const ok = T => (T.isl || [1]).includes(isle) && (T.minTier || 0) <= tier && (!T.alt || (here >= T.alt[0] && here <= T.alt[1]));
     for (const T of Object.values(TYPES)) if (ok(T)) total += tw(T);
     let r = Math.random() * total;
     for (const [k, T] of Object.entries(TYPES)) { if (!ok(T)) continue; r -= tw(T); if (r <= 0) return k; }
-    return isle === 2 ? "larch" : "pine";
+    return isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
 }
 let lastRareToast = -99;
 function spawnTree(announce = true) {
@@ -1401,6 +1438,7 @@ function spawnTree(announce = true) {
         for (const lm of curLM()) if (!lm.camp && Math.hypot(x - lm.x, z - lm.z) < lm.r + 2) { bad = true; break; }
         if (bad) continue;
         if (isle === 2 && Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 5) continue;
+        if (isle === 3 && !treeOk3(x, z)) continue;
         for (const o of trees) if (!o.gone && Math.hypot(x - o.x, z - o.z) < 6) { bad = true; break; }
         if (bad) continue;
         const key = pickType(x, z), T = TYPES[key];
@@ -1465,9 +1503,13 @@ const AXES = [
     { name: "Reaper's Axe", dmg: 30, cost: 9000, steel: 0x10261a, edge: 0x6dffa0, glow: 0x0a6a30, scale: 1.42, rarity: "#6dffa0" },
     { name: "Glacier Axe",   dmg: 45, cost: 18000, steel: 0x6aa8d8, edge: 0xe8faff, glow: 0x2a6a9a, scale: 1.48, rarity: "#9fe8ff", isle2: true },
     { name: "Magma Axe",     dmg: 70, cost: 55000, steel: 0x3a1208, edge: 0xff6a1a, glow: 0xa03a00, scale: 1.54, rarity: "#ff7a3a", isle2: true },
-    { name: "Worldsplitter", dmg: 120, cost: 160000, steel: 0x180a30, edge: 0xff5ae0, glow: 0x6a1a8a, scale: 1.62, rarity: "#ff7aea", isle2: true }
+    { name: "Worldsplitter", dmg: 120, cost: 160000, steel: 0x180a30, edge: 0xff5ae0, glow: 0x6a1a8a, scale: 1.62, rarity: "#ff7aea", isle2: true },
+    // forged on Mooncap Isle
+    { name: "Lunar Cleaver",  dmg: 180, cost: 0, steel: 0xb8c4e8, edge: 0xf4f8ff, glow: 0x3a4a9a, scale: 1.66, rarity: "#cfe0ff", isle3: true, night: 1.3 },
+    { name: "Voidreaver",     dmg: 280, cost: 0, steel: 0x1a0a3a, edge: 0x9a5aff, glow: 0x4a1aa0, scale: 1.72, rarity: "#9a6aff", isle3: true },
+    { name: "Elder's Bane",   dmg: 450, cost: 0, steel: 0x3a0a1a, edge: 0xff4a7a, glow: 0x8a0a3a, scale: 1.82, rarity: "#ff5a8a", isle3: true }
 ];
-const axeDmg = () => { const a = AXES[save.equipped]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0))); };
+const axeDmg = () => axeDmgFor(save.equipped);
 const ownedList = () => AXES.map((a, i) => i).filter(i => save.owned[i]);
 function applyAxeLook() {
     const a = AXES[save.equipped];
@@ -1476,7 +1518,7 @@ function applyAxeLook() {
     headMesh.scale.setScalar(a.scale);
 }
 applyAxeLook();
-if (save.isle !== 2) for (let i = 0; i < 60; i++) spawnTree(false); // (needs AXES for the difficulty scale)
+if (!(save.isle >= 2)) for (let i = 0; i < 60; i++) spawnTree(false); // (needs AXES for the difficulty scale)
 const KF = {
     rest: [-0.2, 1.1, 0.08, 0.56, -0.78, -1.0],
     wind: [0.35, 0.95, 0.45, 0.46, -0.55, -1.1],
@@ -1519,7 +1561,7 @@ function dropLogs(x, z, n, back, key = "pine") {
     const T = TYPES[key];
     const meshes = Math.min(n, 14), base = Math.floor(n / meshes), extra = n % meshes; // big drops are stacks of logs, not hundreds of meshes
     for (let i = 0; i < meshes; i++) {
-        const mk = isle === 2 ? (T.mat || "wood") : null;
+        const mk = isle >= 2 ? (T.mat || (isle === 3 ? "spore" : "wood")) : null;
         const m = mk ? new THREE.Mesh(matGeo, matMeshMat[mk]) : new THREE.Mesh(logGeo, logMats[key] || logMat);
         const d = Math.random() * 2.5;
         m.position.set(x + back.x * d, groundY(x + back.x * d, z + back.z * d) + 0.4, z + back.z * d);
@@ -1559,7 +1601,8 @@ function newContract() {
     const roll = Math.random(), m = 1 + 0.12 * (save.day - 1);
     if (isNight() && roll < 0.5) save.contract = { type: "rare", goal: 1, prog: 0, reward: Math.round(170 * m), text: "Fell a rare tree" };
     else if (roll < 0.6) { const g = 4 + Math.floor(Math.random() * 5); save.contract = { type: "fell", goal: g, prog: 0, reward: Math.round(g * 14 * m), text: `Fell ${g} trees` }; }
-    else { const g = 12 + Math.floor(Math.random() * 14); save.contract = { type: "sell", goal: g, prog: 0, reward: Math.round(g * 6 * m), text: isle === 2 ? `Sell ${g} materials at the Trading Post` : `Sell ${g} logs at the mill` }; }
+    else { const g = 12 + Math.floor(Math.random() * 14); save.contract = { type: "sell", goal: g, prog: 0, reward: Math.round(g * 6 * m), text: isle >= 2 ? `Sell ${g} materials at the Trading Post` : `Sell ${g} logs at the mill` }; }
+    if (isle === 3) save.contract.reward *= 40; // Mooncap money is bigger money
 }
 function contractProgress(kind, n = 1) {
     const c = save.contract;
@@ -1575,6 +1618,7 @@ function contractProgress(kind, n = 1) {
 }
 function resetChests() { for (const c of chests) { c.opened = false; c.beacon.visible = true; } }
 function onDusk() {
+    if (isle === 3) dusk3();
     if (isBlood()) { toast("THE BLOOD MOON RISES. The woods are hungry... and pay double.", "bad"); sfx(80, 1.6, "sawtooth", 0.16, 0.4); bmFelled = 0; }
     else { toast("Night falls. Rare trees are stirring in the woods...", "rare"); sfx(190, 0.7, "sine", 0.07, 0.5); owl(); }
 }
@@ -1586,6 +1630,7 @@ function onDawn() {
     for (const t of trees) if (t.type.night && !t.gone && !t.dying) t.burn = true;
     resetChests();
     if (typeof syncVeins === "function" && mineBuilt) syncVeins();
+    if (isle === 3) dawn3();
     if (!save.contract) newContract();
     writeSave();
 }
@@ -1613,17 +1658,18 @@ const HIT_COL = { ghost: [0x9fe8ff, 0xffffff], blood: [0xaa1818, 0xff5a5a], gold
 function hitTree(best, dmg, melee) {
     best.hp -= dmg;
     best.hurt = 1;
-    floatWorld(V3(best.x, best.gy + Math.min(best.h * 0.55, 3.2), best.z), "-" + dmg, "dmg");
-    showBar(best);
+    floatWorld(V3(best.x + (player.pos.x - best.x) * (best.boss ? 0.3 : 0), best.gy + Math.min(best.h * 0.55, 3.2), best.z + (player.pos.z - best.z) * (best.boss ? 0.3 : 0)), "-" + dmg, "dmg");
+    if (best.boss) bossHurt(best, dmg); else showBar(best);
     if (melee) { shake = Math.min(0.5, shake + 0.25); hitstop = 0.07; fovKick = 1; flash = 0.2; }
     const col = HIT_COL[best.key];
     burst(V3(best.x + (player.pos.x - best.x) * 0.1, best.gy + Math.min(best.h * 0.35, 2.2), best.z + (player.pos.z - best.z) * 0.1), melee ? 10 : 5, 4, col ? col.map(c => new THREE.MeshBasicMaterial({ color: c })) : chipMats);
     if (melee) { sfx(140, 0.14, "square", 0.18, 0.4); sfx(520 + Math.random() * 200, 0.2, "sawtooth", 0.07, 0.35); }
     else sfx(260 + Math.random() * 100, 0.07, "square", 0.06, 0.5);
-    if (best.hp <= 0) fellTree(best);
+    if (best.hp <= 0 && !best.dying) fellTree(best);
 }
 function fellTree(t) {
     t.dying = true; t.t = 0;
+    if (t.boss) { bossDefeated(t); return; }
     save.felled++;
     if (isBlood()) bmFelled++;
     contractProgress("fell");
@@ -1633,7 +1679,8 @@ function fellTree(t) {
 
 function hurtPlayer(dmg, sx, sz) {
     if (player.invuln > 0 || state !== "playing") return;
-    dmg = Math.max(1, Math.round(dmg * (1 - 0.1 * (save.vestLvl || 0))));
+    if (godMode) return;
+    dmg = Math.max(1, Math.round(dmg * (1 - 0.1 * (save.vestLvl || 0)) * (buffOn("ironhide") ? 0.6 : 1)));
     player.hp -= dmg;
     player.invuln = 0.5;
     hurtFlash = 1; shake = Math.min(0.8, shake + 0.5);
@@ -1649,7 +1696,18 @@ function hurtPlayer(dmg, sx, sz) {
     if (player.hp <= 0) die();
 }
 function die() {
+    if (save.phoenix > 0) { // a Phoenix Tear burns away instead of you
+        save.phoenix--;
+        player.hp = Math.round(player.maxHp * 0.6); player.invuln = 3;
+        flash = 0.9; shake = 0.6;
+        sfx(300, 0.6, "sawtooth", 0.12, 2.5); setTimeout(() => sfx(600, 0.8, "triangle", 0.1, 1.6), 150);
+        toast("The Phoenix Tear burns away... and you rise again!", "rare");
+        burst(V3(player.pos.x, player.pos.y - 0.8, player.pos.z), 26, 6, [new THREE.MeshBasicMaterial({ color: 0xff9a3a }), new THREE.MeshBasicMaterial({ color: 0xffe070 })]);
+        writeSave();
+        return;
+    }
     endFishing();
+    if (isle === 3 && fight3.on) endFight(false); // dying ends the fight: the Elder Heart goes back to sleep and you wake up in camp
     player.hp = 0;
     state = "dead";
     deadT = 0;
@@ -1712,7 +1770,7 @@ function updateTalk(dt) {
 }
 function toggleLantern() { player.lantern = !player.lantern; viewLamp.visible = player.lantern; }
 function equipAxe(i) {
-    if (!save.owned[i]) { toast(`${AXES[i].name} is locked. ${isle === 2 ? "Craft it at the Forge." : "The Reaper sells it."}`, "bad"); return; }
+    if (!save.owned[i]) { toast(`${AXES[i].name} is locked. ${isle >= 2 ? "Craft it at the Forge." : "The Reaper sells it."}`, "bad"); return; }
     if (save.equipped === i && !holdingGun()) return;
     save.gunEq = -1; reloading = false;
     save.equipped = i;
@@ -1727,7 +1785,11 @@ function openChest(c) {
     c.opened = true; c.beacon.visible = false; save.chestsOpened++;
     const m = (1 + 0.15 * (save.day - 1)) * (isBlood() ? 2 : 1), r = Math.random();
     let msg;
-    if (c.special) { const cash = Math.round(rand(120, 260) * m); save.money += cash; save.bandages++; msg = `Cursed chest: +${money(cash)} and a bandage`; }
+    if (isle === 3) { // Mooncap chests: real money and a handful of materials
+        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1)), ks = c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
+        save.money += cash; save.mats[k] = (save.mats[k] || 0) + n; if (c.special) save.bandages++;
+        msg = `${c.special ? "Moonlit chest" : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
+    } else if (c.special) { const cash = Math.round(rand(120, 260) * m); save.money += cash; save.bandages++; msg = `Cursed chest: +${money(cash)} and a bandage`; }
     else if (r < 0.6) { const cash = Math.round(rand(25, 85) * m); save.money += cash; msg = `Chest: +${money(cash)}`; }
     else if (r < 0.85) { const cash = Math.round(rand(10, 30) * m); save.money += cash; save.bandages++; msg = `Chest: a bandage and ${money(cash)}`; }
     else { save.logs += 8; save.logBonus += 16; msg = "Chest: a bundle of 8 fine logs"; }
@@ -1743,13 +1805,14 @@ const PER_PAGE = 4;
 const SHOP_TABS = {
     reaper: [["axes", "AXES"], ["gear", "GEAR"], ["sell", "SELL FISH"]],
     forge: [["axes", "CRAFT AXES"], ["guns", "CRAFT GUNS"], ["ammo", "AMMO"], ["gear", "GEAR"]],
-    trade: [["trade", "SELL MATERIALS"]]
+    trade: [["trade", "SELL MATERIALS"]],
+    brew: [["brew", "BREWS"]]
 };
-const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST" };
+const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST", brew: "THE APOTHECARY" };
 function reaperAxeItems() {
     const out = [];
     AXES.forEach((a, i) => {
-        if (i === 0 || a.isle2) return;
+        if (i === 0 || a.isle2 || a.isle3) return;
         out.push({ name: a.name, icon: "a" + i, desc: `${a.dmg} damage per swing${a.night ? " (x1.5 at night)" : ""}`, cost: a.cost, owned: !!save.owned[i], axe: i, col: a.rarity, buy() { gainAxe(i); } });
     });
     return out;
@@ -1773,6 +1836,7 @@ function reaperGear() {
     ];
 }
 function shopItems() {
+    if (shopTab === "brew") return brewItems();
     if (shopTab === "sell") return sellItems();
     if (shopTab === "trade") return tradeItems();
     if (shopTab === "guns") return gunCraftItems();
@@ -1794,11 +1858,13 @@ function buy(i) {
     if (it.maxed) { toast("Already maxed out.", "bad"); return; }
     if (it.craft) {
         if (!hasMats(it.craft)) { toast("Not enough materials. Chop the right trees!", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return; }
+        if (it.cost && save.money < it.cost) { toast("Not enough cash.", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return; }
         payMats(it.craft);
+        if (it.cost) save.money -= it.cost;
         it.buy();
         sfx(330, 0.12, "square", 0.12, 0.6); setTimeout(() => sfx(660, 0.2, "triangle", 0.12, 1.5), 120); setTimeout(() => sfx(990, 0.3, "triangle", 0.1, 1.2), 260);
         flash = 0.3;
-        toast(`Crafted ${it.name}!`, "good");
+        if (!it.quiet) toast(`${it.verb || "Crafted"} ${it.name}!`, "good");
         renderShop(); writeSave();
         return;
     }
@@ -1813,7 +1879,7 @@ function buy(i) {
 const recipeHtml = r => '<span class="recipe">' + Object.entries(r).map(([k, n]) => { const have = save.mats[k] || 0; return `<span class="rp ${have >= n ? "ok" : "no"}"><img src="${iconURL("m:" + k)}">${Math.min(have, n)}/${n} ${MATS[k].name}</span>`; }).join("") + "</span>";
 function renderShop() {
     $("shopCash").textContent = money(save.money);
-    $("shopName").textContent = SHOP_NAMES[shopMode];
+    $("shopName").textContent = shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : SHOP_NAMES[shopMode];
     const tabs = SHOP_TABS[shopMode];
     if (!tabs.some(t => t[0] === shopTab)) shopTab = tabs[0][0];
     const th = tabs.length > 1 ? tabs.map(t => `<button class="tab ${t[0] === shopTab ? "on" : ""}" data-tab="${t[0]}">${t[1]}</button>`).join("") : "";
@@ -1823,8 +1889,9 @@ function renderShop() {
     const start = shopPage * PER_PAGE;
     let shopHtml = items.slice(start, start + PER_PAGE).map((it, k) => {
         const i = start + k, eqd = it.owned && (it.axe !== undefined ? save.equipped === it.axe && !holdingGun() : save.gunEq === it.gun);
-        const cls = it.sell ? (it.value > 0 ? "ok" : "no") : it.owned || it.maxed ? "owned" : it.craft ? (hasMats(it.craft) ? "ok" : "no") : save.money >= it.cost ? "ok" : "no";
-        const costTxt = it.sell ? (it.value > 0 ? "+" + money(it.value) : "—") : it.owned ? (eqd ? "EQUIPPED" : "OWNED · click to equip") : it.maxed ? "MAX" : it.craft ? (hasMats(it.craft) ? "CRAFT" : "NEED MATERIALS") : money(it.cost);
+        const canCraft = it.craft && hasMats(it.craft) && (!it.cost || save.money >= it.cost);
+        const cls = it.sell ? (it.value > 0 ? "ok" : "no") : it.owned || it.maxed ? "owned" : it.craft ? (canCraft ? "ok" : "no") : save.money >= it.cost ? "ok" : "no";
+        const costTxt = it.sell ? (it.value > 0 ? "+" + money(it.value) : "—") : it.owned ? (eqd ? "EQUIPPED" : "OWNED · click to equip") : it.maxed ? (it.maxTxt || "MAX") : it.craft ? (canCraft ? (it.verb ? it.verb.toUpperCase() : "CRAFT") + (it.cost ? " " + money(it.cost) : "") : !hasMats(it.craft) ? "NEED MATERIALS" : "NEED " + money(it.cost)) : money(it.cost);
         return `<div class="row ${cls}" data-i="${i}"><span class="key">${k + 1}</span>${it.icon ? `<img class="ico" src="${iconURL(it.icon)}">` : ""}<div class="info"><b${it.col ? ` style="color:${it.col}"` : ""}>${it.name}</b><small>${it.desc}</small>${it.craft && !it.owned ? recipeHtml(it.craft) : ""}</div><span class="cost">${costTxt}</span></div>`;
     }).join("");
     if (!items.length) shopHtml = `<div class="empty">Nothing here yet.</div>`;
@@ -1879,7 +1946,7 @@ function renderInv() {
     const wHtml = cards.join("");
     if ($("invSlots").dataset.h !== wHtml) { $("invSlots").innerHTML = wHtml; $("invSlots").dataset.h = wHtml; }
     const items = [];
-    if (isle === 2) for (const k of Object.keys(MATS)) items.push(`<div class="card"><img class="big" src="${iconURL("m:" + k)}"><b style="color:${MATS[k].col}">${MATS[k].name}</b><small>${save.mats[k] || 0} · $${matPrice(k)} each</small></div>`);
+    if (isle >= 2) for (const k of isleMats()) items.push(`<div class="card"><img class="big" src="${iconURL("m:" + k)}"><b style="color:${MATS[k].col}">${MATS[k].name}</b><small>${save.mats[k] || 0} · $${matPrice(k)} each</small></div>`);
     else items.push(`<div class="card"><img class="big" src="${iconURL("logs")}"><b>Logs</b><small>${save.logs} carried · $${logValue()} each${save.logBonus ? " + $" + Math.floor(save.logBonus) + " bonus" : ""}</small></div>`);
     items.push(
         `<div class="card" data-act="bandage"><img class="big" src="${iconURL("bandage")}"><b>Bandages</b><small>${save.bandages} · click to heal 40</small></div>`,
@@ -1888,6 +1955,7 @@ function renderInv() {
     );
     if (isle === 2) items.push(`<div class="card" data-act="relic"><img class="big" src="assets/relic.jpg" style="width:52px;height:60px;object-fit:cover"><b style="color:#ffd040">Hypergamous Relic</b><small>${relicCount()} / 6 pieces · click to view</small></div>`);
     if (isle === 1) items.push(`<div class="card" data-act="fish"><img class="big" src="${iconURL("fish")}"><b>Fish</b><small>${save.fishBag.length} in bag · click for the journal</small></div>`);
+    if (isle === 3 || save.phoenix > 0) items.push(`<div class="card"><img class="big" src="${iconURL("phoenix")}"><b style="color:#ffb060">Phoenix Tears</b><small>${save.phoenix || 0} · saves you from one death</small></div>`);
     const iHtml = items.join("");
     if ($("invItems").dataset.h !== iHtml) { $("invItems").innerHTML = iHtml; $("invItems").dataset.h = iHtml; }
     const c = save.contract;
@@ -1899,7 +1967,8 @@ function renderInv() {
         ["Trees felled", save.felled],
         ["Rare trees", save.rareFelled],
         ["Chests opened", save.chestsOpened],
-        [isle === 2 ? "Materials sold" : "Logs sold", save.sold],
+        [isle >= 2 ? "Materials sold" : "Logs sold", save.sold],
+        ...(isle === 3 || save.bossKills ? [["Elder Heart felled", save.bossKills || 0], ["Stars caught", save.starsCaught || 0]] : []),
         ["Deaths", save.deaths],
         ["Fish caught", Object.values(save.fishDex || {}).reduce((a, d) => a + d.n, 0)],
         ["Blood moons survived", save.bmSurvived || 0],
@@ -1943,7 +2012,8 @@ function showPanels() {
     $("panelRelic").classList.toggle("show", panel === "relic");
     if (panel === "relic") renderRelic();
     $("panelTalk").classList.toggle("show", panel === "talk");
-    $("panelBack").classList.toggle("show", panel !== null && panel !== "talk");
+    $("panelBack").classList.toggle("show", panel !== null && panel !== "talk" && panel !== "dev");
+    if (window.__ts4dev) window.__ts4dev.show(panel === "dev");
     if (panel === "inv") renderInv();
     if (panel === "map") drawMap();
     if (panel === "shop") renderShop();
@@ -2038,12 +2108,12 @@ function updateBars(dt) {
 const plates = [];
 const plateV = new THREE.Vector3();
 const treeDmg = t => (t.type.flee ? 0 : Math.round((8 + t.h) * t.type.dmg * (1 + 0.05 * (save.day - 1)) * dmgScale() * (isBlood() ? 1.25 : 1) * isleDm()));
-const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw()));
+const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw() * (buffOn("lucky") ? 1.5 : 1)));
 function hidePlates() { for (const p of plates) p.style.display = "none"; }
 function updateNameplates() {
     const cands = [];
     for (const t of trees) {
-        if (t.gone || t.dying || t.burn) continue;
+        if (t.gone || t.dying || t.burn || t.boss) continue;
         const d = Math.hypot(t.x - camera.position.x, t.z - camera.position.z);
         if (d < 36) { t._pd = d; cands.push(t); }
     }
@@ -2060,7 +2130,8 @@ function updateNameplates() {
         if (!(nowMs - (t._occT || 0) < 120)) { t._occT = nowMs; t._occ = isOccluded(V3(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 1.5, t.z), t.solid); }
         if (t._occ || behindAxe(px, py)) { e.style.display = "none"; continue; }
         const T = t.type, dmg = treeDmg(t);
-        const html = '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle === 2 ? ' · <em style="color:' + MATS[T.mat || "wood"].col + '">' + treeLogs(t) + ' ' + MATS[T.mat || "wood"].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
+        const tm = T.mat || (isle === 3 ? "spore" : "wood");
+        const html = '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle >= 2 ? ' · <em style="color:' + MATS[tm].col + '">' + treeLogs(t) + ' ' + MATS[tm].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
         if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = T.col; }
         e.style.display = "";
         e.style.left = px + "px";
@@ -2074,6 +2145,7 @@ function updateNameplates() {
 
 // ---------- map ----------
 function drawMap() {
+    if (isle === 3) { drawMap3(); return; }
     if (isle === 2) { drawMap2(); return; }
     const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 112;
     g.clearRect(0, 0, S, S);
@@ -2150,7 +2222,7 @@ function startPlaying() {
     if (!actx) { try { actx = new AudioContext(); } catch (e) { /* no audio */ } }
     if (actx && actx.state === "suspended") actx.resume();
     startAmbience();
-    if (state === "title") { if (isle === 2) player.pos.set(RESPAWN.x, 1.7, RESPAWN.z); else player.pos.set(0, 1.7, -0.5); }
+    if (state === "title") { if (isle >= 2) player.pos.set(RESPAWN.x, groundY(RESPAWN.x, RESPAWN.z) + 1.7, RESPAWN.z); else player.pos.set(0, 1.7, -0.5); }
     state = "playing";
     renderMenu();
     if (document.pointerLockElement !== canvas) { try { lockPointer(); } catch (e) { /* needs gesture */ } }
@@ -2167,6 +2239,8 @@ document.addEventListener("pointerlockchange", () => {
 // ---------- input ----------
 addEventListener("keydown", e => {
     if ($("intro")) return; // studio intro is playing
+    if (e.target && e.target.closest && e.target.closest("input, textarea, select")) { if (e.code === "Escape") e.target.blur(); return; } // typing into a field, not playing
+    if (DEBUG && e.code === "Backquote") { e.preventDefault(); if (state === "playing") togglePanel("dev"); else if (window.__ts4dev) window.__ts4dev.toggle(); return; }
     keys[e.code] = true;
     if (state === "dead" && (e.code === "Space" || e.code === "KeyR" || e.code === "Enter")) { respawn(); return; }
     if ((state === "title" || state === "paused") && (e.code === "Enter" || e.code === "Space")) { startPlaying(); return; }
@@ -2216,6 +2290,7 @@ addEventListener("mousemove", e => {
 });
 
 function nearest() {
+    if (isle === 3) return nearest3();
     if (isle === 2) return nearest2();
     const px = player.pos.x, pz = player.pos.z;
     if (Math.hypot(px - SHOP.x, pz - (KEEPER.z + 1.6)) < 3.6) return { k: "shop" };
@@ -2234,9 +2309,15 @@ function interact() {
     if (panel) return;
     const n = nearest();
     if (!n) return;
+    const pick = a => a[Math.floor(Math.random() * a.length)];
     if (n.k === "smith") {
-        openShop("forge", SMITH_SAY[Math.floor(Math.random() * SMITH_SAY.length)]);
-    } else if (n.k === "depot") openShop("trade", ["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."][Math.floor(Math.random() * 3)]);
+        openShop("forge", pick(isle === 3 ? SMITH3_SAY : SMITH_SAY));
+    } else if (n.k === "depot") openShop("trade", isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
+    else if (n.k === "witch") openShop("brew", pick(WITCH_SAY));
+    else if (n.k === "ferry3") { if (!save.ferry3Talk) { save.ferry3Talk = 1; startTalk("THE FERRYMAN", FERRY3_LINES, () => openFerry3()); } else openFerry3(); }
+    else if (n.k === "well") drinkWell();
+    else if (n.k === "scope") useScope();
+    else if (n.k === "star") takeStar(n.s);
     else if (n.k === "ferry2") { if (!save.ferry2Talk) { save.ferry2Talk = 1; startTalk("THE FERRYMAN", FERRY2_LINES, () => openFerry2()); } else openFerry2(); }
     else if (n.k === "relic") collectRelic(n.r);
     else if (n.k === "vein") mineVein(n.v);
@@ -2293,19 +2374,21 @@ function faceMode(t, dist) {
 }
 const treeV = new THREE.Vector3();
 function updateTrees(dt, safe, lookX, lookZ) {
-    const cands = [];
+    const cands = [], rushers = new Set();
     for (const t of trees) {
-        if (t.gone || t.dying || t.burn) continue;
+        if (t.gone || t.dying || t.burn || t.boss) continue;
         const dx = player.pos.x - t.x, dz = player.pos.z - t.z, dist = Math.hypot(dx, dz) || 1;
         t._d = dist; t._nx = dx / dist; t._nz = dz / dist;
         t._seen = dist < 50 && (-t._nx * lookX - t._nz * lookZ) > 0.55;
+        if (t.type.rush) { if (!safe && dist < 40 && dist > t.r + 2.1 && t.atk === "idle") rushers.add(t); continue; } // thornlings come at you, looking or not
         if (!t.type.flee && !safe && !t._seen && dist < activateR() && dist > t.r + 2.1 && t.atk === "idle") cands.push(t);
     }
     cands.sort((a, b) => a._d - b._d);
     const movers = new Set(cands.slice(0, isBlood() ? 5 : 3)); // at most three (five on a blood moon) trees stalk you at once, so they never swarm
+    for (const t of rushers) movers.add(t);
 
     for (const t of trees) {
-        if (t.gone) continue;
+        if (t.gone || t.boss) continue;
         if (t.burn) {
             t.t += dt / 1.4;
             t.g.scale.setScalar(Math.max(0.01, 1 - t.t));
@@ -2372,7 +2455,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         const mode = faceMode(t, dist);
         if (mode !== t.mode) { t.mode = mode; t.face.material = faceMats[mode]; }
         t.gy = groundY(t.x, t.z);
-        t.g.position.set(t.x + (Math.random() - 0.5) * t.hurt * 0.15, t.gy - (isle === 2 ? 0.25 : 0), t.z + (Math.random() - 0.5) * t.hurt * 0.15);
+        t.g.position.set(t.x + (Math.random() - 0.5) * t.hurt * 0.15, t.gy - (isle >= 2 ? 0.25 : 0), t.z + (Math.random() - 0.5) * t.hurt * 0.15);
         t.body.rotation.z = Math.sin(time * 0.9 + t.phase) * 0.025 * swayK + (sp > 0 ? Math.sin(time * 9 + t.phase) * 0.04 : 0);
         t.body.rotation.x = t.hurt * 0.1;
         const raise = t.atk === "wind" ? 1 : (!seen && dist < 18 ? 0.55 : 0);
@@ -2387,18 +2470,18 @@ function updateTrees(dt, safe, lookX, lookZ) {
     // keep trees apart: no clumping, ever
     for (let i = 0; i < trees.length; i++) {
         const a = trees[i];
-        if (a.gone || a.dying || a.burn) continue;
+        if (a.gone || a.dying || a.burn || a.boss) continue;
         for (let j = i + 1; j < trees.length; j++) {
             const b = trees[j];
-            if (b.gone || b.dying || b.burn) continue;
+            if (b.gone || b.dying || b.burn || b.boss) continue;
             const ox = a.x - b.x, oz = a.z - b.z, d = Math.hypot(ox, oz), min = a.r + b.r + 2.2;
             if (d < min && d > 0.001) { const push = (min - d) * 0.5; a.x += ox / d * push; a.z += oz / d * push; b.x -= ox / d * push; b.z -= oz / d * push; }
         }
     }
     for (let i = trees.length - 1; i >= 0; i--) if (trees[i].gone) trees.splice(i, 1);
     let alive = 0;
-    for (const t of trees) if (!t.dying && !t.burn) alive++;
-    if (alive < treeTarget() && Math.random() < dt * (isBlood() ? 1.4 : 0.7) * (isle === 2 ? 1.6 : 1)) spawnTree();
+    for (const t of trees) if (!t.dying && !t.burn && !t.boss && !t.type.rush) alive++;
+    if (alive < treeTarget() && Math.random() < dt * (isBlood() ? 1.4 : 0.7) * (isle >= 2 ? 1.6 : 1)) spawnTree();
 }
 
 function updateWorldAnim(dt) {
@@ -2457,7 +2540,7 @@ function update(dt) {
     // movement
     const dir = new THREE.Vector3((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), 0, (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0));
     if (dir.lengthSq() > 0) dir.normalize().applyAxisAngle(UP, player.yaw);
-    const maxSp = (keys.ShiftLeft ? 8.5 : 5.5) * (1 + 0.07 * save.bootLvl), accel = player.onGround ? 14 : 4;
+    const maxSp = (keys.ShiftLeft ? 8.5 : 5.5) * (1 + 0.07 * save.bootLvl) * (buffOn("swift") ? 1.3 : 1) * devSpeed, accel = player.onGround ? 14 : 4;
     player.vel.x += (dir.x * maxSp - player.vel.x) * Math.min(1, accel * dt);
     player.vel.z += (dir.z * maxSp - player.vel.z) * Math.min(1, accel * dt);
     if (keys.Space && player.onGround && !panel) { player.vel.y = 7; player.onGround = false; }
@@ -2472,6 +2555,7 @@ function update(dt) {
     if (player.onGround) player.bob += dt * Math.hypot(player.vel.x, player.vel.z) * 1.6;
     const safe = inSafe();
     if (safe && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + 2 * dt);
+    if (buffOn("blessed") && player.hp > 0 && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + 1.5 * dt);
 
     // swing / shoot
     if (holdingGun()) updateGun(dt);
@@ -2486,7 +2570,7 @@ function update(dt) {
     camera.getWorldDirection(fwd);
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
-    updateWorldAnim(dt); updateIsle2Anim(dt);
+    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt);
     updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
@@ -2884,7 +2968,7 @@ rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3).setUsage(
 const rainLines = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xaed0ff, transparent: true, opacity: 0.4, fog: false }));
 rainLines.frustumCulled = false; rainLines.visible = false;
 scene.add(rainLines);
-const insideBuilding = () => { const x = player.pos.x, z = player.pos.z; return x > 1500 || (Math.abs(x) < 4.2 && Math.abs(z) < 3.2) || (x > -16.2 && x < -5.8 && z > -17.2 && z < -8.8); };
+const insideBuilding = () => { const x = player.pos.x, z = player.pos.z; return x > 1500 || (isle === 1 && ((Math.abs(x) < 4.2 && Math.abs(z) < 3.2) || (x > -16.2 && x < -5.8 && z > -17.2 && z < -8.8))); };
 function updateRain(dt) {
     const on = wx.rain > 0.05 && !insideBuilding();
     rainLines.visible = on;
@@ -3006,7 +3090,7 @@ function startAmbience() {
     waveGain = mk("lowpass", 700, 0.0);
     rainGain = mk("highpass", 1400, 0.0);
 }
-let birdT = 4, cricketT = 0.3, frogT = 3, gullT = 8, stepAcc = 0, stepSide = 0;
+let birdT = 4, cricketT = 0.3, frogT = 3, gullT = 8, chimeT = 3, stepAcc = 0, stepSide = 0;
 function ambienceTick(dt) {
     if (!actx) return;
     const px = player.pos.x, pz = player.pos.z, night = isNight(), outside = !insideBuilding();
@@ -3016,7 +3100,8 @@ function ambienceTick(dt) {
     if (!outside) return;
     if (!night && wx.rain < 0.3 && (birdT -= dt) <= 0) { birdT = rand(2.5, 8); const b = rand(2200, 3200); sfx(b, 0.07, "sine", 0.02, 1.5); setTimeout(() => sfx(b * 1.2, 0.06, "sine", 0.018, 1.3), 110); }
     if (night && (cricketT -= dt) <= 0) { cricketT = rand(0.1, 0.22); sfx(4300, 0.025, "sine", 0.008, 1); }
-    if (Math.hypot(px - POND.x, pz - POND.z) < 45 && (dayAmt() < 0.6) && (frogT -= dt) <= 0) { frogT = rand(2, 6); sfx(150, 0.12, "square", 0.025, 0.6); setTimeout(() => sfx(180, 0.1, "square", 0.02, 0.6), 160); }
+    if (isle === 3 && (chimeT -= dt) <= 0) { chimeT = rand(5, 13); const b = [784, 880, 988, 1175, 1319][Math.floor(Math.random() * 5)]; sfx(b, 0.9, "sine", night ? 0.018 : 0.012, 1.0); setTimeout(() => sfx(b * 1.5, 0.7, "sine", 0.01, 1.0), 180); } // Mooncap hums with little chimes
+    if (isle === 1 && Math.hypot(px - POND.x, pz - POND.z) < 45 && (dayAmt() < 0.6) && (frogT -= dt) <= 0) { frogT = rand(2, 6); sfx(150, 0.12, "square", 0.025, 0.6); setTimeout(() => sfx(180, 0.1, "square", 0.02, 0.6), 160); }
     if (near > 0.7 && !night && (gullT -= dt) <= 0) { gullT = rand(7, 16); sfx(1100, 0.3, "triangle", 0.025, 0.7); }
     if (isBlood()) { bmBeat -= dt; if (bmBeat <= 0) { bmBeat = 1.4; sfx(60, 0.18, "sine", 0.16, 0.6); setTimeout(() => sfx(52, 0.15, "sine", 0.12, 0.6), 190); } }
 }
@@ -3209,9 +3294,10 @@ function openFerry() {
     openPanel("ferry");
 }
 function renderFerry() {
+    if (isle === 3) { renderFerry3(); return; }
     if (isle === 2) { renderFerry2(); return; }
     const cost = rebirthCost(), n = (save.rebirths || 0) + 1, can = save.money >= cost;
-    const html = `<div class="fprice">Ticket #${n}: <b>${money(cost)}</b> <span>(you have ${money(save.money)})</span></div>
+    const html = `<div class="fprice">Rebirth 1 ticket: <b>${money(cost)}</b> <span>(you have ${money(save.money)})</span></div>
       <div class="flist">
         <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and logs · every axe except the Rusty one · all shop upgrades · ghost lumberjacks · fish bag · the day count. You can't come back to Pine Island.</div>
         <div class="keep"><h4>YOU KEEP</h4>your Fish Journal · stats and trophies · all your rebirths</div>
@@ -3224,10 +3310,10 @@ function renderFerry() {
     b.classList.toggle("danger", !!ferryConfirm);
 }
 $("ferryBuy").addEventListener("click", () => {
-    if (isle === 2) return;
-    if (save.money < rebirthCost()) return;
+    if (isle === 3) return;
+    if (isle === 2 ? !rebirth2Ready() : save.money < rebirthCost()) return;
     if (!ferryConfirm) { ferryConfirm = 1; renderFerry(); setTimeout(() => { ferryConfirm = 0; if (panel === "ferry") renderFerry(); }, 5000); return; }
-    doRebirth();
+    if (isle === 2) startRebirthRide(2); else doRebirth();
 });
 function doRebirth() { startRebirthRide(); }
 
@@ -3278,13 +3364,14 @@ const GUNS = [
     { name: "Pump Shotgun",       kind: "shotgun",  dmg: 8,   pel: 8, spread: 0.06,  mag: 5,   rate: 0.8,  reload: 2.2, range: 34,  auto: false, cost: 11000,  pack: 20,  packCost: 160,  pow: 26,  metal: 0x4a4a54, wood: 0x7a4a28, col: "#ffb060", muz: -0.85 },
     { name: "Chop-Chop SMG",      kind: "smg",      dmg: 8,   pel: 1, spread: 0.025, mag: 32,  rate: 0.085, reload: 1.9, range: 60, auto: true,  cost: 24000,  pack: 96,  packCost: 300,  pow: 30,  metal: 0x2e3a4a, wood: 0x2a2a30, col: "#7fd8ff", muz: -0.52 },
     { name: "Timber Rifle",       kind: "rifle",    dmg: 120, pel: 1, spread: 0.0015, mag: 5,  rate: 0.95, reload: 2.4, range: 140, auto: false, cost: 48000,  pack: 15,  packCost: 330,  pow: 38,  metal: 0x3a4a3a, wood: 0x8a5a34, col: "#6dffa0", muz: -1.0 },
-    { name: "Lumberjack Minigun", kind: "minigun",  dmg: 16,  pel: 1, spread: 0.04,  mag: 150, rate: 0.05, reload: 4.0, range: 70,  auto: true,  cost: 150000, pack: 300, packCost: 1500, pow: 100, metal: 0x6a2a2a, wood: 0x2a1a1a, col: "#ff6a5a", muz: -0.95 }
+    { name: "Lumberjack Minigun", kind: "minigun",  dmg: 16,  pel: 1, spread: 0.04,  mag: 150, rate: 0.05, reload: 4.0, range: 70,  auto: true,  cost: 150000, pack: 300, packCost: 1500, pow: 100, metal: 0x6a2a2a, wood: 0x2a1a1a, col: "#ff6a5a", muz: -0.95 },
+    { name: "Moonbeam Lance",     kind: "lance",    dmg: 260, pel: 1, spread: 0.001, mag: 6,   rate: 0.55, reload: 2.2, range: 130, auto: false, cost: 0,      pack: 18,  packCost: 0,    pow: 220, metal: 0xd8e0f8, wood: 0x3a2a6a, col: "#c8a0ff", muz: -0.9, pierce: true }
 ];
 const gunAm = i => save.gunAmmo[i] || (save.gunAmmo[i] = { mag: 0, res: 0 });
 const magSize = i => Math.round(GUNS[i].mag * (1 + 0.25 * (save.magLvl || 0)));
 const resCap = i => GUNS[i].pack * 6;
 const holdingGun = () => save.gunEq >= 0 && !!save.gunOwned[save.gunEq];
-const gunDmg = i => Math.round(GUNS[i].dmg * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.powderLvl || 0)));
+const gunDmg = i => Math.round(GUNS[i].dmg * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.powderLvl || 0)) * dmgBuff());
 const gun = new THREE.Group();
 gun.visible = false;
 viewScene.add(gun);
@@ -3312,6 +3399,12 @@ function gunParts(i, grp, hands) {
     else if (G.kind === "shotgun") { gc(0.03, 0.62, 0, 0.035, -0.5, metal); gc(0.025, 0.5, 0, -0.02, -0.46, metal); gb(0.075, 0.07, 0.22, 0, -0.04, -0.45, wd); gb(0.06, 0.12, 0.3, 0, -0.03, 0.28, wd); }
     else if (G.kind === "smg") { gc(0.022, 0.26, 0, 0.025, -0.32, metal); gb(0.05, 0.23, 0.07, 0, -0.2, -0.08, dark, 0.1); gb(0.045, 0.1, 0.22, 0, -0.02, 0.22, dark); gb(0.03, 0.03, 0.05, 0, 0.075, -0.3, dark); }
     else if (G.kind === "rifle") { gc(0.024, 0.78, 0, 0.03, -0.62, metal); gb(0.065, 0.13, 0.34, 0, -0.03, 0.3, wd); gc(0.03, 0.26, 0, 0.115, -0.08, dark); gc(0.04, 0.05, 0, 0.115, -0.22, glove); }
+    else if (G.kind === "lance") {
+        const glowL = new THREE.MeshBasicMaterial({ color: 0xc8a0ff });
+        gc(0.034, 0.7, 0, 0.03, -0.55, metal); gb(0.07, 0.12, 0.3, 0, -0.03, 0.27, wd);
+        for (let k = 0; k < 3; k++) { const o = gc(0.05, 0.035, 0, 0.03, -0.32 - k * 0.14, glowL); o.scale.setScalar(1 - k * 0.12); }
+        gc(0.045, 0.06, 0, 0.03, -0.92, glowL); gb(0.02, 0.09, 0.2, 0, 0.1, -0.15, glowL);
+    }
     else { for (let k = 0; k < 6; k++) { const a = k * 1.047; gc(0.016, 0.62, Math.cos(a) * 0.045, 0.02 + Math.sin(a) * 0.045, -0.5, metal); } gb(0.14, 0.15, 0.3, 0, 0, -0.08, metal); gc(0.1, 0.2, 0, -0.17, -0.06, dark); gb(0.05, 0.05, 0.3, 0, 0.1, -0.08, dark); }
     if (hands) gb(0.095, 0.09, 0.12, 0, -0.07, -0.34, glove);
 }
@@ -3321,11 +3414,11 @@ const tracers = [];
     for (let i = 0; i < 14; i++) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3)); const l = new THREE.Line(g, lm.clone()); l.visible = false; l.frustumCulled = false; scene.add(l); tracers.push({ l, life: 0 }); }
 }
 const camRight = new THREE.Vector3(), gdir = new THREE.Vector3();
-function addTracer(from, to) {
+function addTracer(from, to, col = 0xfff0b0, life = 0.07) {
     const t = tracers.find(q => q.life <= 0) || tracers[0];
     const a = t.l.geometry.attributes.position;
     a.setXYZ(0, from.x, from.y, from.z); a.setXYZ(1, to.x, to.y, to.z); a.needsUpdate = true;
-    t.life = 0.07; t.l.visible = true;
+    t.life = t.max = life; t.l.visible = true; t.l.material.color.setHex(col);
 }
 function equipGun(i) {
     if (!save.gunOwned[i]) return;
@@ -3349,11 +3442,11 @@ function finishReload() {
     sfx(520, 0.06, "square", 0.07, 1.4); sfx(300, 0.1, "triangle", 0.07, 0.8);
 }
 // ray vs. the trees: closest approach to the vertical trunk line
-function rayTree(o, d, range) {
+function rayTree(o, d, range, only) {
     const hl = Math.hypot(d.x, d.z);
     if (hl < 1e-5) return null;
     let best = null, bs = range;
-    for (const t of trees) {
+    for (const t of (only ? [only] : trees)) {
         if (t.gone || t.dying || t.burn) continue;
         const dx = t.x - o.x, dz = t.z - o.z;
         const s = (dx * d.x + dz * d.z) / (hl * hl);
@@ -3375,6 +3468,17 @@ function fireGun() {
     camRight.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
     const mz = V3(camera.position.x, camera.position.y - 0.25, camera.position.z).addScaledVector(camRight, 0.28).addScaledVector(gdir, 0.9);
     const dmg = gunDmg(i), hits = new Map();
+    if (G.pierce) { // the lance goes through everything in its way
+        const end = V3(camera.position.x + gdir.x * G.range, camera.position.y + gdir.y * G.range, camera.position.z + gdir.z * G.range);
+        for (const o of [0, 0.03, -0.03]) addTracer(mz.clone().addScaledVector(camRight, o), end, 0xd8b8ff, 0.16);
+        let pierced = 0;
+        for (const t of trees) { if (t.gone || t.dying || t.burn) continue; const h1 = rayTree(camera.position, gdir, G.range, t); if (h1) { hitTree(t, dmg, false); pierced++; } }
+        if (pierced > 1) floatScreen(pierced + " TREES PIERCED", "cash");
+        shake = Math.min(0.6, shake + 0.2); fovKick = Math.max(fovKick, 0.8); flash = Math.max(flash, 0.12);
+        sfx(1200, 0.35, "sawtooth", 0.1, 0.15); sfx(320, 0.4, "sine", 0.14, 0.4);
+        if (am.mag === 0 && am.res > 0) setTimeout(() => { if (holdingGun() && gunAm(save.gunEq).mag === 0) startReload(); }, 250);
+        return;
+    }
     for (let p = 0; p < G.pel; p++) {
         const d = gdir.clone();
         d.x += (Math.random() - 0.5) * 2 * G.spread; d.y += (Math.random() - 0.5) * 2 * G.spread; d.z += (Math.random() - 0.5) * 2 * G.spread;
@@ -3399,7 +3503,7 @@ function updateGun(dt) {
         const G = GUNS[save.gunEq];
         if (G.auto || !fireLatch) { fireLatch = true; fireGun(); }
     }
-    for (const t of tracers) if (t.life > 0) { t.life -= dt; t.l.material.opacity = Math.max(0, t.life / 0.07) * 0.9; if (t.life <= 0) t.l.visible = false; }
+    for (const t of tracers) if (t.life > 0) { t.life -= dt; t.l.material.opacity = Math.max(0, t.life / (t.max || 0.07)) * 0.9; if (t.life <= 0) t.l.visible = false; }
 }
 function animateGun(dt) {
     gunKick = Math.max(0, gunKick - dt * 9);
@@ -3424,13 +3528,24 @@ const MATS = {
     gunpowder: { name: "Gunpowder", col: "#ff6a6a", price: 25,  hex: 0x2a2228 },
     gold:      { name: "Gold",      col: "#ffd040", price: 60,  hex: 0xffc830 },
     crystal:   { name: "Crystal",   col: "#7affef", price: 120, hex: 0x6dffe0 },
-    magma:     { name: "Magma",     col: "#ff7a3a", price: 160, hex: 0xff5a1a }
+    magma:     { name: "Magma",     col: "#ff7a3a", price: 160, hex: 0xff5a1a },
+    // Mooncap Isle
+    spore:     { name: "Spores",    col: "#d0a8ff", price: 18,   hex: 0xb08aff },
+    silver:    { name: "Moonsilver", col: "#e4ecff", price: 30,  hex: 0xc8d4ee },
+    amber:     { name: "Amber",     col: "#ffb040", price: 55,   hex: 0xffa020 },
+    moonstone: { name: "Moonstone", col: "#9fe0ff", price: 95,   hex: 0x9fdcff },
+    void:      { name: "Voidglass", col: "#a47aff", price: 180,  hex: 0x6a3aff },
+    star:      { name: "Star Shard", col: "#fff4a0", price: 600, hex: 0xfff09a },
+    heartwood: { name: "Heartwood", col: "#ff5a8a", price: 2500, hex: 0xd02a5a }
 };
+const MATS_BY_ISLE = { 2: ["wood", "stone", "copper", "iron", "gunpowder", "gold", "crystal", "magma"], 3: ["spore", "silver", "amber", "moonstone", "void", "star", "heartwood"] };
+const isleMats = () => MATS_BY_ISLE[isle] || MATS_BY_ISLE[2];
+const GLOW_MATS = ["gold", "crystal", "magma", "moonstone", "void", "star", "heartwood"];
 const matPrice = k => Math.round(MATS[k].price * rebirthMult() * (1 + 0.15 * (save.priceLvl || 0)));
 const hasMats = r => Object.entries(r).every(([k, n]) => (save.mats[k] || 0) >= n);
 function payMats(r) { for (const [k, n] of Object.entries(r)) save.mats[k] -= n; }
 const matMeshMat = {};
-for (const [k, M] of Object.entries(MATS)) matMeshMat[k] = new THREE.MeshLambertMaterial({ color: M.hex, flatShading: true, emissive: k === "gold" || k === "crystal" || k === "magma" ? M.hex : 0x000000, emissiveIntensity: 0.35 });
+for (const [k, M] of Object.entries(MATS)) matMeshMat[k] = new THREE.MeshLambertMaterial({ color: M.hex, flatShading: true, emissive: GLOW_MATS.includes(k) ? M.hex : 0x000000, emissiveIntensity: 0.35 });
 const matGeo = new THREE.IcosahedronGeometry(0.28, 0);
 
 // what you craft at the Forge
@@ -3455,32 +3570,62 @@ const GUN_RECIPES = [
     { iron: 140, gold: 40, gunpowder: 70, magma: 14 }
 ];
 const AMMO_RECIPES = [{ copper: 2, gunpowder: 1 }, { copper: 3, gunpowder: 3 }, { copper: 5, gunpowder: 4 }, { copper: 4, gunpowder: 3 }, { copper: 16, gunpowder: 12 }];
+// the Moonforge on Mooncap Isle: the same steel, new ingredients, and three blades nobody has made before
+const AXE_RECIPES3 = [
+    null,
+    { spore: 8 },
+    { spore: 12, silver: 4 },
+    { spore: 16, silver: 8 },
+    { silver: 14, amber: 4 },
+    { silver: 20, amber: 10 },
+    { silver: 26, amber: 12, moonstone: 4 },
+    { amber: 20, moonstone: 10 },
+    { moonstone: 18, void: 4 },
+    { amber: 20, moonstone: 26, void: 10 },
+    { moonstone: 30, void: 22, star: 2 },
+    { silver: 60, void: 34, star: 5 },
+    { moonstone: 50, void: 60, star: 10 },
+    { void: 80, star: 16, heartwood: 3 }
+];
+const GUN_RECIPES3 = [
+    { spore: 10, silver: 6 },
+    { spore: 20, silver: 12, amber: 4 },
+    { silver: 26, amber: 12 },
+    { silver: 30, amber: 18, moonstone: 6 },
+    { amber: 40, moonstone: 40, void: 18 },
+    { moonstone: 30, void: 40, star: 8 }
+];
+const AMMO_RECIPES3 = [{ spore: 2, silver: 1 }, { spore: 3, silver: 3 }, { silver: 4, amber: 2 }, { silver: 3, amber: 3 }, { amber: 10, moonstone: 4 }, { moonstone: 3, void: 2 }];
+const axeRecipe = i => (isle === 3 ? AXE_RECIPES3 : AXE_RECIPES)[i];
+const gunRecipe = i => (isle === 3 ? GUN_RECIPES3 : GUN_RECIPES)[i];
+const ammoRecipe = i => (isle === 3 ? AMMO_RECIPES3 : AMMO_RECIPES)[i];
 function axeCraftItems() {
     const out = [];
     AXES.forEach((a, i) => {
-        if (i === 0) return;
-        out.push({ name: a.name, icon: "a" + i, col: a.rarity, desc: `${Math.round(a.dmg * (1 + 0.1 * (save.rebirths || 0)))} damage per swing${a.night ? " (x1.5 at night)" : ""}`, craft: AXE_RECIPES[i], owned: !!save.owned[i], axe: i, buy() { gainAxe(i); } });
+        if (i === 0 || !axeRecipe(i)) return;
+        const need = isle === 3 && i === 13 && !save.bossKills ? " · Heartwood only falls from the Elder Heart" : "";
+        out.push({ name: a.name, icon: "a" + i, col: a.rarity, desc: `${Math.round(a.dmg * (1 + 0.1 * (save.rebirths || 0)))} damage per swing${a.night ? ` (x${a.night} at night)` : ""}${need}`, craft: axeRecipe(i), owned: !!save.owned[i], axe: i, buy() { gainAxe(i); } });
     });
     return out;
 }
 function gunCraftItems() {
-    return GUNS.map((g, i) => ({ name: g.name, icon: "g" + i, col: g.col, desc: `${g.pel > 1 ? g.pel + " pellets × " : ""}${gunDmg(i)} dmg · ${g.auto ? "full auto" : "semi-auto"} · ${g.mag} rounds · ${g.range}m range. Comes with ${g.pack} rounds.`, craft: GUN_RECIPES[i], owned: !!save.gunOwned[i], gun: i, buy() { save.gunOwned[i] = 1; const am = gunAm(i); am.mag = magSize(i); am.res = g.pack; equipGun(i); } }));
+    return GUNS.map((g, i) => ({ g, i })).filter(({ i }) => gunRecipe(i)).map(({ g, i }) => ({ name: g.name, icon: "g" + i, col: g.col, desc: `${g.pel > 1 ? g.pel + " pellets × " : ""}${gunDmg(i)} dmg${g.pierce ? " · PIERCES every tree in a line" : ""} · ${g.auto ? "full auto" : "semi-auto"} · ${g.mag} rounds · ${g.range}m range. Comes with ${g.pack} rounds.`, craft: gunRecipe(i), owned: !!save.gunOwned[i], gun: i, buy() { save.gunOwned[i] = 1; const am = gunAm(i); am.mag = magSize(i); am.res = g.pack; equipGun(i); } }));
 }
 function ammoCraftItems() {
     const out = [];
     GUNS.forEach((g, i) => {
-        if (!save.gunOwned[i]) return;
+        if (!save.gunOwned[i] || !ammoRecipe(i)) return;
         const am = gunAm(i);
-        out.push({ name: g.name + " ammo", icon: "g" + i, col: g.col, desc: `+${g.pack} rounds · you have ${am.mag} + ${am.res} (max ${resCap(i)} spare)`, craft: AMMO_RECIPES[i], maxed: am.res >= resCap(i), buy() { am.res = Math.min(resCap(i), am.res + g.pack); if (holdingGun() && save.gunEq === i && am.mag === 0) startReload(); } });
+        out.push({ name: g.name + " ammo", icon: "g" + i, col: g.col, desc: `+${g.pack} rounds · you have ${am.mag} + ${am.res} (max ${resCap(i)} spare)`, craft: ammoRecipe(i), maxed: am.res >= resCap(i), buy() { am.res = Math.min(resCap(i), am.res + g.pack); if (holdingGun() && save.gunEq === i && am.mag === 0) startReload(); } });
     });
-    if (!out.length) out.push({ name: "No guns yet", desc: "Craft a gun first. Then bring Copper and Gunpowder here to make bullets.", sell: true, value: 0, buy() {} });
+    if (!out.length) out.push({ name: "No guns yet", desc: isle === 3 ? "Craft a gun first. Then bring Spores, Moonsilver and Amber here to make rounds." : "Craft a gun first. Then bring Copper and Gunpowder here to make bullets.", sell: true, value: 0, buy() {} });
     return out;
 }
 function tradeItems() {
-    const out = [], ks = Object.keys(MATS).filter(k => (save.mats[k] || 0) > 0);
+    const out = [], ks = isleMats().filter(k => (save.mats[k] || 0) > 0);
     const total = ks.reduce((a, k) => a + save.mats[k] * matPrice(k), 0);
     out.push({ name: "Sell everything", desc: ks.length ? "Every material you're carrying. Careful: you need them to craft!" : "You have nothing to sell. Go chop some trees.", sell: true, value: total, buy() { for (const k of ks) sellMat(k, save.mats[k], true); if (total) { toast(`Sold everything for +${money(total)}`, "cash"); writeSave(); } } });
-    for (const k of Object.keys(MATS)) {
+    for (const k of isleMats()) {
         const n = save.mats[k] || 0;
         out.push({ name: `${MATS[k].name} ×${n}`, icon: "m:" + k, col: MATS[k].col, desc: `$${matPrice(k)} each · click sells ALL`, sell: true, value: n * matPrice(k), buy() { if (n) { sellMat(k, n); writeSave(); } } });
     }
@@ -3524,12 +3669,19 @@ function propModel(key) {
     else if (key === "lantern") { add(BOX, icM(0x2a2a30), 0, 0.45, 0, 0.5, 0.1, 0.5); add(BOX, icM(0x2a2a30), 0, -0.35, 0, 0.55, 0.12, 0.55); add(BOX, icM(0xffb040, 0xff9020), 0, 0.05, 0, 0.36, 0.7, 0.36); add(new THREE.TorusGeometry(0.18, 0.03, 4, 10), icM(0x2a2a30), 0, 0.62, 0); g.rotation.y = 0.6; }
     else if (key === "cash") { for (let k = 0; k < 4; k++) add(BOX, icM(k % 2 ? 0x3aa05a : 0x4ab86a), (k % 2) * 0.06, k * 0.12, 0, 1, 0.1, 0.55); add(BOX, icM(0xe8d870), 0.03, 0.2, 0, 0.12, 0.42, 0.57); g.rotation.set(0.5, 0.6, 0); }
     else if (key === "fish") { add(ICO, icM(0x5a9ad0), 0, 0, 0, 0.32, 0.22, 0.75); add(CONE6, icM(0x4a80b0), 0, 0, -0.85, 0.25, 0.4, 0.06, -Math.PI / 2); g.rotation.set(0.2, 1.2, 0); }
+    else if (key === "phoenix") { add(ICO, icM(0xff8a2a, 0xff5a10), 0, -0.1, 0, 0.42, 0.46, 0.42); add(CONE6, icM(0xffb040, 0xff7a10), 0, 0.42, 0, 0.3, 0.6, 0.3); add(ICO, icM(0xfff0a0, 0xffd040), 0.12, 0.0, 0.3, 0.12); g.rotation.set(0.2, 0.4, 0.15); }
     else if (key.startsWith("m:")) {
-        const k = key.slice(2), m = icM(MATS[k].hex, k === "gold" || k === "crystal" || k === "magma" ? MATS[k].hex : 0);
+        const k = key.slice(2), m = icM(MATS[k].hex, GLOW_MATS.includes(k) ? MATS[k].hex : 0);
         if (m.emissive) m.emissiveIntensity = 0.3;
-        if (k === "wood") { add(CYL8, icM(0x8a5a34), 0, 0, 0, 0.32, 1.2, 0.32, Math.PI / 2, 0.4, 0); add(CYL8, icM(0xe0b070), Math.sin(0.4) * 0.61, 0, Math.cos(0.4) * 0.61, 0.28, 0.02, 0.28, Math.PI / 2, 0.4, 0); }
+        if (k === "spore") { for (const [x, z, s] of [[0, 0, 1], [0.42, 0.2, 0.7], [-0.36, 0.25, 0.6]]) { add(CYL8, icM(0xeee4d0), x, -0.3 + s * 0.28, z, 0.11 * s, 0.6 * s, 0.11 * s); const cp = new THREE.SphereGeometry(0.36 * s, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2); add(cp, m, x, -0.3 + s * 0.58, z, 1, 0.6, 1); } g.rotation.set(0.35, 0.4, 0); }
+        else if (k === "amber") { add(ICO, icM(0xffa020, 0xc06000), 0, 0, 0, 0.55, 0.48, 0.45, 0.3, 0.6); add(BOX, icM(0x3a1a08), 0.05, 0.02, 0.36, 0.14, 0.06, 0.04, 0, 0, 0.4); }
+        else if (k === "moonstone") { add(new THREE.IcosahedronGeometry(1, 1), m, 0, 0, 0, 0.5, 0.42, 0.5); add(new THREE.TorusGeometry(0.42, 0.05, 4, 16, Math.PI), icM(0xffffff, 0xcfe8ff), 0, 0, 0.3, 1, 1, 1, 0, 0, 0.5); }
+        else if (k === "void") { add(CONE6, m, 0, 0.15, 0, 0.32, 1.25, 0.32); add(CONE6, icM(0x2a1050, 0x3a10a0), 0.3, -0.05, 0.1, 0.2, 0.75, 0.2, 0, 0, -0.55); add(CONE6, m, -0.3, -0.1, 0, 0.18, 0.62, 0.18, 0, 0, 0.55); }
+        else if (k === "star") { const s = new THREE.Shape(); for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 + Math.PI / 2, rr = i % 2 ? 0.26 : 0.62; i ? s.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : s.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); } s.closePath(); const sg = new THREE.ExtrudeGeometry(s, { depth: 0.16, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 1 }); sg.translate(0, 0, -0.08); add(sg, icM(0xfff09a, 0xffd040)); g.rotation.set(0.15, 0.5, 0.1); }
+        else if (k === "heartwood") { add(CYL8, icM(0x5a2a1a), 0, 0, 0, 0.5, 0.8, 0.5, Math.PI / 2, 0.4, 0); add(CYL8, icM(0xff4a7a, 0xd01a4a), Math.sin(0.4) * 0.41, 0, Math.cos(0.4) * 0.41, 0.3, 0.02, 0.3, Math.PI / 2, 0.4, 0); add(CYL8, icM(0xc89a6a), Math.sin(0.4) * 0.405, 0, Math.cos(0.4) * 0.405, 0.46, 0.01, 0.46, Math.PI / 2, 0.4, 0); }
+        else if (k === "wood") { add(CYL8, icM(0x8a5a34), 0, 0, 0, 0.32, 1.2, 0.32, Math.PI / 2, 0.4, 0); add(CYL8, icM(0xe0b070), Math.sin(0.4) * 0.61, 0, Math.cos(0.4) * 0.61, 0.28, 0.02, 0.28, Math.PI / 2, 0.4, 0); }
         else if (k === "stone") { add(ICO, m, 0, 0, 0, 0.55, 0.42, 0.5, 0.3, 0.4); add(ICO, icM(0x6a6a74), 0.45, -0.15, 0.2, 0.3, 0.25, 0.3); }
-        else if (k === "copper" || k === "iron" || k === "gold") { const tg = new THREE.CylinderGeometry(0.42, 0.62, 0.3, 4); tg.rotateY(Math.PI / 4); add(tg, m, 0, 0, 0, 1, 1, 0.55); add(tg, m, 0.12, 0.32, 0.02, 0.9, 1, 0.5); g.rotation.set(0.35, 0.5, 0); }
+        else if (k === "copper" || k === "iron" || k === "gold" || k === "silver") { const tg = new THREE.CylinderGeometry(0.42, 0.62, 0.3, 4); tg.rotateY(Math.PI / 4); add(tg, m, 0, 0, 0, 1, 1, 0.55); add(tg, m, 0.12, 0.32, 0.02, 0.9, 1, 0.5); g.rotation.set(0.35, 0.5, 0); }
         else if (k === "gunpowder") { add(CONE6, m, 0, 0, 0, 0.7, 0.55, 0.7); for (let s = 0; s < 6; s++) add(BOX, icM(0xff4a3a, 0xff2a1a), Math.cos(s) * 0.3, -0.05 + (s % 3) * 0.08, Math.sin(s) * 0.3, 0.06); add(CYL8, icM(0x6a4a2a), -0.5, -0.1, 0.3, 0.25, 0.5, 0.25); }
         else if (k === "crystal") { add(CONE6, m, 0, 0.2, 0, 0.3, 1.2, 0.3); add(CONE6, m, 0.3, 0, 0.1, 0.18, 0.7, 0.18, 0, 0, -0.5); add(CONE6, m, -0.28, -0.05, 0, 0.16, 0.6, 0.16, 0, 0, 0.5); }
         else { add(ICO, m, 0, 0, 0, 0.55); add(ICO, icM(0x3a1a10), 0.3, 0.25, 0.3, 0.25); }
@@ -3589,7 +3741,9 @@ const LM2 = [
 ];
 function curLM() { return isle === 2 ? LM2 : LANDMARKS; }
 let isle2Built = false, altar2 = null, ferry2 = null, ferryman2 = null, ferryBoat2 = null, smithMesh = null, clerkMesh = null, mapBg2 = null;
-const treeTarget = () => (isle === 2 ? (isBlood() ? 125 : 90) : (isBlood() ? 82 : 60));
+const isle2G = new THREE.Group(); // everything on the Highland Isle (and its cave and mine), so another island can hide it
+scene.add(isle2G);
+const treeTarget = () => (isle >= 2 ? (isBlood() ? 125 : 90) : (isBlood() ? 82 : 60));
 
 function npcFaceTex(kind) {
     const cv = document.createElement("canvas");
@@ -3603,6 +3757,15 @@ function npcFaceTex(kind) {
         g.fillStyle = "#5a2a12"; g.fillRect(30, 82, 68, 12); g.fillRect(22, 92, 84, 48); // bushy beard + moustache
         g.fillStyle = "#7a3a1a"; for (let i = 0; i < 14; i++) g.fillRect(24 + (i * 6) % 80, 96 + (i * 7) % 40, 4, 8);
         g.fillStyle = "#2a0a04"; g.fillRect(50, 98, 28, 6);
+    } else if (kind === "witch") {
+        g.fillStyle = "rgba(90,40,110,.35)"; g.fillRect(14, 74, 18, 10); g.fillRect(96, 74, 18, 10); // purple cheeks
+        const weye = (x, y) => { g.fillStyle = "#fff6d0"; g.fillRect(x - 10, y - 7, 20, 14); g.fillStyle = "#b040ff"; g.fillRect(x - 5, y - 6, 10, 12); g.fillStyle = "#000"; g.fillRect(x - 2, y - 4, 4, 8); };
+        weye(40, 54); weye(88, 54);
+        g.fillStyle = "#2a1030"; g.save(); g.translate(40, 40); g.rotate(-0.25); g.fillRect(-14, -3, 28, 6); g.restore(); g.save(); g.translate(88, 40); g.rotate(0.25); g.fillRect(-14, -3, 28, 6); g.restore();
+        g.fillStyle = "#4a7a3a"; g.beginPath(); g.moveTo(60, 58); g.lineTo(72, 58); g.lineTo(66, 86); g.closePath(); g.fill(); // long nose
+        g.fillStyle = "#3a5a2a"; g.fillRect(70, 76, 6, 6); // wart
+        g.fillStyle = "#1a0a14"; g.beginPath(); g.moveTo(40, 98); g.quadraticCurveTo(64, 118, 90, 96); g.lineTo(88, 102); g.quadraticCurveTo(64, 124, 42, 104); g.fill(); // crooked grin
+        g.fillStyle = "#f4ecd0"; g.fillRect(56, 103, 7, 8); // one tooth
     } else {
         g.fillStyle = "rgba(255,120,120,.35)"; g.fillRect(16, 70, 20, 12); g.fillRect(92, 70, 20, 12); // rosy cheeks
         eye(40, 58, 1); eye(88, 58, 1);
@@ -3641,11 +3804,12 @@ function makeHumanoid(o) {
     if (o.hair) { box(head, lamb(o.hair), 0, 0.22, -0.02, 0.47, 0.1, 0.46); box(head, lamb(o.hair), 0, 0.04, -0.2, 0.47, 0.4, 0.08); for (const sd of [-1, 1]) box(head, lamb(o.hair), sd * 0.225, 0.1, -0.05, 0.04, 0.22, 0.3); }
     if (o.beard) { box(head, lamb(o.beard), 0, -0.24, 0.12, 0.44, 0.18, 0.2); box(head, lamb(o.beard), 0, -0.38, 0.15, 0.32, 0.16, 0.14); }
     if (o.hat === "cap") { part(head, CYL8, lamb(o.hatCol), 0, 0.28, 0, 0.25, 0.14, 0.25); box(head, lamb(o.hatCol), 0, 0.22, 0.28, 0.42, 0.03, 0.22); }
+    if (o.hat === "witch") { const hc = lamb(o.hatCol); part(head, CYL8, hc, 0, 0.27, 0, 0.62, 0.04, 0.62); const cn = part(head, CONE6, hc, 0, 0.62, -0.04, 0.27, 0.72, 0.27); cn.rotation.x = -0.22; part(head, CYL8, new THREE.MeshBasicMaterial({ color: 0xb06aff }), 0, 0.33, 0, 0.29, 0.07, 0.29); }
     if (o.hat === "mask") { const m = box(head, lamb(0x2a2a32), 0, 0.3, 0.06, 0.48, 0.26, 0.08); m.rotation.x = -1.1; const v = box(head, new THREE.MeshBasicMaterial({ color: 0x3a8ac0 }), 0, 0.34, 0.12, 0.3, 0.06, 0.02); v.rotation.x = -1.1; box(head, lamb(0x2a2a32), 0, 0.2, 0, 0.47, 0.06, 0.45); }
     return { g, head, torso, armL: arms[0], armR: arms[1], kind: o.face, ph: Math.random() * 6, swing: 0, cyc: 0 };
 }
-function updateNpcs(dt) {
-    for (const p of npcs) {
+function updateNpcs(dt, list = npcs) {
+    for (const p of list) {
         p.g.getWorldPosition(p.wp || (p.wp = new THREE.Vector3()));
         const dx = player.pos.x - p.wp.x, dz = player.pos.z - p.wp.z, d = Math.hypot(dx, dz);
         const want = d < 14 ? clamp(angDiff(Math.atan2(dx, dz), p.yaw), -1.0, 1.0) : 0;
@@ -3659,6 +3823,10 @@ function updateNpcs(dt) {
             p.armL.rotation.x = -0.4 + Math.sin(time * 1.5) * 0.05;
             if (u >= 0.65 && !prevHit) { p.hitDone = true; p.hammer.getWorldPosition(npcV); if (d < 18 && state === "playing") { sfx(1400 + Math.random() * 200, 0.07, "square", 0.04 * (1 - d / 18), 0.5); sfx(520, 0.15, "triangle", 0.04 * (1 - d / 18), 0.7); } burst(npcV, 5, 3, [sparkMat, sparkMat2]); }
             if (u < 0.6) p.hitDone = false;
+        } else if (p.kind === "witch") { // stirs the cauldron in slow circles, and waves you over when you're close
+            p.armL.rotation.x = -1.0 + Math.sin(time * 2.2) * 0.25; p.armL.rotation.z = -0.25 + Math.cos(time * 2.2) * 0.25;
+            if (d < 7) p.armR.rotation.z = lerp(p.armR.rotation.z, 2.5 + Math.sin(time * 8) * 0.3, Math.min(1, 6 * dt));
+            else { p.armR.rotation.z = lerp(p.armR.rotation.z, 0.1, Math.min(1, 4 * dt)); p.armR.rotation.x = -0.3 + Math.sin(time * 1.1 + p.ph) * 0.1; }
         } else {
             if (d < 9) { p.armR.rotation.z = lerp(p.armR.rotation.z, 2.6 + Math.sin(time * 9) * 0.35, Math.min(1, 6 * dt)); p.armR.rotation.x = lerp(p.armR.rotation.x, 0, Math.min(1, 6 * dt)); }
             else { p.armR.rotation.z = lerp(p.armR.rotation.z, 0.08, Math.min(1, 4 * dt)); p.armR.rotation.x = -0.35 + Math.sin(time * 1.1 + p.ph) * 0.1; }
@@ -3671,7 +3839,7 @@ const npcV = new THREE.Vector3(), sparkMat = new THREE.MeshBasicMaterial({ color
 function buildIsle2() {
     isle2Built = true;
     curBuild = 2;
-    const prevAdd = addTgt; addTgt = null;
+    const prevAdd = addTgt; addTgt = isle2G;
     colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
     const gy = terrain2;
 
@@ -3805,9 +3973,9 @@ function buildIsle2() {
     // sign: ferry this way
     {
         const sp = batch(woodDark); sp.add(CYL6, 4, 1.2, 16, 0, 0, 0, 0.09, 2.4, 0.09); sp.add(CYL6, 3, 1.2, -18, 0, 0, 0, 0.09, 2.4, 0.09); sp.build();
-        const nb = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH FERRY", "THIS WAY ↑", "#c8a0ff") })); nb.position.set(3, 2.6, -18); scene.add(nb);
+        const nb = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 2 FERRY", "THIS WAY ↑", "#c8a0ff") })); nb.position.set(3, 2.6, -18); scene.add(nb);
         const nbk = nb.clone(); nbk.rotation.y = Math.PI; scene.add(nbk);
-        const board = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH FERRY", "↑ NORTH SHORE", "#c8a0ff") })); board.position.set(4, 2.6, 16); scene.add(board);
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 2 FERRY", "↑ NORTH SHORE", "#c8a0ff") })); board.position.set(4, 2.6, 16); scene.add(board);
         const bk = board.clone(); bk.rotation.y = Math.PI; scene.add(bk);
     }
 
@@ -3822,7 +3990,7 @@ function buildIsle2() {
         for (let i = 0; i < D2LEN; i++) for (const s of [-1.9, 1.9]) { const p = dock2Pt(i + 0.5, s, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
         posts.build(); rails.build(); bulbs.build();
         for (const s of [-2.0, 2.0]) { const p = dock2Pt(3.5, s); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
-        const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 2", "COMING SOON", "#c8a0ff") }));
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 2", "MOONCAP ISLE", "#c8a0ff") }));
         board.position.copy(dock2Pt(3.5, 0, 3.3)); board.rotation.y = yaw; scene.add(board);
         const board2 = board.clone(); board2.rotation.y = yaw + Math.PI; scene.add(board2);
         const fl = label("THE FERRY", "#c8a0ff", 3.2, 0.7); fl.position.copy(dock2Pt(3.5, 0, 4.6)); fl.maxD = 70;
@@ -3880,11 +4048,19 @@ function buildIsle2() {
         ob.add(oh, obw, otr, ocb, oms, olp);
         isle2.arrBoat = ob;
         // far beacon: the next rebirth
-        const FI = dock2Pt(D2LEN + 90, 0, 0);
+        const FI = dock2Pt(D2LEN + 230, 0, 0);
         const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 200, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xc8a0ff, transparent: true, opacity: 0.18, fog: false, depthWrite: false, side: THREE.DoubleSide }));
         beam.position.set(FI.x, 100, FI.z); scene.add(beam); isle2.beam = beam;
-        const bl = label("REBIRTH 2", "#c8a0ff", 5.2, 1.2); bl.position.set(FI.x, 30, FI.z); bl.maxD = 420; bl.blurK = 0.25;
-        const bl2 = label("COMING SOON", "#ffffff", 4.2, 1.0); bl2.position.set(FI.x, 25, FI.z); bl2.maxD = 420; bl2.blurK = 0.25;
+        const bl = label("MOONCAP ISLE", "#c8a0ff", 5.2, 1.2); bl.position.set(FI.x, 58, FI.z); bl.maxD = 420; bl.blurK = 0.25;
+        const bl2 = label("REBIRTH 2", "#ffffff", 4.2, 1.0); bl2.position.set(FI.x, 50, FI.z); bl2.maxD = 420; bl2.blurK = 0.25;
+        // Mooncap Isle on the horizon: a low violet island under giant glowing mushrooms
+        const farM = c => new THREE.MeshBasicMaterial({ color: c, fog: false });
+        const fbase = new THREE.Mesh(new THREE.CylinderGeometry(60, 72, 5, 14), farM(0x2a2048)); fbase.position.set(FI.x, -2.2, FI.z); scene.add(fbase);
+        for (const [ox, oz, h, cr, col] of [[0, 0, 26, 17, 0x9a6aff], [-30, 14, 16, 11, 0x6a8aff], [26, 10, 19, 12, 0xc87aff], [12, -24, 12, 8, 0x7affe0], [-18, -20, 10, 7, 0xff8ad8]]) {
+            const p = D2PERP.clone().multiplyScalar(ox).addScaledVector(D2DIR, oz);
+            const st = new THREE.Mesh(new THREE.CylinderGeometry(cr * 0.16, cr * 0.22, h, 8), farM(0x5a4a7a)); st.position.set(FI.x + p.x, h / 2, FI.z + p.z); scene.add(st);
+            const cp = new THREE.Mesh(new THREE.SphereGeometry(cr, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), farM(col)); cp.scale.y = 0.5; cp.position.set(FI.x + p.x, h, FI.z + p.z); scene.add(cp);
+        }
     }
 
     // ----- landmarks -----
@@ -4031,28 +4207,20 @@ function groundY2(x, z) {
     return Math.max(-0.4, terrain2(x, z));
 }
 function enterIsle2() {
-    if (!isle2Built) buildIsle2();
-    if (!caveBuilt) buildRelics();
-    if (!mineBuilt) buildMine();
+    leaveWorld();
+    if (!isle2Built) { buildIsle2(); buildRelics(); buildMine(); snapWorld(2); } else loadWorld(2);
     isle = 2; save.isle = 2;
-    isle1.visible = false;
+    showWorld(2);
     groundFn = groundY2;
     waterMesh.geometry = isle2.waterGeo; waterMesh.material.needsUpdate = true;
-    for (const p of smokePuffs) if (p.m.parent === isle1) { isle1.remove(p.m); scene.add(p.m); }
     smokeEmit.length = 0; isle2.emit.forEach(e => smokeEmit.push(e));
     RESPAWN.x = 3; RESPAWN.z = 4;
-    for (const t of trees) { scene.remove(t.g); t.gone = true; if (t.bar) { t.bar.remove(); t.bar = null; } }
-    trees.length = 0;
-    for (const l of logs) scene.remove(l.m);
-    logs.length = 0;
-    for (const q of sending) scene.remove(q.m);
-    sending.length = 0; sendVals.length = 0;
     save.ghosts = 0; syncGhosts();
-    for (let i = 0; i < 90; i++) spawnTree(false);
+    resetIsleTrees(90);
     resetChests();
 }
 function updateIsle2Anim(dt) {
-    if (!isle2Built) return;
+    if (!isle2Built || isle !== 2) return;
     updateRelics(dt); updateMine(dt);
     if (isle2.foam) { isle2.foam.scale.setScalar(1 + Math.sin(time * 0.8) * 0.004); isle2.foam.material.opacity = 0.38 + Math.sin(time * 0.8) * 0.14; }
     if (isle2.beam) isle2.beam.material.opacity = 0.14 + Math.sin(time * 1.5) * 0.05;
@@ -4074,9 +4242,9 @@ const FERRY2_LINES = [
     "There is another light out there, past the horizon. A third life. But I won't sail there for cash alone.",
     "Bring me the Hypergamous Relic. It shattered into six pieces, and every one of them is somewhere on this island.",
     "One sleeps at the bottom of a cave nobody is supposed to find. Look for a dark mouth in the eastern hills.",
-    "Six pieces and $2,500,000. Then we talk. Rebirth 2 is coming soon."
+    "Six pieces and $2,500,000. Then I'll take you to Mooncap Isle, where the trees glow and the sky has two moons."
 ];
-const FERRY2_QUIPS = ["Six pieces. No fewer.", "The cave is in the east. Bring a lantern.", "Not yet, woodcutter. Not yet.", "The next ferry is still being cut and nailed.", "I can see it out there, in the dark. It's coming.", "Chop. Save. Wait. That's the whole job."];
+const FERRY2_QUIPS = ["Six pieces. No fewer.", "The cave is in the east. Bring a lantern.", "Not yet, woodcutter. Not yet.", "Mooncap Isle is waiting. So is what sleeps there.", "See that violet light? Two moons rise over it.", "Chop. Save. Sail. That's the whole job."];
 const SMITH_SAY = ["Bring me the trees' insides and I'll make you something that hurts.", "Iron from Ironbark, powder from Powderwood. Copper makes bullets.", "Nothing here is for sale. Everything here is earned.", "Hammer's hot. What are we making?", "Gold makes it pretty. Magma makes it scary."];
 const costOf = (base, g, n) => Math.floor(base * Math.pow(g, n));
 const vestCost = () => costOf(6000, 2.2, save.vestLvl || 0), magCost = () => costOf(4000, 2.4, save.magLvl || 0), whetCost = () => costOf(5000, 2, save.whetLvl || 0);
@@ -4092,9 +4260,10 @@ function gunItems() {
     return out;
 }
 function gearItems2() {
+    const k3 = isle === 3 ? 6 : 1; // Mooncap pays more, so it charges more
     return [
-        { name: "Bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
-        { name: "Better Log Price", desc: `Each log sells for $${logValue()} → $${logValue() + 5}`, cost: priceCost(), buy() { save.priceLvl++; } },
+        { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
+        { name: "Better Prices", desc: `Materials sell for +15% more each level (now +${15 * (save.priceLvl || 0)}%)`, cost: priceCost(), buy() { save.priceLvl++; } },
         { name: "Vitality", desc: `+20 max health (${save.hpLvl}/5)`, cost: hpCost(), maxed: save.hpLvl >= 5, buy() { save.hpLvl++; player.maxHp = maxHpNow(); player.hp = player.maxHp; } },
         { name: "Swift Boots", desc: `+7% move speed (${save.bootLvl}/4)`, cost: bootCost(), maxed: save.bootLvl >= 4, buy() { save.bootLvl++; } },
         { name: "Lantern Oil", desc: `A brighter, longer-reaching lantern (${save.oilLvl}/3)`, cost: oilCost(), maxed: save.oilLvl >= 3, buy() { save.oilLvl++; } },
@@ -4103,7 +4272,7 @@ function gearItems2() {
         { name: "Whetstone", desc: `+10% axe damage (${save.whetLvl || 0}/5)`, cost: whetCost(), maxed: (save.whetLvl || 0) >= 5, buy() { save.whetLvl = (save.whetLvl || 0) + 1; } },
         { name: "Gunpowder Mix", desc: `+10% gun damage (${save.powderLvl || 0}/5)`, cost: powderCost(), maxed: (save.powderLvl || 0) >= 5, buy() { save.powderLvl = (save.powderLvl || 0) + 1; } },
         { name: "Log Magnet", desc: `Logs fly to you from further away (${save.magnetLvl || 0}/3)`, cost: magnetCost(), maxed: (save.magnetLvl || 0) >= 3, buy() { save.magnetLvl = (save.magnetLvl || 0) + 1; } }
-    ];
+    ].map(it => { it.cost *= k3; return it; });
 }
 function sellAtDepot() {
     if (save.logs <= 0) { toast("You're not carrying any logs.", "bad"); return; }
@@ -4167,7 +4336,7 @@ function drawMap2() {
         g.strokeStyle = lm.col; g.lineWidth = 1.5; g.beginPath(); g.arc(X(lm.x), Z(lm.z), lm.r * sc * 0.7, 0, 7); g.stroke();
         g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4); g.fillStyle = lm.col; g.fillText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4);
     }
-    { const de = dock2Pt(D2LEN); g.strokeStyle = "#c8a0ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D2B.x), Z(D2B.z)); g.lineTo(X(de.x), Z(de.z)); g.stroke(); g.fillStyle = "#c8a0ff"; g.font = "bold 12px Consolas"; g.fillText("REBIRTH FERRY", X(de.x), Z(de.z) + 16); }
+    { const de = dock2Pt(D2LEN); g.strokeStyle = "#c8a0ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D2B.x), Z(D2B.z)); g.lineTo(X(de.x), Z(de.z)); g.stroke(); g.fillStyle = "#c8a0ff"; g.font = "bold 12px Consolas"; g.fillText("REBIRTH 2 FERRY", X(de.x), Z(de.z) + 16); }
     { const ae = arrPt(ARRLEN); g.strokeStyle = "#ffe080"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(ARRB.x), Z(ARRB.z)); g.lineTo(X(ae.x), Z(ae.z)); g.stroke(); g.fillStyle = "#ffe080"; g.font = "bold 12px Consolas"; g.fillText("ARRIVALS", X(ae.x), Z(ae.z) - 8); }
     for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); g.strokeStyle = "#000"; g.lineWidth = 1; g.strokeRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
     for (const t of trees) {
@@ -4190,59 +4359,68 @@ function drawMap2() {
 let ride = null;
 const BOAT_A = DOCK_LEN - 7, BOAT_S = 4.4, RIDE_T = 17;
 const DECK = V3(0.55, 2.55, 3.0), deckV = new THREE.Vector3(); // where you stand on the ferry (boat-local): beside the bow, clear of the cabin and mast
-const deckEye = () => { ferryBoat.updateMatrixWorld(); return deckV.copy(DECK).applyMatrix4(ferryBoat.matrixWorld); };
+const deckEye = (boat = ferryBoat) => { boat.updateMatrixWorld(); return deckV.copy(DECK).applyMatrix4(boat.matrixWorld); };
 function say(t) { const e = $("rideCap"); e.textContent = t; e.classList.toggle("show", !!t); }
-function startRebirthRide() {
-    if (ride || save.money < rebirthCost()) return;
+// which ferry you're riding: Pine Island's (to the Highland Isle) or the Highland Isle's (to Mooncap Isle)
+const rideCfg = n => (n === 2
+    ? { boat: ferryBoat2, man: ferryman2, pt: dock2Pt, DIR: D2DIR, A: D2LEN - 7, S: 4.4, lines: ["The violet light grows closer...", "Two moons rise over the water."], finish: finishRebirth2 }
+    : { boat: ferryBoat, man: ferryman, pt: dockPt, DIR: FDIR, A: BOAT_A, S: BOAT_S, lines: ["The golden light grows closer...", "A new life awaits."], finish: finishRebirth });
+function startRebirthRide(from = 1) {
+    if (ride || (from === 2 ? !rebirth2Ready() : save.money < rebirthCost())) return;
     closePanel();
-    ride = { phase: "walk", t: 0, from: player.pos.clone(), fx: false, done: false };
+    ride = { phase: "walk", t: 0, from: player.pos.clone(), fx: false, done: false, cfg: rideCfg(from) };
     mouseDown = false; endFishing();
     player.invuln = 99999; player.vel.set(0, 0, 0);
-    const fl = labelList.find(l => l.el.textContent === "FERRYMAN"); if (fl) fl.visible = false;
-    $("rbSmall").textContent = "REBIRTH #" + ((save.rebirths || 0) + 1);
-    say("All aboard.");
+    const fl = labelList.find(l => l.el.textContent === "FERRYMAN" && l.isle === isle); if (fl) fl.visible = false;
+    $("rbSmall").textContent = from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
+    $("rebirthFx").classList.toggle("violet", from === 2);
+    say(from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
     sfx(200, 0.9, "sine", 0.1, 2);
     writeSave();
 }
 const eio = u => u * u * (3 - 2 * u);
 function updateRide(dt) {
-    const r = ride;
+    const r = ride, C = r.cfg;
     r.t += dt;
     player.vel.set(0, 0, 0); player.invuln = 99999; mouseDown = false;
     const lookAt = (tx, tz) => { player.yaw += angDiff(Math.atan2(-(tx - player.pos.x), -(tz - player.pos.z)), player.yaw) * Math.min(1, 5 * dt); player.pitch += (0 - player.pitch) * Math.min(1, 3 * dt); };
     if (r.phase === "walk") {
-        const A = dockPt(BOAT_A + DECK.z, 1.3), B = deckEye().clone(), t1 = 2.6, t2 = 1.4, by = B.y;
+        const A = C.pt(C.A + DECK.z, 1.3), B = deckEye(C.boat).clone(), t1 = 2.6, t2 = 1.4, by = B.y;
         if (r.t < t1) { const u = eio(r.t / t1); player.pos.set(lerp(r.from.x, A.x, u), 1.75, lerp(r.from.z, A.z, u)); lookAt(B.x, B.z); player.bob += dt * 6; }
         else if (r.t < t1 + t2) { const u = (r.t - t1) / t2; player.pos.set(lerp(A.x, B.x, u), lerp(1.75, by, eio(u)) + Math.sin(u * Math.PI) * 0.55, lerp(A.z, B.z, u)); lookAt(B.x, B.z); if (!r.hop && u > 0.8) { r.hop = true; sfx(140, 0.2, "square", 0.12, 0.4); } }
         else {
             r.phase = "sail"; r.t = 0; sfx(110, 0.5, "sawtooth", 0.1, 0.5);
-            ferryBoat.add(ferryman); ferryman.position.set(0.35, 0.8, -3.0); ferryman.rotation.y = 0;
-            player.yaw = Math.atan2(-FDIR.x, -FDIR.z); player.pitch = 0.04;
+            C.boat.add(C.man); C.man.position.set(0.35, 0.8, -3.0); C.man.rotation.y = 0;
+            player.yaw = Math.atan2(-C.DIR.x, -C.DIR.z); player.pitch = 0.04;
             say("The ferry pulls away...");
         }
     } else {
-        const u = clamp(r.t / RIDE_T, 0, 1), s = BOAT_A + 125 * u * u, p = dockPt(s, BOAT_S);
-        ferryBoat.position.x = p.x; ferryBoat.position.z = p.z;
-        player.pos.copy(deckEye());
+        const u = clamp(r.t / RIDE_T, 0, 1), s = C.A + 125 * u * u, p = C.pt(s, C.S);
+        C.boat.position.x = p.x; C.boat.position.z = p.z;
+        player.pos.copy(deckEye(C.boat));
         player.bob += dt * 0.6;
-        if (r.t > 6 && !r.c2) { r.c2 = true; say("The golden light grows closer..."); }
-        if (r.t > 11 && !r.c3) { r.c3 = true; say("A new life awaits."); }
+        if (r.t > 6 && !r.c2) { r.c2 = true; say(C.lines[0]); }
+        if (r.t > 11 && !r.c3) { r.c3 = true; say(C.lines[1]); }
         if (r.t > 12.8 && !r.fx) { r.fx = true; $("rebirthFx").classList.add("show"); sfx(200, 1.6, "sine", 0.1, 3); setTimeout(() => sfx(400, 1.6, "sine", 0.08, 2.5), 500); }
         if (r.t > 0.5 && r.t < 12 && Math.random() < dt * 0.9) sfx(90 + Math.random() * 40, 0.5, "sine", 0.03, 0.8);
-        if (r.t >= RIDE_T && !r.done) { r.done = true; finishRebirth(); }
+        if (r.t >= RIDE_T && !r.done) { r.done = true; C.finish(); }
     }
 }
-function finishRebirth() {
-    save.money -= rebirthCost();
-    save.rebirths = (save.rebirths || 0) + 1;
+// what every rebirth takes away (rebirths, the journal and your stats stay)
+function resetForRebirth() {
     save.money = 0; save.logs = 0; save.logBonus = 0;
     save.owned = new Array(N_AXES).fill(0); save.owned[0] = 1; save.equipped = 0; save.gunOwned = []; save.gunEq = -1; save.gunAmmo = {};
     save.bandages = 1; save.priceLvl = 0; save.hpLvl = 0; save.bootLvl = 0; save.oilLvl = 0; save.rodLvl = 0;
     save.vestLvl = 0; save.magLvl = 0; save.whetLvl = 0; save.powderLvl = 0; save.magnetLvl = 0;
     save.fishBag = []; save.day = 1; save.altarDay = 0; save.contract = null; save.ghosts = 0;
     save.mats = {}; save.hotbar = ["a0", null, null, null, null]; save.relic = [0, 0, 0, 0, 0, 0];
+    save.buffs = {}; save.wellDay = 0; save.scopeDay = 0; save.veins = [];
     applyAxeLook(); syncGhosts();
     clockT = (8 / 24) * DAY_LEN; bmFelled = 0; setWeather("clear", false);
+}
+function finishRebirth() {
+    save.rebirths = 1; // Pine Island is the start; the Highland Isle is Rebirth 1
+    resetForRebirth();
     enterIsle2(); newContract();
     holdingReset();
     player.maxHp = maxHpNow(); player.hp = player.maxHp;
@@ -4319,7 +4497,7 @@ function makeRelicPiece(i, x, y, z) {
 }
 function buildCave() {
     caveBuilt = true;
-    const prev = addTgt; addTgt = null;
+    const prev = addTgt; addTgt = isle2G;
     const rockM = new THREE.MeshLambertMaterial({ color: 0x3e3846, flatShading: true, side: THREE.BackSide });
     // the tunnel: a rough rock tube winding down into the dark
     const tg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(CAVE_PTS.map(([x, z, y]) => V3(CX + x, y + 1.6, z))), 220, 2.9, 9, false);
@@ -4374,6 +4552,7 @@ function buildCaveMouth() {
     circles.push({ x: CAVE_MOUTH.x + 0.5, z: CAVE_MOUTH.z - 2.1, r: 1.3 }, { x: CAVE_MOUTH.x + 0.5, z: CAVE_MOUTH.z + 2.1, r: 1.3 });
 }
 function buildRelics() {
+    const prev = addTgt; addTgt = isle2G;
     const at = (i, x, z, up = 1.4) => makeRelicPiece(i, x, terrain2(x, z) + up, z);
     at(1, GPEAK.x + 7, GPEAK.z - 1);
     at(2, LM2[2].x - 2, LM2[2].z + 3);
@@ -4383,6 +4562,7 @@ function buildRelics() {
     at(5, lx, lz);
     buildCaveMouth();
     buildCave();
+    addTgt = prev;
 }
 let caveCd = 0;
 function fadeTo(fn) {
@@ -4440,19 +4620,21 @@ function openFerry2() {
     $("ferrySay").textContent = "“" + FERRY2_QUIPS[Math.floor(Math.random() * FERRY2_QUIPS.length)] + "”";
     openPanel("ferry");
 }
+const rebirth2Ready = () => relicCount() === RELIC_N && save.money >= REBIRTH2_COST;
 function renderFerry2() {
     const n = relicCount(), cashOk = save.money >= REBIRTH2_COST, relicOk = n === RELIC_N;
-    document.querySelector("#panelFerry h2").textContent = "THE FERRY TO REBIRTH 2";
-    const html = `<div class="fprice">Ticket #2: <b>${money(REBIRTH2_COST)}</b> + <b>the Hypergamous Relic</b></div>
+    document.querySelector("#panelFerry h2").textContent = "THE FERRY TO MOONCAP ISLE";
+    const html = `<div class="fprice">Rebirth 2 ticket: <b>${money(REBIRTH2_COST)}</b> + <b>the Hypergamous Relic</b></div>
       <div class="flist">
         <div class="${cashOk ? "keep" : "lose"}"><h4>${cashOk ? "✔" : "✘"} CASH</h4>${money(save.money)} of ${money(REBIRTH2_COST)}</div>
         <div class="${relicOk ? "keep" : "lose"}"><h4>${relicOk ? "✔" : "✘"} RELIC PIECES</h4>${n} / ${RELIC_N} found · press K to see them</div>
-        <div class="gain"><h4>REBIRTH 2</h4>The next island isn't finished yet. Coming soon. Get ready now.</div>
+        <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and materials · every axe and gun · all upgrades · the relic (it pays for the crossing) · the day count</div>
+        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ MOONCAP ISLE: two moons, glowing forests, falling stars, potions, three new axes, a beam gun... and the Elder Heart</div>
       </div>`;
     if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
-    const b = $("ferryBuy");
-    b.disabled = true; b.classList.remove("danger");
-    b.textContent = !relicOk ? `FIND ${RELIC_N - n} MORE RELIC PIECE${RELIC_N - n === 1 ? "" : "S"}` : !cashOk ? "NEED " + money(REBIRTH2_COST - save.money) + " MORE" : "READY. REBIRTH 2 IS COMING SOON";
+    const b = $("ferryBuy"), ok = relicOk && cashOk;
+    b.disabled = !ok; b.classList.toggle("danger", ok && !!ferryConfirm);
+    b.textContent = !relicOk ? `FIND ${RELIC_N - n} MORE RELIC PIECE${RELIC_N - n === 1 ? "" : "S"}` : !cashOk ? "NEED " + money(REBIRTH2_COST - save.money) + " MORE" : ferryConfirm ? "CLICK AGAIN TO CONFIRM" : "SAIL TO MOONCAP ISLE";
 }
 
 
@@ -4485,7 +4667,7 @@ const veins = [];
 let mineBuilt = false;
 function buildMine() {
     mineBuilt = true;
-    const prev = addTgt; addTgt = null;
+    const prev = addTgt; addTgt = isle2G;
     const rock = batch(new THREE.MeshLambertMaterial({ color: 0x4a4038, flatShading: true })), floorB = batch(new THREE.MeshLambertMaterial({ color: 0x3a2e24, flatShading: true }));
     const ceil = batch(new THREE.MeshLambertMaterial({ color: 0x3a3430, flatShading: true })), tim = batch(new THREE.MeshLambertMaterial({ color: 0x6a4a2a, flatShading: true })), rail = batch(new THREE.MeshLambertMaterial({ color: 0x6a6a74, flatShading: true }));
     const inside = (x, z) => MINE_R.some(r => inRect(x, z, r));
@@ -4582,8 +4764,1222 @@ function mineVein(v) {
     writeSave();
 }
 
-// a save that's already on the Highland Isle starts there (this must run after everything above is defined)
-if (save.isle === 2) enterIsle2();
+// =====================================================================
+//  1.2.0: REBIRTH 2: Mooncap Isle, the Elder Heart, falling stars, the Apothecary
+// =====================================================================
+// ---- switching between islands: each island keeps its own colliders, chests and altar ----
+const worldSnap = {};
+let isle1Water = null, isle1Emit = null;
+function snapWorld(n) { worldSnap[n] = { colliders: colliders.slice(), circles: circles.slice(), occluders: occluders.slice(), chests: chests.slice(), altar }; }
+function loadWorld(n) {
+    const s = worldSnap[n]; if (!s) return;
+    for (const [arr, src] of [[colliders, s.colliders], [circles, s.circles], [occluders, s.occluders], [chests, s.chests]]) { arr.length = 0; arr.push(...src); }
+    altar = s.altar;
+}
+function leaveWorld() {
+    if (isle === 1 && !worldSnap[1]) { snapWorld(1); isle1Water = waterMesh.geometry; isle1Emit = smokeEmit.slice(); }
+    if (isle === 3 && fight3.on) endFight(false, true);
+    for (const p of smokePuffs) if (p.m.parent === isle1) { isle1.remove(p.m); scene.add(p.m); }
+}
+function showWorld(n) {
+    isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3;
+    moon2.visible = false; for (const a of aurora) a.visible = false; spores3.visible = n === 3;
+    wisps.material.color.setHex(n === 3 ? 0xffb0f0 : 0x9dffd0);
+}
+function resetIsleTrees(n) {
+    for (const t of trees) { if (!t.boss) scene.remove(t.g); t.gone = true; if (t.bar) { t.bar.remove(); t.bar = null; } }
+    trees.length = 0;
+    for (const l of logs) scene.remove(l.m);
+    logs.length = 0;
+    for (const q of sending) scene.remove(q.m);
+    sending.length = 0; sendVals.length = 0;
+    for (let i = 0; i < n; i++) spawnTree(false);
+}
+// back to Pine Island (only the dev panel does this)
+function enterIsle1() {
+    if (isle === 1) return;
+    leaveWorld(); loadWorld(1);
+    isle = 1; save.isle = 1;
+    showWorld(1);
+    groundFn = null;
+    if (isle1Water) { waterMesh.geometry = isle1Water; waterMesh.material.needsUpdate = true; }
+    smokeEmit.length = 0; (isle1Emit || []).forEach(e => smokeEmit.push(e));
+    RESPAWN.x = 1; RESPAWN.z = 0;
+    resetIsleTrees(60);
+    resetChests();
+}
+
+// ---- the shape of Mooncap Isle ----
+const shoreR3 = th => 136 + 10 * Math.sin(2 * th + 0.4) + 7 * Math.sin(3 * th + 1.9) + 4 * Math.sin(5 * th + 0.7);
+const shoreAt3 = (x, z) => shoreR3(Math.atan2(z, x));
+const ARR3TH = (() => { let b = 0, m = 1e9; for (let i = 0; i < 360; i++) { const th = (i / 360) * Math.PI * 2, r = shoreR3(th); if (r < m) { m = r; b = th; } } return b; })();
+const at3 = (k, d) => ({ x: Math.cos(ARR3TH + k * Math.PI) * d, z: Math.sin(ARR3TH + k * Math.PI) * d }); // k: half-turns round from where you land
+const HOLLOW = { ...at3(1, 80), r: 21 };
+const WELL = { ...at3(0.55, 62), r: 11 };
+const CRATER = { ...at3(0.3, 75), r: 12 };
+const OBS = at3(-0.78, 70);
+const MARSH = { ...at3(-0.28, 72), r: 15 };
+const GROVE3 = { ...at3(-0.55, 66), r: 20 };
+const CIRCLE3 = at3(0.78, 46);
+const ARR3DIR = V3(Math.cos(ARR3TH), 0, Math.sin(ARR3TH)), ARR3PERP = V3(-ARR3DIR.z, 0, ARR3DIR.x), ARR3LEN = 22;
+const ARR3B = V3(ARR3DIR.x * (shoreR3(ARR3TH) - 8), 0, ARR3DIR.z * (shoreR3(ARR3TH) - 8));
+const arr3Pt = (a, s = 0, y = 0) => V3(ARR3B.x + ARR3DIR.x * a + ARR3PERP.x * s, y, ARR3B.z + ARR3DIR.z * a + ARR3PERP.z * s);
+const FERRYMAN3 = { x: arr3Pt(ARR3LEN - 6, -1.25).x, z: arr3Pt(ARR3LEN - 6, -1.25).z };
+const BED3 = { x: -9, z: 6 }, SMITH3 = { x: -11, z: -7 }, DEPOT3 = { x: 11, z: -7 }, WITCH3 = { x: 0, z: 14 };
+const SMITH3_AT = standPt(SMITH3), DEPOT3_AT = standPt(DEPOT3), WITCH3_AT = standPt(WITCH3, 2.6);
+const OBS_DOOR = { x: OBS.x + (0 - OBS.x) / Math.hypot(OBS.x, OBS.z) * 4.2, z: OBS.z + (0 - OBS.z) / Math.hypot(OBS.x, OBS.z) * 4.2 };
+const LM3 = [
+    { name: "LANTERN CAMP", x: 0, z: 0, r: 24, col: "#c8a0ff", camp: true },
+    { name: "THE HOLLOW", x: HOLLOW.x, z: HOLLOW.z, r: HOLLOW.r + 5, col: "#ff5a8a" },
+    { name: "MOONWELL", x: WELL.x, z: WELL.z, r: WELL.r + 4, col: "#7affef" },
+    { name: "STARFALL CRATER", x: CRATER.x, z: CRATER.z, r: CRATER.r + 3, col: "#fff4a0" },
+    { name: "OBSERVATORY", x: OBS.x, z: OBS.z, r: 8, col: "#9fd8ff" },
+    { name: "GLOWCAP GROVE", x: GROVE3.x, z: GROVE3.z, r: 12, col: "#d0a8ff" },
+    { name: "SPORE MARSH", x: MARSH.x, z: MARSH.z, r: MARSH.r, col: "#7affb0" },
+    { name: "MOON CIRCLE", x: CIRCLE3.x, z: CIRCLE3.z, r: 8, col: "#e0d0ff" }
+];
+function terrain3(x, z) {
+    const d = Math.hypot(x, z), inside = shoreAt3(x, z) - d;
+    if (inside < 5) return Math.max(-3.4, -(5 - inside) * 0.2);
+    let h = Math.max(0, fbm2(x * 0.016 + 11.3, z * 0.016 - 4.2, 4) - 0.4) * 24 * sstep(24, 56, d) + fbm2(x * 0.07, z * 0.07, 2) * 1.1;
+    h += 11 * sstep(26, 3, Math.hypot(x - OBS.x, z - OBS.z));                                  // the observatory hill
+    const dc = Math.hypot(x - CRATER.x, z - CRATER.z);
+    h = lerp(h, 0.3, sstep(CRATER.r + 1, CRATER.r - 4, dc)) + 3.2 * Math.exp(-((dc - CRATER.r - 1) ** 2) / 10); // the crater: a flat floor inside a raised rim
+    h *= sstep(16, 30, d) * sstep(5, 28, inside);
+    h = lerp(h, 0.15, sstep(HOLLOW.r + 12, HOLLOW.r + 1, Math.hypot(x - HOLLOW.x, z - HOLLOW.z)));   // the Hollow: a flat arena
+    h = lerp(h, 0.05 + fbm2(x * 0.2, z * 0.2, 2) * 0.45, sstep(MARSH.r + 8, MARSH.r - 3, Math.hypot(x - MARSH.x, z - MARSH.z)));
+    const lk = sstep(WELL.r + 9, WELL.r - 1, Math.hypot(x - WELL.x, z - WELL.z));
+    return h * (1 - lk) - lk * 2.6;
+}
+function groundY3(x, z) {
+    const { along, side } = dockLocal(x, z, ARR3B, ARR3DIR, ARR3PERP);
+    if (along > 4 && along < ARR3LEN + 3 && Math.abs(side) < 3) return 0;
+    return Math.max(-0.4, terrain3(x, z));
+}
+function clampIsle3(p) {
+    const { along, side } = dockLocal(p.x, p.z, ARR3B, ARR3DIR, ARR3PERP);
+    if (along > 4.5 && along < ARR3LEN + 3 && Math.abs(side) < 6) {
+        const a = Math.min(along, ARR3LEN - 0.7), s = clamp(side, -1.65, 1.65);
+        p.x = ARR3B.x + ARR3DIR.x * a + ARR3PERP.x * s; p.z = ARR3B.z + ARR3DIR.z * a + ARR3PERP.z * s;
+        return;
+    }
+    const lim = shoreAt3(p.x, p.z) - 3, d = Math.hypot(p.x, p.z);
+    if (d > lim) { p.x *= lim / d; p.z *= lim / d; }
+    if (fight3.on) { // the roots have sealed the Hollow
+        const dx = p.x - HOLLOW.x, dz = p.z - HOLLOW.z, dd = Math.hypot(dx, dz), R = HOLLOW.r - 1.3;
+        if (dd > R) { p.x = HOLLOW.x + dx / dd * R; p.z = HOLLOW.z + dz / dd * R; }
+    }
+}
+const treeOk3 = (x, z) => Math.hypot(x - HOLLOW.x, z - HOLLOW.z) > HOLLOW.r + 9 && Math.hypot(x - WELL.x, z - WELL.z) > WELL.r + 7 && Math.hypot(x - ARR3B.x, z - ARR3B.z) > 12;
+const inHollow = () => isle === 3 && Math.hypot(player.pos.x - HOLLOW.x, player.pos.z - HOLLOW.z) < HOLLOW.r;
+
+// ---- the sky: a second moon, the aurora, drifting spores ----
+const isle3G = new THREE.Group(); isle3G.visible = false; scene.add(isle3G);
+const isle3 = { waterGeo: null, foam: null, emit: [], fire: null, fireLight: null, wellWater: null, wellLight: null, boat: null, cauldron: null, bubbles: [], lanterns: null, glowCaps: [], crater: null };
+let isle3Built = false, ferryman3 = null, mapBg3 = null;
+const npcs3 = [];
+const moon2 = new THREE.Group();
+{
+    moon2.add(new THREE.Mesh(new THREE.SphereGeometry(22, 14, 10), new THREE.MeshBasicMaterial({ color: 0xd8c4ff, fog: false })));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(36, 1.4, 4, 48), new THREE.MeshBasicMaterial({ color: 0xb8a0ff, fog: false, transparent: true, opacity: 0.55 }));
+    ring.rotation.x = 1.25; moon2.add(ring);
+    moon2.visible = false; scene.add(moon2);
+}
+const aurora = [];
+for (let k = 0; k < 3; k++) {
+    const g = new THREE.PlaneGeometry(320, 38, 64, 1), col = [], c = new THREE.Color(), pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) { const top = pos.getY(i) > 0; c.setHex(top ? [0x5a1aa0, 0x2a1a8a, 0x8a1a8a][k] : [0x3affb0, 0x5ab8ff, 0xff6ad8][k]); col.push(c.r, c.g, c.b); }
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    m.userData.base = Float32Array.from(pos.array); m.userData.k = k; m.visible = false; m.frustumCulled = false;
+    scene.add(m); aurora.push(m);
+}
+const spores3 = (() => {
+    const N = 420, p = new Float32Array(N * 3), col = new Float32Array(N * 3), c = new THREE.Color();
+    for (let i = 0; i < N; i++) { p[i * 3] = rand(-40, 40); p[i * 3 + 1] = rand(0, 14); p[i * 3 + 2] = rand(-40, 40); c.setHex([0xd8a8ff, 0x8affe8, 0xff9ae0, 0xfff0a0][i % 4]); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(p, 3)); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.16, vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false }));
+    pts.visible = false; pts.frustumCulled = false; scene.add(pts);
+    return pts;
+})();
+const moon2Dir = V3(-0.55, 0.62, 0.56).normalize();
+function sky3(d) {
+    const night = 1 - d, cl = 1 - clamp(wx.cloud * 0.7 + wx.rain, 0, 1);
+    moon2.visible = night > 0.08 && !inCave();
+    moon2.position.copy(camera.position).addScaledVector(moon2Dir, 340);
+    moon2.lookAt(camera.position);
+    moon2.children[0].material.color.setHex(isBlood() ? 0xff6a8a : 0xd8c4ff);
+    for (const a of aurora) { a.visible = night > 0.15; a.material.opacity = night * 0.55 * cl * (isBlood() ? 0.4 : 1); }
+    spores3.material.opacity = 0.35 + night * 0.6;
+    wisps.material.color.setHex(0xffb0f0);
+}
+function updateSky3(dt) {
+    for (const a of aurora) {
+        if (!a.visible) continue;
+        const k = a.userData.k, b = a.userData.base, p = a.geometry.attributes.position;
+        for (let i = 0; i < p.count; i++) { const x = b[i * 3], y = b[i * 3 + 1]; p.setXYZ(i, x, y + Math.sin(x * 0.02 + time * 0.3 + k) * 6, Math.sin(x * 0.012 + time * 0.22 + k * 2) * 26 + (y > 0 ? 6 : 0)); }
+        p.needsUpdate = true;
+        a.position.set(camera.position.x + [0, -60, 70][k], 108 + k * 12, camera.position.z - 170 + k * 55);
+        a.rotation.set(-0.35, [0.1, 0.5, -0.4][k], 0);
+    }
+    if (spores3.visible) {
+        const p = spores3.geometry.attributes.position, cx = player.pos.x, cz = player.pos.z, cy = groundY(cx, cz);
+        for (let i = 0; i < p.count; i++) {
+            let x = p.getX(i), y = p.getY(i) + dt * (0.25 + (i % 5) * 0.06), z = p.getZ(i);
+            x += Math.sin(time * 0.6 + i) * dt * 0.3; z += Math.cos(time * 0.5 + i * 1.3) * dt * 0.3;
+            if (x - cx > 40) x -= 80; else if (x - cx < -40) x += 80;
+            if (z - cz > 40) z -= 80; else if (z - cz < -40) z += 80;
+            if (y > cy + 16) y = cy - 1 + Math.random();
+            p.setXYZ(i, x, y, z);
+        }
+        p.needsUpdate = true;
+    }
+}
+
+// ---- building the island ----
+const glowM = c => new THREE.MeshBasicMaterial({ color: c });
+const fxPink = glowM(0xff6a9a), fxRed = glowM(0xff3a6a), fxWhite = glowM(0xffe0ea), fxGold = glowM(0xfff4a0);
+function makeFerrymanFigure(coat, trim, orbCol) {
+    const f = new THREE.Group(), coatM = lamb(coat), trimM = lamb(trim);
+    const p = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); f.add(o); return o; };
+    p(new THREE.CylinderGeometry(0.32, 0.95, 2.3, 8), coatM, 0, 1.15, 0);
+    p(new THREE.CylinderGeometry(0.97, 0.99, 0.12, 8), trimM, 0, 0.06, 0);
+    p(new THREE.SphereGeometry(0.62, 8, 5), coatM, 0, 2.2, 0).scale.set(1.15, 0.55, 0.85);
+    p(new THREE.SphereGeometry(0.5, 8, 6), coatM, 0, 2.6, 0).scale.set(1, 1.15, 1.1);
+    p(new THREE.ConeGeometry(0.4, 0.8, 7), coatM, 0, 3.15, -0.2).rotation.x = -0.55;
+    p(new THREE.PlaneGeometry(0.7, 0.7), new THREE.MeshBasicMaterial({ map: ferrymanTex(), transparent: true }), 0, 2.58, 0.56);
+    p(new THREE.CylinderGeometry(0.03, 0.03, 3.2, 5), woodDark, 0.95, 1.6, 0.55);
+    p(new THREE.SphereGeometry(0.22, 7, 6), glowM(orbCol), 0.95, 3.25, 0.55);
+    return f;
+}
+function makeBoat3(hullC, trimC, lampC) {
+    const b = new THREE.Group(), hullM = lamb(hullC), trimM = lamb(trimC);
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(2.7, 1.0, 7.6), hullM); hull.position.y = 0.2;
+    const bowG = new THREE.ConeGeometry(1.35, 2.4, 4); bowG.rotateX(Math.PI / 2); bowG.rotateZ(Math.PI / 4);
+    const bow = new THREE.Mesh(bowG, hullM); bow.position.set(0, 0.2, 5.0); bow.scale.y = 0.75;
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.18, 7.8), trimM); trim.position.y = 0.72;
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.3, 2.6), trimM); cabin.position.set(0, 1.5, -1.3);
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 5, 6), woodDark); mast.position.set(0, 3.0, 1.6);
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 5), glowM(lampC)); lamp.position.set(0, 5.6, 1.6);
+    b.add(hull, bow, trim, cabin, mast, lamp);
+    return b;
+}
+// a market stall facing camp: counter, posts, a canvas roof and a glowing sign
+function stall3(at, signA, signB, signCol, roofCol) {
+    const g = new THREE.Group(); g.position.set(at.x, groundY3(at.x, at.z), at.z); g.rotation.y = Math.atan2(-at.x, -at.z);
+    const canvasM = new THREE.MeshLambertMaterial({ color: roofCol, flatShading: true, side: THREE.DoubleSide });
+    const b = (m, x, y, z, sx, sy, sz, rx = 0) => { const o = new THREE.Mesh(BOX, m); o.scale.set(sx, sy, sz); o.position.set(x, y, z); o.rotation.x = rx; g.add(o); return o; };
+    b(wood, 0, 0.52, 0.7, 4.2, 1.05, 1.1); b(woodDark, 0, 1.08, 0.7, 4.5, 0.1, 1.4);
+    for (const sx of [-2.1, 2.1]) for (const sz of [0.1, -2.0]) { const p = new THREE.Mesh(CYL6, woodDark); p.scale.set(0.1, 3.2, 0.1); p.position.set(sx, 1.6, sz); g.add(p); }
+    b(canvasM, 0, 3.25, -0.9, 5, 0.12, 3.4, 0.08); b(wood, 0, 1.5, -2.0, 4.2, 3, 0.12);
+    for (let k = 0; k < 9; k++) { const o = new THREE.Mesh(ICO, glowM([0xffd890, 0xc8a0ff, 0x8affe8][k % 3])); o.scale.setScalar(0.09); o.position.set(-2.2 + k * 0.55, 3.05 - Math.abs(Math.sin(k * 0.9)) * 0.18, 0.75); g.add(o); } // string lights
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.28), new THREE.MeshBasicMaterial({ map: signTex(signA, signB, signCol), side: THREE.DoubleSide })); sign.position.set(0, 4.15, 0.95); g.add(sign);
+    scene.add(g);
+    colliders.push([at.x - 2.6, at.x + 2.6, at.z - 2.6, at.z + 2.6]);
+    return g;
+}
+function buildIsle3() {
+    isle3Built = true;
+    curBuild = 3;
+    const prevAdd = addTgt; addTgt = isle3G;
+    colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
+
+    // ----- the land: teal and violet meadows, silver sand, a dark Hollow -----
+    {
+        const g = new THREE.PlaneGeometry(400, 400, 210, 210);
+        g.rotateX(-Math.PI / 2);
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) pos.setY(i, terrain3(pos.getX(i), pos.getZ(i)));
+        g.computeVertexNormals();
+        const nor = g.attributes.normal, col = [], c = new THREE.Color();
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), z = pos.getZ(i), y = pos.getY(i), ny = nor.getY(i), d = Math.hypot(x, z), inside = shoreAt3(x, z) - d, rn = Math.random();
+            const dh = Math.hypot(x - HOLLOW.x, z - HOLLOW.z), dm = Math.hypot(x - MARSH.x, z - MARSH.z), dc = Math.hypot(x - CRATER.x, z - CRATER.z);
+            if (y < -0.5) c.setHSL(0.72, 0.25, 0.14 + rn * 0.04);                                 // seabed
+            else if (Math.hypot(x - WELL.x, z - WELL.z) < WELL.r + 4) c.setHSL(0.5, 0.3, 0.2 + rn * 0.05);
+            else if (inside < 12 && y < 2.2) c.setHSL(0.72, 0.16, 0.6 + rn * 0.06);               // silver-lilac sand
+            else if (d < SAFE_R + 1) c.setHSL(0.76, 0.18, 0.18 + rn * 0.05);
+            else if (dh < HOLLOW.r + 1) c.setHSL(0.93, 0.32, 0.12 + rn * 0.04);                   // the Hollow's dark red earth
+            else if (dm < MARSH.r) c.setHSL(0.46, 0.42, 0.13 + rn * 0.04);
+            else if (dc < CRATER.r - 1) c.setHSL(0.62, 0.22, 0.2 + rn * 0.05);
+            else if (ny < 0.8) c.setHSL(0.7, 0.12, 0.3 + rn * 0.06);                              // rocky slopes
+            else { const v = sstep(0.42, 0.58, fbm2(x * 0.03 + 5, z * 0.03 - 7, 3)); c.setHSL(lerp(0.48, 0.78, v) + rn * 0.03, 0.38, 0.17 + rn * 0.06 + clamp(y / 20, 0, 1) * 0.06); }
+            col.push(c.r, c.g, c.b);
+        }
+        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+        const wg = new THREE.PlaneGeometry(760, 760, 152, 152);
+        wg.rotateX(-Math.PI / 2);
+        const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x7ae4f4), mid = new THREE.Color(0x4a6ad8), deep = new THREE.Color(0x221a62);
+        for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), k = clamp((Math.hypot(x, z) - shoreAt3(x, z)) / 36, 0, 1); cc.copy(shallow).lerp(mid, clamp(k * 2, 0, 1)).lerp(deep, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
+        wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3));
+        isle3.waterGeo = wg;
+        const N = 300, fp = [], idx = [];
+        for (let i = 0; i <= N; i++) { const th = (i / N) * Math.PI * 2, r = shoreR3(th); fp.push(Math.cos(th) * (r - 3.5), -0.4, Math.sin(th) * (r - 3.5), Math.cos(th) * (r - 2.2), -0.4, Math.sin(th) * (r - 2.2)); if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } }
+        const fg = new THREE.BufferGeometry(); fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3)); fg.setIndex(idx);
+        isle3.foam = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0xf0e8ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+        scene.add(isle3.foam);
+    }
+
+    // ----- Lantern Camp: a fire that burns violet, the Moonforge, the Trading Post, the Apothecary, a bed -----
+    {
+        const stones = batch(lamb(0x8a84a0));
+        for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); }
+        stones.build();
+        const lg = batch(woodDark);
+        for (let i = 0; i < 4; i++) lg.add(CYL6, 0, 0.25, -3, Math.PI / 2, i * 0.8, 0, 0.12, 1.3, 0.12);
+        lg.build();
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.7, 6), glowM(0x8a6aff)); flame.position.set(0, 1.05, -3);
+        const core = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 5), glowM(0xe8dcff)); core.position.set(0, 0.72, -3);
+        const pool = new THREE.Mesh(new THREE.CircleGeometry(5.5, 16), new THREE.MeshBasicMaterial({ color: 0x9a7aff, transparent: true, opacity: 0.2, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, depthWrite: false }));
+        pool.rotation.x = -Math.PI / 2; pool.position.set(0, 0.04, -3);
+        scene.add(flame, core, pool);
+        fires.push({ flame, core, ph: srand() * 6 });
+        const fl = new THREE.PointLight(0xa88aff, 18, 18, 1.6); fl.position.set(0, 2, -3); scene.add(fl); isle3.fireLight = fl;
+        circles.push({ x: 0, z: -3, r: 1.3 });
+        isle3.fire = flame;
+        const seats = batch(wood);
+        for (const [dx, dz, r] of [[-2.6, -3.5, 0.2], [2.5, -2.4, -0.5], [0.4, -5.9, Math.PI / 2]]) seats.add(CYL6, dx, 0.28, dz, 0, r, Math.PI / 2, 0.22, 1.7, 0.22);
+        seats.build();
+        const cl = label("LANTERN CAMP", "#c8a0ff", 3.4, 0.8); cl.position.set(0, 4.6, -3); cl.maxD = 90;
+    }
+    {   // bed: a lean-to under violet canvas
+        const g = new THREE.Group(); g.position.set(BED3.x, groundY3(BED3.x, BED3.z), BED3.z); g.rotation.y = Math.atan2(-BED3.x, -BED3.z);
+        const canvasM = new THREE.MeshLambertMaterial({ color: 0x5a4a8a, flatShading: true, side: THREE.DoubleSide });
+        const roof = new THREE.Mesh(BOX, canvasM); roof.scale.set(3.4, 0.08, 2.8); roof.position.set(0, 2.2, -0.3); roof.rotation.x = 0.28; g.add(roof);
+        for (const [px, pz] of [[-1.6, 0.9], [1.6, 0.9], [-1.6, -1.5], [1.6, -1.5]]) { const p = new THREE.Mesh(CYL6, woodDark); p.scale.set(0.07, pz > 0 ? 2.0 : 2.5, 0.07); p.position.set(px, pz > 0 ? 1.0 : 1.25, pz); g.add(p); }
+        const cot = new THREE.Mesh(BOX, wood); cot.scale.set(1.4, 0.3, 2.3); cot.position.set(0, 0.35, -0.2); g.add(cot);
+        const blanket = new THREE.Mesh(BOX, lamb(0x3a2a7a)); blanket.scale.set(1.3, 0.14, 1.5); blanket.position.set(0, 0.58, -0.55); g.add(blanket);
+        const pillow = new THREE.Mesh(BOX, lamb(0xe8e0f0)); pillow.scale.set(1.0, 0.14, 0.5); pillow.position.set(0, 0.58, 0.7); g.add(pillow);
+        const lamp = new THREE.Mesh(ICO, glowM(0xffd890)); lamp.scale.setScalar(0.14); lamp.position.set(1.4, 1.9, 0.8); g.add(lamp);
+        scene.add(g);
+        circles.push({ x: BED3.x, z: BED3.z, r: 1.4 });
+        const bl = label("BED", "#b8c8ff", 2, 0.6); bl.position.set(BED3.x, 3.0, BED3.z);
+    }
+    {   // the Moonforge
+        const g = stall3(SMITH3, "THE MOONFORGE", "CRAFT AXES · GUNS", "#9fd8ff", 0x2a3a6a);
+        const anvil = new THREE.Mesh(BOX, lamb(0x3a3a4a)); anvil.scale.set(0.7, 0.5, 0.45); anvil.position.set(2.7, 0.25, 0.9); g.add(anvil);
+        const smith = makeHumanoid({ face: "smith", skin: 0xc8a0a0, shirt: 0x2a3a6a, pants: 0x1a1a2a, apron: 0x3a2a4a, beard: 0xd8d8e8, hat: "mask", wide: 1.25, belly: true });
+        smith.g.position.set(0, 0, -0.6); g.add(smith.g); smith.yaw = g.rotation.y; npcs3.push(smith);
+        const hm = new THREE.Group(); hm.position.set(0, -0.64, 0.05); smith.armR.add(hm);
+        part(hm, BOX, lamb(0x6a4a2a), 0, 0, 0.22, 0.05, 0.05, 0.5); smith.hammer = part(hm, BOX, lamb(0xb8c4e8), 0, 0, 0.48, 0.24, 0.13, 0.13);
+        part(g, BOX, glowM(0x9fe0ff), 0, 1.16, 0.5, 0.36, 0.06, 0.14); // a glowing moonsilver ingot
+        const furnace = new THREE.Group(); furnace.position.set(1.4, 0, -1.4); g.add(furnace);
+        part(furnace, BOX, lamb(0x4a4a5a), 0, 0.6, 0, 1.0, 1.2, 0.8); part(furnace, BOX, glowM(0x8ab8ff), 0, 0.55, 0.41, 0.5, 0.35, 0.02); part(furnace, CYL8, lamb(0x3a3a4a), 0, 1.6, -0.1, 0.18, 1.0, 0.18);
+        isle3.emit.push({ x: SMITH3.x, y: 3.2, z: SMITH3.z - 1.2, rate: 0.6, acc: 0.5 });
+        const l = label("THE MOONFORGE", "#9fd8ff", 3.2, 0.8); l.position.set(SMITH3.x, 6.2, SMITH3.z);
+    }
+    {   // the Trading Post
+        const g = stall3(DEPOT3, "TRADING POST", "SELL MATERIALS", "#ffd040", 0x4a2a5a);
+        const clerk = makeHumanoid({ face: "clerk", skin: 0xe8c8b0, shirt: 0xe8e0f0, vest: 0x5a2a6a, pants: 0x3a2a3a, hair: 0x3a2a5a, hat: "cap", hatCol: 0x6a3a9a });
+        clerk.g.position.set(0, 0, -0.6); g.add(clerk.g); clerk.yaw = g.rotation.y; npcs3.push(clerk);
+        const crates = batch(lamb(0x5a4430)); crates.add(BOX, DEPOT3.x + 3.3, 0.45, DEPOT3.z + 0.2, 0, 0.2, 0, 0.9, 0.9, 0.9); crates.add(BOX, DEPOT3.x + 3.4, 1.2, DEPOT3.z + 0.3, 0, 0.5, 0, 0.7, 0.6, 0.7); crates.build();
+        const sp = batch(glowM(0xd0a8ff)); for (let k = 0; k < 7; k++) sp.add(ICO, DEPOT3.x + 3.3 + srange(-0.3, 0.3), 0.95, DEPOT3.z + 0.2 + srange(-0.3, 0.3), 0, 0, 0, 0.12); sp.build();
+        circles.push({ x: DEPOT3.x + 3.4, z: DEPOT3.z + 0.2, r: 0.9 });
+        const l = label("TRADING POST", "#ffd040", 3.6, 0.8); l.position.set(DEPOT3.x, 6.2, DEPOT3.z);
+    }
+    {   // the Apothecary: a little house inside a giant mushroom, a counter out front, a bubbling cauldron
+        const at = WITCH3, g = new THREE.Group(); g.position.set(at.x, groundY3(at.x, at.z), at.z); g.rotation.y = Math.atan2(-at.x, -at.z); // local +z faces camp
+        const stemM = lamb(0xe8dcc8), capM = new THREE.MeshLambertMaterial({ color: 0x7a3ad8, emissive: 0x2a0a50, flatShading: true, side: THREE.DoubleSide });
+        part(g, new THREE.CylinderGeometry(2.3, 2.6, 3.4, 14), stemM, 0, 1.7, -2.4, 1, 1, 1);
+        part(g, new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), capM, 0, 3.3, -2.4, 4.4, 2.4, 4.4);
+        part(g, new THREE.CircleGeometry(4.4, 16), new THREE.MeshLambertMaterial({ color: 0xd8c0e8, flatShading: true, side: THREE.DoubleSide }), 0, 3.3, -2.4, 1, 1, 1, Math.PI / 2);
+        for (let k = 0; k < 14; k++) { const a = k * 2.4, e = 0.2 + (k % 4) * 0.33; part(g, ICO, glowM(0xfff0ff), Math.cos(a) * Math.cos(e) * 4.45, 3.3 + Math.sin(e) * 2.43, -2.4 + Math.sin(a) * Math.cos(e) * 4.45, 0.34, 0.16, 0.34); }
+        part(g, BOX, new THREE.MeshBasicMaterial({ color: 0x140a1a }), 0, 1.1, 0.12, 1.1, 2.1, 0.1); // the door
+        part(g, BOX, woodDark, 0, 2.2, 0.16, 1.3, 0.14, 0.12);
+        for (const sx of [-1, 1]) { const w = part(g, CYL8, glowM(0xffd890), sx * 1.62, 2.1, -0.66, 0.34, 0.06, 0.34, Math.PI / 2, 0, 0); w.rotation.y = -sx * 0.78; }
+        for (const sx of [-1.75, 1.75]) { // bottle shelves either side of the door
+            part(g, BOX, woodDark, sx, 0.85, -0.4, 0.95, 1.7, 0.36);
+            for (const y of [0.55, 1.15]) for (let k = 0; k < 3; k++) part(g, CYL6, glowM([0x7aff9a, 0xff7ad8, 0x8ab8ff, 0xffd060][(k + (y > 1 ? 1 : 2) + (sx > 0 ? 1 : 0)) % 4]), sx - 0.28 + k * 0.28, y + 0.16, -0.2, 0.07, 0.26, 0.07);
+        }
+        part(g, BOX, wood, 0, 0.52, 1.5, 3.6, 1.05, 0.9); part(g, BOX, woodDark, 0, 1.08, 1.5, 3.9, 0.1, 1.15);
+        for (let k = 0; k < 4; k++) part(g, CYL6, glowM([0x7aff9a, 0xff7ad8, 0xffd060, 0x8ab8ff][k]), -1.2 + k * 0.55, 1.28, 1.45, 0.08, 0.3, 0.08); // brews on the counter
+        for (const sx of [-2.5, 2.5]) { part(g, ICO, glowM(0xffd890), sx, 2.5, 0.9, 0.2, 0.26, 0.2); part(g, CYL6, woodDark, sx, 3.0, 0.9, 0.02, 0.8, 0.02); } // lanterns hanging from the cap
+        const cauldron = new THREE.Group(); cauldron.position.set(-2.6, 0, 1.3); g.add(cauldron);
+        part(cauldron, new THREE.SphereGeometry(0.75, 10, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x1a1a22, flatShading: true, side: THREE.DoubleSide }), 0, 0.85, 0, 1, 1, 1);
+        part(cauldron, CYL8, glowM(0x7aff8a), 0, 0.8, 0, 0.66, 0.02, 0.66);
+        for (const a of [0, 2.1, 4.2]) part(cauldron, BOX, woodDark, Math.cos(a) * 0.45, 0.2, Math.sin(a) * 0.45, 0.08, 0.4, 0.08);
+        for (let k = 0; k < 6; k++) { const b = part(cauldron, ICO, glowM(0xb0ffb8), 0, 0.85, 0, 0.08, 0.08, 0.08); isle3.bubbles.push({ m: b, ph: k / 6, ox: Math.cos(k * 1.7) * 0.4, oz: Math.sin(k * 1.7) * 0.4 }); }
+        const cl = new THREE.PointLight(0x7aff9a, 7, 10, 1.6); cl.position.set(-2.6, 1.6, 1.3); g.add(cl);
+        const witch = makeHumanoid({ face: "witch", skin: 0x8ac08a, shirt: 0x3a1a4a, pants: 0x2a1a2a, hair: 0x1a1a1a, hat: "witch", hatCol: 0x2a1a3a });
+        witch.g.position.set(0, 0, 0.55); g.add(witch.g); witch.yaw = g.rotation.y; npcs3.push(witch);
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.28), new THREE.MeshBasicMaterial({ map: signTex("APOTHECARY", "BREWS · TONICS", "#7aff9a"), side: THREE.DoubleSide }));
+        sign.position.set(0, 4.85, 1.75); sign.rotation.x = -0.3; sign.scale.setScalar(0.85); g.add(sign);
+        scene.add(g);
+        circles.push({ x: at.x, z: at.z + 2.4, r: 2.55 }, { x: at.x + 2.6, z: at.z - 1.3, r: 0.9 });
+        colliders.push([at.x - 1.95, at.x + 1.95, at.z - 1.95, at.z - 1.05]);
+        isle3.emit.push({ x: at.x + 2.6, y: 1.4, z: at.z - 1.3, rate: 0.5, acc: 0.2 });
+        const l = label("APOTHECARY", "#7aff9a", 3.2, 0.8); l.position.set(at.x, 7.4, at.z + 1);
+    }
+    {   // signposts on the edge of camp: the side you read on the way out points ahead to the place, the back points home
+        const post = (to, name, col) => {
+            const dir = Math.atan2(to.x, to.z), x = Math.sin(dir) * 22, z = Math.cos(dir) * 22, y = groundY3(x, z), far = Math.round(Math.hypot(to.x - x, to.z - z) - (to.r || 0));
+            const p = new THREE.Mesh(CYL6, woodDark); p.scale.set(0.09, 2.4, 0.09); p.position.set(x, y + 1.2, z); scene.add(p);
+            const out = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex(name, `AHEAD ↑ ${far}m`, col) })); out.position.set(x, y + 2.6, z); out.rotation.y = dir + Math.PI; scene.add(out);
+            const home = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("LANTERN CAMP", "AHEAD ↑", "#c8a0ff") })); home.position.set(x, y + 2.6, z); home.rotation.y = dir; scene.add(home);
+        };
+        post(HOLLOW, "THE HOLLOW", "#ff5a8a");
+        post(WELL, "MOONWELL", "#7affef");
+    }
+
+    // ----- the arrivals dock, the violet ferry, the Ferryman -----
+    {
+        const yaw = Math.atan2(ARR3DIR.x, ARR3DIR.z);
+        const planks = batch(new THREE.MeshLambertMaterial({ color: 0x6a5a6a, flatShading: true }));
+        for (let i = 0; i < ARR3LEN; i++) { const p = arr3Pt(i + 0.5); planks.add(BOX, p.x, 0.22, p.z, 0, yaw, 0, 3.6, 0.14, 0.92); }
+        planks.build();
+        const posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(glowM(0xc8a0ff));
+        for (let i = 0; i <= ARR3LEN; i += 3) for (const sd of [-1.9, 1.9]) { const p = arr3Pt(i, sd); posts.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) bulbs.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
+        for (let i = 0; i < ARR3LEN; i++) for (const sd of [-1.9, 1.9]) { const p = arr3Pt(i + 0.5, sd, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
+        posts.build(); rails.build(); bulbs.build();
+        for (const sd of [-2.0, 2.0]) { const p = arr3Pt(3.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
+        const wb = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("WELCOME TO", "MOONCAP ISLE", "#c8a0ff") })); wb.position.copy(arr3Pt(3.5, 0, 3.3)); wb.rotation.y = yaw; scene.add(wb);
+        const wb2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("ARRIVALS", "FROM THE HIGHLANDS", "#c8a0ff") })); wb2.position.copy(arr3Pt(3.5, 0, 3.3)); wb2.rotation.y = yaw + Math.PI; scene.add(wb2);
+        const al = label("ARRIVALS", "#c8a0ff", 3.2, 0.7); al.position.copy(arr3Pt(3.5, 0, 4.6)); al.maxD = 70;
+        isle3.boat = makeBoat3(0x2a2a4a, 0x6a5a9a, 0xc8a0ff); isle3.boat.position.copy(arr3Pt(ARR3LEN - 7, 4.4, -0.15)); isle3.boat.rotation.y = yaw; scene.add(isle3.boat);
+        ferryman3 = makeFerrymanFigure(0x22163a, 0x6a4a9a, 0xe8d8ff); ferryman3.position.set(FERRYMAN3.x, 0.3, FERRYMAN3.z); ferryman3.rotation.y = yaw + Math.PI; scene.add(ferryman3);
+        const fm = label("FERRYMAN", "#c8a0ff", 2.6, 0.6); fm.position.set(FERRYMAN3.x, 4.7, FERRYMAN3.z); fm.maxD = 60;
+        // lanterns light the way from the dock to camp
+        const lp = batch(woodDark), lg = batch(glowM(0xffd890)), lc = batch(lamb(0x2a2a34));
+        const land = Math.hypot(ARR3B.x, ARR3B.z);
+        for (let s = 4, k = 0; s < land - 26; s += 8, k++) {
+            const sd = k % 2 ? 3.2 : -3.2, x = ARR3B.x - ARR3DIR.x * s + ARR3PERP.x * sd, z = ARR3B.z - ARR3DIR.z * s + ARR3PERP.z * sd, y = groundY3(x, z);
+            lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lp.add(BOX, x - ARR3PERP.x * sd * 0.12, y + 2.35, z - ARR3PERP.z * sd * 0.12, 0, Math.atan2(ARR3PERP.x, ARR3PERP.z), 0, 0.06, 0.06, 0.6);
+            lg.add(ICO, x - ARR3PERP.x * sd * 0.2, y + 2.05, z - ARR3PERP.z * sd * 0.2, 0, 0, 0, 0.17, 0.22, 0.17); lc.add(CONE6, x - ARR3PERP.x * sd * 0.2, y + 2.32, z - ARR3PERP.z * sd * 0.2, 0, 0, 0, 0.22, 0.14, 0.22);
+        }
+        lp.build(); isle3.lanterns = lg.build(); lc.build();
+        // a faint far beacon: whatever is next
+        const FI = arr3Pt(ARR3LEN + 240);
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 220, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.12, fog: false, depthWrite: false, side: THREE.DoubleSide }));
+        beam.position.set(FI.x, 110, FI.z); scene.add(beam); isle3.beam = beam;
+        const bl = label("???", "#9fe8ff", 4.2, 1.0); bl.position.set(FI.x, 46, FI.z); bl.maxD = 420; bl.blurK = 0.25;
+    }
+
+    // ----- the Hollow: where the Elder Heart sleeps -----
+    buildHollow();
+
+    // ----- the Moonwell -----
+    {
+        const y0 = -0.3;
+        const water = new THREE.Mesh(new THREE.CircleGeometry(WELL.r + 2.6, 28), new THREE.MeshLambertMaterial({ color: 0x5ae0e8, emissive: 0x1a8a9a, transparent: true, opacity: 0.86, flatShading: true }));
+        water.rotation.x = -Math.PI / 2; water.position.set(WELL.x, y0, WELL.z); scene.add(water); isle3.wellWater = water;
+        const sparkle = batch(glowM(0xd8ffff));
+        for (let i = 0; i < 26; i++) { const a = srand() * 6.283, d = srange(0.5, WELL.r); sparkle.add(ICO, WELL.x + Math.cos(a) * d, y0 + 0.05, WELL.z + Math.sin(a) * d, 0, 0, 0, 0.09, 0.02, 0.09); }
+        isle3.wellSparkle = sparkle.build();
+        const ring = batch(lamb(0xc8c8dc)), runes = batch(glowM(0x7affef));
+        for (let i = 0; i < 12; i++) { const a = (i / 12) * 6.283, x = WELL.x + Math.cos(a) * (WELL.r + 3.4), z = WELL.z + Math.sin(a) * (WELL.r + 3.4), y = terrain3(x, z), h = i % 3 === 0 ? 2.6 : 1.3; ring.add(BOX, x, y + h / 2, z, 0, -a, 0, 0.8, h, 0.5); runes.add(BOX, x - Math.cos(a) * 0.26, y + h * 0.62, z - Math.sin(a) * 0.26, 0, -a, 0, 0.3, 0.3, 0.03); circles.push({ x, z, r: 0.5 }); }
+        ring.build(); runes.build();
+        const wl = new THREE.PointLight(0x5affef, 10, 26, 1.5); wl.position.set(WELL.x, 2.5, WELL.z); scene.add(wl); isle3.wellLight = wl;
+        circles.push({ x: WELL.x, z: WELL.z, r: WELL.r - 1.6 });
+        const l = label("MOONWELL", "#7affef", 3.4, 0.8); l.position.set(WELL.x, 5, WELL.z);
+    }
+
+    // ----- Starfall Crater: a fallen star still glowing in the middle -----
+    {
+        const y0 = terrain3(CRATER.x, CRATER.z);
+        const star = new THREE.Mesh(new THREE.IcosahedronGeometry(2.0, 0), new THREE.MeshBasicMaterial({ color: 0xfff2b0 })); star.position.set(CRATER.x, y0 + 1.2, CRATER.z); star.rotation.set(0.4, 0.3, 0.2); scene.add(star); isle3.crater = star;
+        const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(2.6, 0), new THREE.MeshLambertMaterial({ color: 0x3a3450, flatShading: true, transparent: true, opacity: 0.7 })); shell.position.copy(star.position); shell.rotation.set(1, 0.2, 0.5); scene.add(shell);
+        const shards = batch(glowM(0xfff4a0)), stones = batch(glowM(0x9fdcff));
+        for (let i = 0; i < 26; i++) { const a = srand() * 6.283, d = srange(3, CRATER.r - 2), x = CRATER.x + Math.cos(a) * d, z = CRATER.z + Math.sin(a) * d, s = srange(0.3, 0.9); (i % 2 ? shards : stones).add(CONE6, x, terrain3(x, z) + s * 0.6, z, srange(-0.5, 0.5), srand() * 3, srange(-0.5, 0.5), s * 0.3, s * 1.6, s * 0.3); }
+        shards.build(); stones.build();
+        const cl = new THREE.PointLight(0xffe8a0, 12, 26, 1.5); cl.position.set(CRATER.x, y0 + 3.5, CRATER.z); scene.add(cl);
+        circles.push({ x: CRATER.x, z: CRATER.z, r: 2.8 });
+        const chestAt = (x, z, sp) => { const c = makeChest(x, z, srand() * 6, sp); const y = terrain3(x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; return c; };
+        chestAt(CRATER.x + 5, CRATER.z - 4, true);
+        const l = label("STARFALL CRATER", "#fff4a0", 3.4, 0.8); l.position.set(CRATER.x, y0 + 7, CRATER.z);
+    }
+
+    // ----- the Observatory on its hill -----
+    {
+        const y0 = terrain3(OBS.x, OBS.z), face = Math.atan2(-OBS.x, -OBS.z);
+        const g = new THREE.Group(); g.position.set(OBS.x, y0 - 0.2, OBS.z); g.rotation.y = face; scene.add(g);
+        part(g, CYL8, lamb(0x8a86a0), 0, 2.4, 0, 3.4, 4.8, 3.4);
+        part(g, CYL8, lamb(0x6a6680), 0, 4.95, 0, 3.6, 0.3, 3.6);
+        part(g, new THREE.SphereGeometry(1, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), lamb(0xd8dcf0), 0, 5.1, 0, 3.3, 3.0, 3.3);
+        part(g, BOX, lamb(0x2a2a3a), 0, 6.9, 1.7, 1.1, 2.4, 1.8, -0.4);
+        const scope = part(g, CYL8, lamb(0x6a5a3a), 0, 7.6, 2.0, 0.42, 3.4, 0.42); scope.rotation.x = 0.85;
+        part(g, CYL8, glowM(0x9fd8ff), 0, 8.75, 3.3, 0.36, 0.06, 0.36).rotation.x = 0.85;
+        part(g, BOX, new THREE.MeshBasicMaterial({ color: 0x0a0812 }), 0, 1.1, 3.38, 1.2, 2.2, 0.1);
+        for (const sx of [-1.6, 1.6]) part(g, BOX, glowM(0xffd890), sx, 3.0, 3.1, 0.5, 0.7, 0.1);
+        circles.push({ x: OBS.x, z: OBS.z, r: 3.6 });
+        const l = label("OBSERVATORY", "#9fd8ff", 3.2, 0.8); l.position.set(OBS.x, y0 + 11, OBS.z);
+    }
+
+    // ----- the Moon Circle: pray once a day -----
+    {
+        const y0 = terrain3(CIRCLE3.x, CIRCLE3.z);
+        const st = batch(lamb(0xb8b4d0)), rn = batch(glowM(0xd0b8ff));
+        for (let i = 0; i < 7; i++) { const a = (i / 7) * 6.283, x = CIRCLE3.x + Math.cos(a) * 5.6, z = CIRCLE3.z + Math.sin(a) * 5.6, h = srange(2.6, 3.6), y = terrain3(x, z); st.add(BOX, x, y + h / 2, z, 0, -a, 0, 0.9, h, 0.6); rn.add(new THREE.TorusGeometry(0.22, 0.04, 4, 10, 4.2), x - Math.cos(a) * 0.32, y + h * 0.66, z - Math.sin(a) * 0.32, 0, -a + Math.PI / 2, 0, 1); circles.push({ x, z, r: 0.7 }); }
+        st.add(CYL8, CIRCLE3.x, y0 + 0.5, CIRCLE3.z, 0, 0, 0, 1.1, 1.0, 1.1);
+        st.build(); rn.build();
+        const glow = new THREE.Mesh(new THREE.CircleGeometry(1.0, 16), new THREE.MeshBasicMaterial({ color: 0xd0b8ff, transparent: true, opacity: 0.5, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+        glow.rotation.x = -Math.PI / 2; glow.position.set(CIRCLE3.x, y0 + 1.02, CIRCLE3.z); scene.add(glow);
+        altar = { x: CIRCLE3.x, z: CIRCLE3.z, glow };
+        circles.push({ x: CIRCLE3.x, z: CIRCLE3.z, r: 1.3 });
+        const l = label("MOON CIRCLE", "#e0d0ff", 3.2, 0.8); l.position.set(CIRCLE3.x, y0 + 5.4, CIRCLE3.z);
+        const l2 = label("ALTAR", "#d0b8ff", 1.6, 0.5); l2.position.set(CIRCLE3.x, y0 + 2.6, CIRCLE3.z);
+    }
+
+    // ----- the Spore Marsh -----
+    {
+        const pud = batch(new THREE.MeshLambertMaterial({ color: 0x1a6a6a, emissive: 0x0a3a3a, transparent: true, opacity: 0.85, flatShading: true }));
+        for (let i = 0; i < 14; i++) { const a = srand() * 6.283, d = srange(0, MARSH.r - 3), x = MARSH.x + Math.cos(a) * d, z = MARSH.z + Math.sin(a) * d; pud.add(CYL8, x, 0.12, z, 0, srand() * 3, 0, srange(1.2, 2.8), 0.02, srange(1, 2.2)); }
+        pud.build();
+        const reeds = batch(lamb(0x2a6a5a)), tips = batch(glowM(0x7affb0));
+        for (let i = 0; i < 90; i++) { const a = srand() * 6.283, d = srange(1, MARSH.r + 2), x = MARSH.x + Math.cos(a) * d, z = MARSH.z + Math.sin(a) * d, h = srange(0.8, 1.8), y = terrain3(x, z); reeds.add(CONE6, x, y + h / 2, z, srange(-0.2, 0.2), 0, srange(-0.2, 0.2), 0.05, h, 0.05); if (i % 3 === 0) tips.add(ICO, x, y + h, z, 0, 0, 0, 0.07); }
+        reeds.build(); tips.build();
+        const chestAt = (x, z, sp) => { const c = makeChest(x, z, srand() * 6, sp); const y = terrain3(x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; return c; };
+        chestAt(MARSH.x + 4, MARSH.z - 3, true);
+        const l = label("SPORE MARSH", "#7affb0", 3.2, 0.8); l.position.set(MARSH.x, 4, MARSH.z);
+    }
+
+    // ----- giant mushrooms: a whole grove of them, and plenty more scattered about -----
+    const okSpot3 = (x, z, margin = 0) => {
+        const d = Math.hypot(x, z);
+        if (d < SAFE_R + 1 || d > shoreAt3(x, z) - 9) return false;
+        if (!treeOk3(x, z)) return false;
+        for (let k = 1; k < LM3.length; k++) { const lm = LM3[k]; if (k !== 5 && Math.hypot(x - lm.x, z - lm.z) < lm.r + margin) return false; }
+        const { along, side } = dockLocal(x, z, ARR3B, ARR3DIR, ARR3PERP); if (along < 0 && along > -(Math.hypot(ARR3B.x, ARR3B.z) - 24) && Math.abs(side) < 5) return false; // keep the lantern path clear
+        return true;
+    };
+    const scatter3 = (count, fn, margin = 0) => { let made = 0, guard = 0; while (made < count && guard++ < count * 40) { const a = srand() * 6.283, d = srange(SAFE_R + 1, shoreR3(a) - 9), x = Math.cos(a) * d, z = Math.sin(a) * d; if (!okSpot3(x, z, margin)) continue; fn(x, z, terrain3(x, z)); made++; } };
+    {
+        const stems = batch(new THREE.MeshLambertMaterial({ color: 0xe8dcc8, flatShading: true }));
+        const capCols = [0x8a5ae0, 0x5a7ae8, 0xc06ad8, 0x4ab0c8], capMats = capCols.map(c => new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.22, flatShading: true }));
+        const caps = capMats.map(m => batch(m)), gills = batch(new THREE.MeshLambertMaterial({ color: 0xd8c0e8, flatShading: true, side: THREE.DoubleSide })), dots = batch(glowM(0xfff0ff));
+        const capGeo = new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), gillGeo = new THREE.CylinderGeometry(0.97, 0.25, 0.22, 12, 1, true);
+        const shroom = (x, z, y, h, cr) => {
+            const lean = srange(-0.12, 0.12), tx = x + lean * h * 0.5, c = Math.floor(srand() * caps.length);
+            stems.add(CYL8, x + lean * h * 0.25, y + h / 2, z, 0, 0, -lean, cr * 0.14, h, cr * 0.14);
+            caps[c].add(capGeo, tx, y + h, z, 0, srand() * 3, 0, cr, cr * 0.48, cr);
+            gills.add(gillGeo, tx, y + h - cr * 0.08, z, 0, 0, 0, cr, cr * 0.5, cr);
+            for (let k = 0; k < 6; k++) { const a = srand() * 6.283, e = srange(0.3, 1.2); dots.add(ICO, tx + Math.cos(a) * Math.cos(e) * cr, y + h + Math.sin(e) * cr * 0.48, z + Math.sin(a) * Math.cos(e) * cr, 0, 0, 0, cr * 0.07, cr * 0.04, cr * 0.07); }
+            circles.push({ x: x + lean * h * 0.25, z, r: cr * 0.16 + 0.25 });
+            if (cr > 4) isle3.glowCaps.push({ x: tx, y: y + h, z });
+        };
+        for (let i = 0; i < 26; i++) { const a = srand() * 6.283, d = Math.sqrt(srand()) * GROVE3.r, x = GROVE3.x + Math.cos(a) * d, z = GROVE3.z + Math.sin(a) * d; if (i && Math.hypot(x - GROVE3.x, z - GROVE3.z) < 3) continue; const big = i < 1 || srand() < 0.35; shroom(x, z, terrain3(x, z), big ? srange(9, 15) : srange(4, 8), big ? srange(4.5, 7) : srange(2, 3.6)); }
+        scatter3(38, (x, z, y) => shroom(x, z, y, srange(3.2, 8), srange(1.6, 3.6)), 2);
+        stems.build(); caps.forEach(c => c.build()); gills.build(); dots.build();
+        const gl = new THREE.PointLight(0xb08aff, 14, 30, 1.5); gl.position.set(GROVE3.x, terrain3(GROVE3.x, GROVE3.z) + 6, GROVE3.z); scene.add(gl);
+        const l = label("GLOWCAP GROVE", "#d0a8ff", 3.4, 0.8); l.position.set(GROVE3.x, terrain3(GROVE3.x, GROVE3.z) + 18, GROVE3.z); l.maxD = 140;
+    }
+    {   // small glowing things: mushroom clusters, moonpetals, teal grass, silver rocks, fallen logs
+        const st = batch(lamb(0xe8e0d0)), gA = batch(glowM(0xd0a0ff)), gB = batch(glowM(0x7affe8)), gC = batch(glowM(0xff9ad8));
+        scatter3(170, (x, z, y) => { const b = [gA, gB, gC][Math.floor(srand() * 3)]; for (let i = 0; i < 4; i++) { const dx = srange(-0.6, 0.6), dz = srange(-0.6, 0.6), s = srange(0.18, 0.42), yy = terrain3(x + dx, z + dz); st.add(CYL6, x + dx, yy + s * 0.5, z + dz, 0, 0, 0, s * 0.18, s, s * 0.18); b.add(ICO, x + dx, yy + s, z + dz, 0, 0, 0, s * 0.42, s * 0.24, s * 0.42); } });
+        st.build(); gA.build(); gB.build(); gC.build();
+        const stem = batch(lamb(0x3a7a6a)), petals = batch(glowM(0xe8f0ff)), petals2 = batch(glowM(0x9fd8ff));
+        scatter3(60, (x, z) => { const n = 8 + Math.floor(srand() * 8); for (let i = 0; i < n; i++) { const fx = x + srange(-2.4, 2.4), fz = z + srange(-2.4, 2.4), fy = terrain3(fx, fz); stem.add(CYL6, fx, fy + 0.22, fz, 0, 0, 0, 0.02, 0.44, 0.02); (srand() < 0.6 ? petals : petals2).add(ICO, fx, fy + 0.5, fz, 0, 0, 0, 0.11, 0.06, 0.11); } });
+        stem.build(); petals.build(); petals2.build();
+        const g1 = batch(lamb(0x3a8a8a)), g2 = batch(lamb(0x6a5aaa));
+        scatter3(260, (x, z, y) => { const gb = srand() < 0.5 ? g1 : g2; for (let i = 0; i < 4; i++) gb.add(CONE6, x + srange(-0.3, 0.3), y + 0.3, z + srange(-0.3, 0.3), srange(-0.25, 0.25), 0, srange(-0.25, 0.25), 0.05, srange(0.45, 0.85), 0.05); });
+        g1.build(); g2.build();
+        const rocks = batch(lamb(0x8a86a4)), bigR = batch(lamb(0x5e5a78));
+        scatter3(110, (x, z, y) => { const s = srange(0.4, 1.5); rocks.add(ICO, x, y + s * 0.4, z, srand() * 3, srand() * 3, 0, s, s * srange(0.6, 1), s); if (s > 1.15) circles.push({ x, z, r: s * 0.85 }); });
+        scatter3(18, (x, z, y) => { const s = srange(2.2, 4); bigR.add(ICO, x, y + s * 0.35, z, srand() * 3, srand() * 3, 0, s, s * srange(0.6, 0.9), s * srange(0.8, 1.2)); circles.push({ x, z, r: s * 0.85 }); }, 3);
+        rocks.build(); bigR.build();
+        const logsB = batch(lamb(0x4a3a4a)), moss = batch(glowM(0x7affb0));
+        scatter3(20, (x, z, y) => { const r = srand() * 3, l = srange(2.4, 4.4); logsB.add(CYL6, x, y + 0.32, z, Math.PI / 2, r, 0, 0.32, l, 0.32); for (let k = 0; k < 3; k++) moss.add(ICO, x + Math.sin(r) * srange(-l / 2, l / 2), y + 0.62, z + Math.cos(r) * srange(-l / 2, l / 2), 0, 0, 0, 0.12, 0.06, 0.12); });
+        logsB.build(); moss.build();
+        // the beach: pale driftwood, shells, glowing coral fans
+        const beachSpot = (n, min, max, fn) => { for (let i = 0; i < n; i++) { const a = srand() * 6.283, d = shoreR3(a) - srange(min, max), x = Math.cos(a) * d, z = Math.sin(a) * d; if (Math.hypot(x - ARR3B.x, z - ARR3B.z) < 12) continue; fn(x, z, Math.max(0, terrain3(x, z))); } };
+        const drift = batch(lamb(0xb8b0c0)), shells = batch(glowM(0xf8eef8)), coral = batch(glowM(0xff8ad8)), coral2 = batch(glowM(0x7ad8ff));
+        beachSpot(30, 3, 11, (x, z, y) => drift.add(CYL6, x, y + 0.14, z, Math.PI / 2, 0, srand() * 3, 0.12, srange(1.5, 3.2), 0.12));
+        beachSpot(90, 2, 12, (x, z, y) => shells.add(ICO, x, y + 0.06, z, 0, srand() * 3, 0, 0.13, 0.08, 0.13));
+        beachSpot(40, 1, 7, (x, z, y) => { const b = srand() < 0.5 ? coral : coral2; for (let k = 0; k < 3; k++) b.add(CONE6, x + srange(-0.4, 0.4), y + 0.3, z + srange(-0.4, 0.4), srange(-0.4, 0.4), 0, srange(-0.4, 0.4), 0.07, srange(0.4, 0.9), 0.07); });
+        drift.build(); shells.build(); coral.build(); coral2.build();
+    }
+    // chests scattered about
+    for (let i = 0; i < 9; i++) { let guard = 0; while (guard++ < 60) { const a = srand() * 6.283, d = srange(36, 110), x = Math.cos(a) * d, z = Math.sin(a) * d; if (d > shoreAt3(x, z) - 12 || !okSpot3(x, z, 2)) continue; const c = makeChest(x, z, srand() * 6, i % 4 === 0); const y = terrain3(x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; break; } }
+    // falling-star effects and the boss's attack pieces live in the island group too
+    buildStarFx(); buildBossFx();
+    isle3.emit.forEach(e => smokeEmit.push(e));
+    addTgt = prevAdd; curBuild = 1;
+}
+
+// =====================================================================
+//  the Elder Heart: a sleeping world-tree boss in the Hollow
+// =====================================================================
+const BOSS_H = 22, BOSS_R = 3.4;
+const BOSS_T = { name: "The Elder Heart", col: "#ff5a8a", hp: 1, logs: 0, dmg: 1, speed: 0, bonus: 0, rare: true, wd: 0, wn: 0 };
+HIT_COL.elderheart = [0xff3a6a, 0x3a1a24];
+let boss = null; // the tree object (in `trees` only while the fight is on)
+const fight3 = { on: false, phase: 1, cd: 3, atk: null, atkT: 0, wall: 0, beat: 0, lag: 1, minions: [], hitWave: new Set(), dyingT: -1, intro: 0, heart: 0, seen: false };
+const bossMaxHp = () => Math.ceil(140 * hpScale() * (1 + 0.25 * (save.bossKills || 0)));
+const bossDmg = (k = 1) => Math.round(24 * isleDm() * (1 + 0.04 * (save.day - 1)) * k);
+const bossFx = { rings: [], spikes: [], seeds: [], waves: [] };
+let bossG = null, bossWall = null, bossStump = null, bossLabel = null, bossLight = null, bossHeart = null, bossCrown = null, hollowLabel = null;
+const bossCrownCol = new THREE.Color(0x3a1a5a), bossCrownRage = new THREE.Color(0x6a1030);
+function buildHollow() {
+    const H = HOLLOW, y0 = terrain3(H.x, H.z);
+    // the arena floor: dark earth with glowing veins running into the middle
+    const fl = new THREE.Mesh(new THREE.CircleGeometry(H.r + 0.5, 48), decalMat(0x24101c)); fl.rotation.x = -Math.PI / 2; fl.position.set(H.x, y0 + 0.03, H.z); scene.add(fl);
+    const veins = batch(new THREE.MeshBasicMaterial({ color: 0x8a1a4a, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 }));
+    for (let i = 0; i < 18; i++) { const a = (i / 18) * 6.283 + srand() * 0.2; let px = H.x + Math.cos(a) * 4, pz = H.z + Math.sin(a) * 4, aa = a; for (let s = 0; s < 6; s++) { aa += srange(-0.35, 0.35); const nx = px + Math.cos(aa) * 2.8, nz = pz + Math.sin(aa) * 2.8; if (Math.hypot(nx - H.x, nz - H.z) > H.r - 0.5) break; veins.add(BOX, (px + nx) / 2, y0 + 0.05, (pz + nz) / 2, 0, -aa, 0, 2.9, 0.02, 0.12); px = nx; pz = nz; } }
+    veins.build();
+    // gnarled roots arch over the rim, thorns and dark rocks crowd round it
+    const archM = lamb(0x2a1a24);
+    for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * 6.283 + 0.3, a2 = a + 0.42, r0 = H.r + 3.5;
+        const pA = V3(H.x + Math.cos(a) * r0, y0 - 0.5, H.z + Math.sin(a) * r0), pB = V3(H.x + Math.cos(a2) * r0, y0 - 0.5, H.z + Math.sin(a2) * r0);
+        const mid = pA.clone().add(pB).multiplyScalar(0.5).add(V3(0, srange(6, 9), 0)).addScaledVector(V3(H.x - mid0(pA, pB).x, 0, H.z - mid0(pA, pB).z).normalize(), 2.5);
+        const tg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([pA, mid, pB]), 18, srange(0.45, 0.7), 6, false);
+        scene.add(new THREE.Mesh(tg, archM));
+    }
+    const thorn = batch(lamb(0x3a1a2a)), rk = batch(lamb(0x3a3044));
+    for (let i = 0; i < 70; i++) { const a = srand() * 6.283, d = srange(H.r + 2, H.r + 7), x = H.x + Math.cos(a) * d, z = H.z + Math.sin(a) * d, y = terrain3(x, z); if (srand() < 0.6) { for (let k = 0; k < 4; k++) thorn.add(CONE6, x + srange(-0.4, 0.4), y + 0.5, z + srange(-0.4, 0.4), srange(-0.6, 0.6), 0, srange(-0.6, 0.6), 0.08, srange(0.8, 1.6), 0.08); } else { const s = srange(0.6, 1.6); rk.add(ICO, x, y + s * 0.4, z, srand(), srand() * 3, 0, s, s * 0.7, s); } }
+    thorn.build(); rk.build();
+    // the wall of roots that rises when the fight begins
+    bossWall = new THREE.Group(); bossWall.position.set(H.x, y0 - 6.2, H.z); scene.add(bossWall);
+    const wb = batch(lamb(0x2a1420)), wt = batch(glowM(0xff3a6a));
+    { const was = addTgt; addTgt = bossWall;
+      for (let i = 0; i < 44; i++) { const a = (i / 44) * 6.283, r = H.r + 0.4 + srange(-0.3, 0.3), x = Math.cos(a) * r, z = Math.sin(a) * r, h = srange(5, 7.5); wb.add(CONE6, x, h / 2, z, srange(-0.15, 0.15), srand() * 3, srange(-0.15, 0.15), srange(0.6, 0.95), h, srange(0.6, 0.95)); if (i % 3 === 0) wt.add(ICO, x * 0.97, h * 0.62, z * 0.97, 0, 0, 0, 0.14); }
+      wb.build(); wt.build(); addTgt = was; }
+    bossWall.visible = false;
+    // the stump left behind when it falls
+    bossStump = new THREE.Group(); bossStump.position.set(H.x, y0, H.z); scene.add(bossStump);
+    part(bossStump, new THREE.CylinderGeometry(BOSS_R * 1.05, BOSS_R * 1.35, 2.4, 12), lamb(0x2a1a24), 0, 1.2, 0, 1, 1, 1);
+    part(bossStump, new THREE.CircleGeometry(BOSS_R * 1.03, 14), lamb(0x7a4a3a), 0, 2.42, 0, 1, 1, 1, -Math.PI / 2);
+    part(bossStump, new THREE.CircleGeometry(BOSS_R * 0.35, 10), glowM(0xff3a6a), 0, 2.44, 0, 1, 1, 1, -Math.PI / 2);
+    bossStump.visible = false;
+    buildBossModel(y0);
+    hollowLabel = label("THE HOLLOW", "#ff5a8a", 3.6, 0.8); hollowLabel.position.set(H.x, y0 + 31, H.z); hollowLabel.maxD = 260; hollowLabel.blurK = 0.4;
+    bossLabel = label("THE ELDER HEART · sleeping", "#ff9ab8", 2.8, 0.7); bossLabel.position.set(H.x, y0 + 27, H.z); bossLabel.maxD = 120;
+}
+const mid0 = (a, b) => ({ x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 });
+function buildBossModel(y0) {
+    const H = HOLLOW;
+    bossG = new THREE.Group(); bossG.position.set(H.x, y0 - 0.2, H.z); scene.add(bossG);
+    const body = new THREE.Group(); bossG.add(body);
+    const barkM = new THREE.MeshLambertMaterial({ color: 0x2e1c28, flatShading: true });
+    const tg = new THREE.CylinderGeometry(BOSS_R * 0.7, BOSS_R * 1.25, BOSS_H, 12, 8);
+    { const p = tg.attributes.position; for (let i = 0; i < p.count; i++) { const u = p.getY(i) / BOSS_H + 0.5, k = 1 + 0.1 * Math.sin(u * 13 + p.getX(i) * 2) + 0.06 * Math.sin(Math.atan2(p.getZ(i), p.getX(i)) * 5); p.setX(i, p.getX(i) * k + Math.sin(u * 3) * 0.6); p.setZ(i, p.getZ(i) * k); } tg.computeVertexNormals(); }
+    const trunk = new THREE.Mesh(tg, barkM); trunk.position.y = BOSS_H / 2; body.add(trunk);
+    const roots = batch(barkM); { const was = addTgt; addTgt = body;
+        for (let i = 0; i < 9; i++) { const a = (i / 9) * 6.283 + srand() * 0.3; roots.add(CONE6, Math.cos(a) * BOSS_R * 1.5, BOSS_R * 0.4, Math.sin(a) * BOSS_R * 1.5, 0, -a, Math.PI / 2 + 0.5, BOSS_R * 0.5, BOSS_R * 2.8, BOSS_R * 0.5); }
+        roots.build(); addTgt = was; }
+    // the crown: dark violet clouds of leaves with glowing fruit and hanging vines
+    bossCrown = new THREE.MeshLambertMaterial({ color: 0x3a1a5a, emissive: 0x14061e, flatShading: true });
+    const crownB = batch(bossCrown), fruit = batch(glowM(0xff5a8a)), vines = batch(lamb(0x2a3a2a));
+    { const was = addTgt; addTgt = body;
+      crownB.add(ICO, 0, BOSS_H * 1.02, 0, 0, 0, 0, 6.5, 4.6, 6.5);
+      for (let i = 0; i < 9; i++) { const a = (i / 9) * 6.283, d = srange(4.5, 6.5), y = BOSS_H * srange(0.78, 0.95), s = srange(3.2, 4.6); crownB.add(ICO, Math.cos(a) * d, y, Math.sin(a) * d, srand(), srand() * 3, 0, s, s * 0.8, s); for (let k = 0; k < 2; k++) fruit.add(ICO, Math.cos(a) * (d + s * 0.8), y - s * 0.3 + k, Math.sin(a) * (d + s * 0.8), 0, 0, 0, 0.45); }
+      for (let i = 0; i < 16; i++) { const a = srand() * 6.283, d = srange(3, 8), l = srange(3, 7); vines.add(CYL6, Math.cos(a) * d, BOSS_H * 0.8 - l / 2, Math.sin(a) * d, 0, 0, 0, 0.08, l, 0.08); }
+      const crownMesh = crownB.build(); fruit.build(); vines.build(); addTgt = was;
+      // the heart: a glowing core in a cracked hollow of the trunk
+      const front = BOSS_R * 1.06;
+      part(body, new THREE.CircleGeometry(1.6, 12), new THREE.MeshBasicMaterial({ color: 0x0a0408 }), 0, 6, front + 0.02, 1, 1.3, 1);
+      bossHeart = part(body, new THREE.IcosahedronGeometry(1, 1), glowM(0xff3a6a), 0, 6, front - 0.3, 0.95, 1.1, 0.8);
+      const cracks = batch(glowM(0xb01a4a)); { const w2 = addTgt; addTgt = body; for (let i = 0; i < 9; i++) { const a = (i / 9) * 6.283, l = srange(1.5, 3); cracks.add(BOX, Math.cos(a) * (1.4 + l / 2), 6 + Math.sin(a) * (1.4 + l / 2) * 1.3, front + 0.05, 0, 0, a, l, 0.12, 0.05); } cracks.build(); addTgt = w2; }
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMats.calm); face.scale.setScalar(6.2); face.position.set(0, 12.2, BOSS_R * 0.98 + 0.1); body.add(face);
+      // four great arms
+      const arms = [], aGeo = armGeometry(9);
+      for (const [s, y, zz] of [[-1, 14.5, 0.6], [1, 14.5, 0.6], [-1, 11, -0.4], [1, 11, -0.4]]) {
+          const pivot = new THREE.Group(); pivot.position.set(s * BOSS_R * 0.78, y, zz);
+          const arm = new THREE.Mesh(aGeo, barkM); arm.scale.set(2.6, 1, 2.6); arm.rotation.z = -s * 2.2; pivot.add(arm); body.add(pivot);
+          arms.push({ pivot, arm, s, low: y < 12 });
+      }
+      bossLight = new THREE.PointLight(0xff3a6a, 2, 30, 1.6); bossLight.position.set(0, 7, 6); bossG.add(bossLight);
+      boss = { boss: true, key: "elderheart", type: BOSS_T, g: bossG, body, face, arms, h: BOSS_H, r: BOSS_R, x: H.x, z: H.z, gy: y0, hp: 1, maxHp: 1, solid: [trunk, crownMesh],
+          dying: false, burn: false, gone: false, t: 0, hurt: 0, phase: 0, mode: "calm", atk: "idle", atkT: 0, cool: 0, armUp: 0, swing: 0, slam: 0, bar: null, barT: 0 };
+    }
+    circles.push({ x: H.x, z: H.z, r: BOSS_R * 1.15 });
+    occluders.push(trunk);
+}
+function buildBossFx() {
+    const ringM = new THREE.MeshBasicMaterial({ color: 0xff2a4a, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
+    for (let i = 0; i < 16; i++) {
+        const g = new THREE.Group(), m = ringM.clone();
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.88, 1, 32), m); ring.rotation.x = -Math.PI / 2; g.add(ring);
+        const fill = new THREE.Mesh(new THREE.CircleGeometry(1, 32), m.clone()); fill.rotation.x = -Math.PI / 2; fill.material.opacity = 0.2; g.add(fill);
+        g.visible = false; scene.add(g); bossFx.rings.push({ g, ring, fill, t: -1, life: 1, r: 1 });
+    }
+    const spM = lamb(0x3a1424), tipM = glowM(0xff3a6a);
+    for (let i = 0; i < 10; i++) {
+        const g = new THREE.Group();
+        for (let k = 0; k < 7; k++) { const a = (k / 7) * 6.283 + Math.random(), d = k ? rand(0.6, 1.8) : 0, h = k ? rand(1.6, 2.8) : 3.4; const c = part(g, CONE6, spM, Math.cos(a) * d, h / 2, Math.sin(a) * d, 0.38, h, 0.38, rand(-0.3, 0.3), 0, rand(-0.3, 0.3)); part(g, ICO, tipM, c.position.x, h * 0.95, c.position.z, 0.1, 0.1, 0.1); }
+        g.visible = false; scene.add(g); bossFx.spikes.push({ g, t: -1, x: 0, z: 0, y: 0, hit: false });
+    }
+    const seedM = glowM(0xff6a9a), seedM2 = glowM(0xffe0ea);
+    for (let i = 0; i < 18; i++) { const g = new THREE.Group(); part(g, ICO, seedM, 0, 0, 0, 0.42, 0.42, 0.42); part(g, ICO, seedM2, 0, 0, 0, 0.2, 0.2, 0.2); g.visible = false; scene.add(g); bossFx.seeds.push({ g, t: -1, dur: 1, a: V3(0, 0, 0), b: V3(0, 0, 0), ring: null }); }
+    for (let i = 0; i < 3; i++) {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1.1, 64, 1, true), new THREE.MeshBasicMaterial({ color: 0xff6a9a, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+        m.visible = false; scene.add(m); bossFx.waves.push({ m, R: -1 });
+    }
+}
+// show the right thing in the Hollow: the sleeping tree, or the stump until dawn
+function syncBoss() {
+    if (!bossG) return;
+    const dead = save.bossDay === save.day && save.bossKills > 0;
+    bossG.visible = !dead; bossStump.visible = dead;
+    bossLabel.el.textContent = dead ? "THE ELDER HEART · regrows at dawn" : "THE ELDER HEART · sleeping";
+    bossLabel.visible = !fight3.on;
+    if (!dead) { boss.body.rotation.set(0, 0, 0); boss.dying = false; boss.gone = false; bossG.scale.setScalar(1); }
+}
+function startFight() {
+    const f = fight3;
+    f.on = true; f.phase = 1; f.cd = 3.2; f.atk = null; f.atkT = 0; f.lag = 1; f.minions = []; f.dyingT = -1; f.intro = 0; f.heart = 0;
+    boss.maxHp = boss.hp = bossMaxHp(); boss.dying = false; boss.gone = false; boss.t = 0; boss.hurt = 0;
+    if (!trees.includes(boss)) trees.push(boss);
+    bossWall.visible = true; bossLabel.visible = false;
+    $("bossBar").classList.add("show"); $("bossPh").textContent = ""; $("bossBar").classList.remove("rage");
+    roar(1); shake = 0.9; flash = 0.25;
+    titleCard("THE ELDER HEART", "the oldest tree in the world wakes up");
+    toast("Roots seal the Hollow. The only way out is through.", "bad");
+    if (!f.seen) { f.seen = true; setTimeout(() => { if (fight3.on) toast("Watch the ground. Red rings burst. When it slams, JUMP the shockwave.", "rare"); }, 3500); }
+}
+function endFight(won, quiet) {
+    const f = fight3;
+    f.on = false; f.atk = null;
+    $("bossBar").classList.remove("show");
+    for (const t of f.minions) if (!t.gone && !t.dying) t.burn = true;
+    f.minions = [];
+    for (const r of bossFx.rings) { r.t = -1; r.g.visible = false; }
+    for (const s of bossFx.spikes) if (s.t >= 0 && s.t < 0.8) s.t = 0.8;
+    for (const s of bossFx.seeds) { s.on = false; s.g.visible = false; }
+    for (const w of bossFx.waves) { w.R = -1; w.m.visible = false; }
+    if (!won) {
+        boss.hp = boss.maxHp; boss.gone = true; // out of the trees list; it goes back to sleep
+        for (const a of boss.arms) a.pivot.rotation.x = 0;
+        if (!quiet) setTimeout(() => toast("The Elder Heart sinks back into sleep...", "rare"), 1500);
+        bossLabel.visible = true;
+    }
+}
+function roar(k = 1) { sfx(70 * k, 1.3, "sawtooth", 0.2, 0.45); sfx(105 * k, 1.0, "square", 0.08, 0.4); sfx(52, 1.6, "sine", 0.22, 0.6); }
+let titleT = null;
+function titleCard(big, small) {
+    const e = $("titleCard"); $("tcBig").textContent = big; $("tcSmall").textContent = small || "";
+    e.classList.remove("show"); void e.offsetWidth; e.classList.add("show");
+    clearTimeout(titleT); titleT = setTimeout(() => e.classList.remove("show"), 3600);
+}
+function bossHurt(t, dmg) {
+    fight3.heart = 1;
+    if (Math.random() < 0.3) sfx(60 + Math.random() * 20, 0.15, "sine", 0.12, 0.6);
+}
+function bossDefeated(t) {
+    const f = fight3;
+    f.dyingT = 0; t.gone = true; // out of the trees list right away; the fall is just for show
+    endFight(true);
+    save.bossKills = (save.bossKills || 0) + 1; save.bossDay = save.day;
+    save.felled++; contractProgress("fell"); contractProgress("rare");
+    roar(0.7); shake = 1; flash = 0.9; hitstop = 0.25;
+    titleCard("THE ELDER HEART FALLS", "it will regrow at dawn");
+    writeSave();
+}
+function bossRewards() {
+    const k = save.bossKills, first = k === 1, cash = Math.round(60000 * rebirthMult() * (1 + 0.3 * (k - 1)));
+    save.money += cash;
+    const drops = [["heartwood", first ? 3 : 1 + (Math.random() < 0.5 ? 1 : 0)], ["star", 3 + Math.floor(Math.random() * 3)], ["moonstone", 18 + Math.floor(Math.random() * 18)], ["void", 10 + Math.floor(Math.random() * 10)]];
+    for (const [m, n] of drops) dropMats(HOLLOW.x, HOLLOW.z, m, n);
+    toast(`+${money(cash)} from the Elder Heart${first ? " · FIRST KILL!" : ""}`, "cash");
+    toast("Heartwood, Star Shards, Moonstone and Voidglass spill out of the trunk. Grab them!", "rare");
+    if (first) setTimeout(() => toast("The Moonforge can now make Elder's Bane, the strongest axe there is.", "good"), 2500);
+    burst(V3(HOLLOW.x, boss.gy + 3, HOLLOW.z), 60, 9, [fxRed, fxWhite, fxGold]);
+    sfx(392, 0.6, "triangle", 0.12, 1.5); setTimeout(() => sfx(523, 0.6, "triangle", 0.12, 1.5), 160); setTimeout(() => sfx(784, 1.0, "triangle", 0.12, 1.2), 340);
+    writeSave();
+}
+// materials that burst out and fly to you, like logs do
+function dropMats(x, z, mat, n) {
+    const meshes = Math.min(n, 10), base = Math.floor(n / meshes), extra = n % meshes;
+    for (let i = 0; i < meshes; i++) {
+        const m = new THREE.Mesh(matGeo, matMeshMat[mat]), a = Math.random() * 6.283, d = rand(BOSS_R + 1, BOSS_R + 6);
+        m.position.set(x + Math.cos(a) * d, groundY(x, z) + 1.5, z + Math.sin(a) * d);
+        if (base > 1) m.scale.setScalar(Math.min(1.8, 1 + base * 0.08));
+        scene.add(m);
+        logs.push({ m, vy: 5 + Math.random() * 4, bonus: 0, w: base + (i < extra ? 1 : 0), mat });
+    }
+}
+const bossDist = () => Math.hypot(player.pos.x - HOLLOW.x, player.pos.z - HOLLOW.z);
+const grounded = () => player.pos.y - (groundY(player.pos.x, player.pos.z) + 1.7) < 0.32;
+function bossHit(dmgK, sx, sz) { if (player.invuln > 0) return; hurtPlayer(bossDmg(dmgK), sx, sz); }
+function ringAt(x, z, r, life, col = 0xff2a4a) {
+    const o = bossFx.rings.find(q => q.t < 0); if (!o) return null;
+    o.t = 0; o.life = life; o.r = r; o.g.position.set(x, groundY(x, z) + 0.08, z); o.g.scale.setScalar(r); o.g.visible = true;
+    o.ring.material.color.setHex(col); o.fill.material.color.setHex(col);
+    return o;
+}
+function eruptAt(x, z) {
+    const s = bossFx.spikes.find(q => q.t < 0); if (!s) return;
+    s.t = 0; s.x = x; s.z = z; s.y = groundY(x, z); s.hit = false; s.burst = false; s.g.position.set(x, s.y - 3.6, z); s.g.rotation.y = Math.random() * 6; s.g.visible = true;
+}
+function pickBossAttack() {
+    const f = fight3, d = bossDist(), alive = f.minions.filter(t => !t.gone && !t.dying && !t.burn).length;
+    const opts = [];
+    if (d < BOSS_R + 7.5) opts.push(["swipe", 3.2]);
+    opts.push(["roots", 3], ["seeds", 2.2]);
+    if (f.phase >= 2) opts.push(["quake", 2.6]);
+    if (alive < (f.phase >= 2 ? 5 : 2)) opts.push(["summon", f.phase >= 2 ? 1.1 : 0.6]);
+    let r = Math.random() * opts.reduce((a, o) => a + o[1], 0);
+    for (const [k, w] of opts) { r -= w; if (r <= 0 && k !== f.last) return k; }
+    return opts[0][0];
+}
+function startBossAttack(k) {
+    const f = fight3;
+    f.atk = k; f.atkT = 0; f.last = k; f.fired = false; f.step = 0;
+    if (k === "swipe") { floatWorld(V3(boss.x, boss.gy + 13, boss.z), "!", "warn"); sfx(150, 0.4, "sawtooth", 0.08, 0.5); }
+    if (k === "roots") {
+        const n = f.phase === 1 ? 1 : f.phase === 2 ? 3 : 5, vx = player.vel.x, vz = player.vel.z;
+        f.targets = [];
+        for (let i = 0; i < n; i++) {
+            let x = player.pos.x, z = player.pos.z;
+            if (i === 1) { x += vx * 0.8; z += vz * 0.8; } else if (i > 1) { const a = Math.random() * 6.283, d = rand(3, 7); x += Math.cos(a) * d; z += Math.sin(a) * d; }
+            const dd = Math.hypot(x - HOLLOW.x, z - HOLLOW.z), lim = HOLLOW.r - 2; if (dd > lim) { x = HOLLOW.x + (x - HOLLOW.x) / dd * lim; z = HOLLOW.z + (z - HOLLOW.z) / dd * lim; }
+            f.targets.push({ x, z }); ringAt(x, z, 2.6, f.phase >= 2 ? 0.95 : 1.15);
+        }
+        sfx(90, 0.6, "sawtooth", 0.06, 0.7);
+    }
+    if (k === "seeds") {
+        const n = f.phase === 1 ? 5 : f.phase === 2 ? 8 : 11;
+        for (let i = 0; i < n; i++) {
+            const s = bossFx.seeds.find(q => !q.on); if (!s) break;
+            const lead = i === 0 ? 0 : 0.9, a = Math.random() * 6.283, d = i === 0 ? 0 : rand(1.5, 6.5);
+            let x = player.pos.x + player.vel.x * lead + Math.cos(a) * d, z = player.pos.z + player.vel.z * lead + Math.sin(a) * d;
+            const dd = Math.hypot(x - HOLLOW.x, z - HOLLOW.z), lim = HOLLOW.r - 1.5; if (dd > lim) { x = HOLLOW.x + (x - HOLLOW.x) / dd * lim; z = HOLLOW.z + (z - HOLLOW.z) / dd * lim; }
+            s.on = true; s.t = -0.12 * i; s.dur = rand(1.1, 1.5); s.a.set(boss.x + rand(-4, 4), boss.gy + BOSS_H * 0.85, boss.z + rand(-4, 4)); s.b.set(x, groundY(x, z), z);
+            s.ring = null; s.g.visible = false;
+        }
+        sfx(500, 0.25, "triangle", 0.06, 0.6);
+    }
+    if (k === "quake") { floatScreen("JUMP!", "warn"); sfx(80, 0.9, "sawtooth", 0.1, 0.5); }
+    if (k === "summon") { roar(1.4); }
+}
+function spawnThornling(x, z) {
+    const t = makeTree(x, z, rand(2.4, 3.4), "thornling");
+    t.minion = true; t.cool = 0.6; fight3.minions.push(t);
+    burst(V3(x, groundY(x, z) + 0.5, z), 16, 5, [fxRed, chipMats[2]]);
+    sfx(200, 0.3, "sawtooth", 0.07, 0.4);
+}
+function updateFight(dt) {
+    const f = fight3, B = boss, d = bossDist();
+    // walls rise, the heart pulses, the tree turns to watch you
+    f.wall = Math.min(1, f.wall + dt * 0.8);
+    bossWall.position.y = B.gy - 6.2 + eio(f.wall) * 6.2;
+    f.heart = Math.max(0, f.heart - dt * 3);
+    const yaw = Math.atan2(player.pos.x - B.x, player.pos.z - B.z);
+    bossG.rotation.y += angDiff(yaw, bossG.rotation.y) * Math.min(1, (f.phase >= 2 ? 1.6 : 1.0) * dt);
+    // phases
+    const frac = B.hp / B.maxHp;
+    if (f.phase === 1 && frac <= 0.5) {
+        f.phase = 2; roar(0.8); shake = 0.8; flash = 0.3;
+        $("bossPh").textContent = "· ENRAGED"; $("bossBar").classList.add("rage");
+        toast("The Elder Heart is ENRAGED! Its shockwaves can be jumped.", "bad");
+        for (let i = 0; i < 3; i++) { const a = Math.random() * 6.283; spawnThornling(B.x + Math.cos(a) * 9, B.z + Math.sin(a) * 9); }
+        f.atk = null; f.cd = 1.2;
+    } else if (f.phase === 2 && frac <= 0.2) { f.phase = 3; roar(0.6); $("bossPh").textContent = "· DESPERATE"; toast("It's nearly done. So is your health, probably.", "rare"); }
+    bossCrown.color.copy(bossCrownCol).lerp(bossCrownRage, f.phase >= 2 ? 1 : 0);
+    // heartbeat drone
+    f.beat -= dt;
+    if (f.beat <= 0) { f.beat = f.phase === 1 ? 1.2 : f.phase === 2 ? 0.85 : 0.6; sfx(58, 0.2, "sine", 0.2, 0.6); setTimeout(() => sfx(50, 0.16, "sine", 0.14, 0.6), 170); f.heart = Math.max(f.heart, 0.6); }
+    // attacks
+    if (!f.atk) { f.cd -= dt; if (f.cd <= 0) startBossAttack(pickBossAttack()); }
+    else {
+        f.atkT += dt;
+        const A = f.atk, k = f.phase >= 2 ? 0.8 : 1;
+        if (A === "swipe") {
+            if (f.atkT < 0.8 * k) B.armUp = lerp(B.armUp, 1, Math.min(1, 8 * dt));
+            else if (!f.fired) { f.fired = true; B.slam = 1; sfx(120, 0.25, "sawtooth", 0.12, 0.4); if (d < BOSS_R + 8) bossHit(1.3, B.x, B.z); }
+            if (f.atkT > 0.8 * k + 0.5) endAttack();
+        } else if (A === "roots") {
+            const T = f.phase >= 2 ? 0.95 : 1.15;
+            if (f.atkT >= T && !f.fired) { f.fired = true; for (const p of f.targets) eruptAt(p.x, p.z); shake = Math.max(shake, 0.4); sfx(70, 0.4, "square", 0.14, 0.5); }
+            if (f.atkT > T + 0.6) endAttack();
+        } else if (A === "seeds") {
+            if (f.atkT > 2.4) endAttack();
+        } else if (A === "quake") {
+            if (f.atkT < 1.0 * k) B.armUp = lerp(B.armUp, 1.4, Math.min(1, 6 * dt));
+            else if (f.step < (f.phase === 3 ? 2 : 1) && f.atkT > 1.0 * k + f.step * 0.7) {
+                f.step++; B.slam = 1; shake = 0.9; f.hitWave = new Set();
+                const w = bossFx.waves.find(q => q.R < 0); if (w) { w.R = BOSS_R + 1; w.m.visible = true; w.id = Math.random(); }
+                sfx(55, 0.8, "sawtooth", 0.2, 0.4); sfx(90, 0.5, "square", 0.12, 0.5);
+                burst(V3(B.x, B.gy + 0.5, B.z), 30, 7, [chipMats[2], fxPink]);
+            }
+            if (f.atkT > 1.0 * k + 2.4) endAttack();
+        } else if (A === "summon") {
+            if (f.atkT > 0.5 && !f.fired) { f.fired = true; const n = f.phase >= 2 ? 3 : 2; for (let i = 0; i < n; i++) { const a = yaw + Math.PI + rand(-1.4, 1.4), r = rand(7, 13); spawnThornling(B.x + Math.sin(a) * r, B.z + Math.cos(a) * r); } }
+            if (f.atkT > 1.2) endAttack();
+        }
+    }
+    // arms
+    B.armUp = lerp(B.armUp, 0, Math.min(1, 2 * dt)); B.slam = Math.max(0, B.slam - dt * 3);
+    for (const a of B.arms) {
+        a.arm.rotation.z = -a.s * (2.2 - B.armUp * 1.0) + Math.sin(time * 1.1 + a.s + (a.low ? 1 : 0)) * 0.08;
+        a.pivot.rotation.x = -B.slam * (a.low ? 0.9 : 1.4) + B.armUp * 0.3;
+    }
+    const mode = B.hurt > 0.25 || f.phase >= 3 ? "scream" : "angry";
+    if (B.mode !== mode) { B.mode = mode; B.face.material = faceMats[mode]; }
+    B.hurt = Math.max(0, B.hurt - dt * 4);
+    B.body.rotation.z = Math.sin(time * 0.7) * 0.012 + (Math.random() - 0.5) * B.hurt * 0.02;
+    // the bar (the white part catches up slowly)
+    f.lag = Math.max(frac, f.lag - dt * 0.35);
+    $("bossFill").style.width = (frac * 100) + "%"; $("bossLag").style.width = (f.lag * 100) + "%";
+    $("bossHp").textContent = Math.max(0, Math.ceil(B.hp)).toLocaleString() + " / " + B.maxHp.toLocaleString();
+}
+function endAttack() { const f = fight3; f.atk = null; f.cd = f.phase === 1 ? rand(2.2, 3.2) : f.phase === 2 ? rand(1.5, 2.3) : rand(1.0, 1.6); }
+// rings, spikes, seeds and shockwaves keep moving even right after the fight ends
+function updateBossFx(dt) {
+    for (const r of bossFx.rings) {
+        if (r.t < 0) continue;
+        r.t += dt; const u = r.t / r.life;
+        r.fill.scale.setScalar(Math.min(1, u)); r.ring.material.opacity = 0.45 + Math.sin(time * 18) * 0.25; r.fill.material.opacity = 0.18 + u * 0.25;
+        if (u >= 1) { r.t = -1; r.g.visible = false; }
+    }
+    for (const s of bossFx.spikes) {
+        if (s.t < 0) continue;
+        s.t += dt;
+        const up = s.t < 0.12 ? s.t / 0.12 : s.t < 0.8 ? 1 : Math.max(0, 1 - (s.t - 0.8) / 0.4);
+        s.g.position.y = s.y - 3.6 + up * 3.6;
+        if (!s.hit && s.t < 0.3 && fight3.on && Math.hypot(player.pos.x - s.x, player.pos.z - s.z) < 2.7) { s.hit = true; bossHit(1, s.x, s.z); player.vel.y = 6; }
+        if (!s.burst) { s.burst = true; burst(V3(s.x, s.y + 0.3, s.z), 12, 5, [chipMats[2], fxRed]); }
+        if (s.t > 1.2) { s.t = -1; s.g.visible = false; }
+    }
+    for (const s of bossFx.seeds) {
+        if (!s.on) continue;
+        s.t += dt;
+        if (s.t < 0) continue;
+        if (!s.ring) { s.ring = ringAt(s.b.x, s.b.z, 2.2, s.dur, 0xff6a9a); s.g.visible = true; }
+        const u = Math.min(1, s.t / s.dur);
+        s.g.position.set(lerp(s.a.x, s.b.x, u), lerp(s.a.y, s.b.y, u) + Math.sin(u * Math.PI) * 9, lerp(s.a.z, s.b.z, u));
+        s.g.rotation.y += dt * 8;
+        if (u >= 1) {
+            s.on = false; s.g.visible = false;
+            burst(V3(s.b.x, s.b.y + 0.4, s.b.z), 12, 6, [fxPink, fxWhite]);
+            const dd = Math.hypot(player.pos.x - s.b.x, player.pos.z - s.b.z);
+            if (dd < 2.3 && fight3.on) bossHit(0.7, s.b.x, s.b.z);
+            if (dd < 25) sfx(160 + Math.random() * 60, 0.2, "square", 0.08 * (1 - dd / 25), 0.4);
+        }
+    }
+    for (const w of bossFx.waves) {
+        if (w.R < 0) continue;
+        w.R += dt * 13;
+        w.m.scale.set(w.R, 1, w.R); w.m.position.set(HOLLOW.x, boss.gy + 0.55, HOLLOW.z); w.m.material.opacity = 0.65 * (1 - w.R / (HOLLOW.r + 2));
+        const dd = bossDist();
+        if (fight3.on && Math.abs(dd - w.R) < 0.9 && grounded() && !fight3.hitWave.has(w.id)) { fight3.hitWave.add(w.id); bossHit(0.9, HOLLOW.x, HOLLOW.z); player.vel.y = 5; const ux = (player.pos.x - HOLLOW.x) / (dd || 1), uz = (player.pos.z - HOLLOW.z) / (dd || 1); player.vel.x += ux * 9; player.vel.z += uz * 9; }
+        if (w.R > HOLLOW.r + 2) { w.R = -1; w.m.visible = false; }
+    }
+}
+function updateBoss(dt, animOnly) {
+    if (!bossG) return;
+    const f = fight3, B = boss;
+    if (bossLight) bossLight.intensity = (f.on ? 6 + Math.sin(time * 6) * 2 : 1.5 + Math.sin(time * 1.5) * 0.6) + f.heart * 10;
+    if (bossHeart) { const s = 1 + Math.sin(time * (f.on ? 6 : 2)) * 0.08 + f.heart * 0.25; bossHeart.scale.set(0.95 * s, 1.1 * s, 0.8 * s); }
+    updateBossFx(dt);
+    if (f.dyingT >= 0) { // the great fall
+        f.dyingT += dt;
+        const u = Math.min(1, f.dyingT / 3.2);
+        B.body.rotation.x = -Math.pow(u, 2.2) * Math.PI * 0.46;
+        if (f.dyingT < 2.6 && Math.random() < dt * 20) burst(V3(B.x + rand(-3, 3), B.gy + rand(1, 12), B.z + rand(-3, 3)), 2, 3, [fxRed, chipMats[2]]);
+        if (u >= 1 && !f.landed) { f.landed = true; shake = 1.2; sfx(45, 1.2, "sawtooth", 0.25, 0.4); bossRewards(); }
+        if (f.dyingT > 4.4) { f.dyingT = -1; f.landed = false; bossG.visible = false; bossStump.visible = true; bossLabel.el.textContent = "THE ELDER HEART · regrows at dawn"; bossLabel.visible = true; bossWall.visible = false; }
+    }
+    if (!f.on && f.wall > 0) { f.wall = Math.max(0, f.wall - dt * 0.6); bossWall.position.y = B.gy - 6.2 + eio(f.wall) * 6.2; if (f.wall <= 0 && f.dyingT < 0) bossWall.visible = false; }
+    if (f.on) { if (!animOnly && state === "playing") updateFight(dt); return; }
+    if (f.dyingT >= 0 || !bossG.visible) return;
+    // asleep: it breathes, and its arms drift
+    B.body.rotation.z = Math.sin(time * 0.4) * 0.01;
+    for (const a of B.arms) { a.arm.rotation.z = -a.s * 2.2 + Math.sin(time * 0.5 + a.s) * 0.05; a.pivot.rotation.x = 0; }
+    if (B.mode !== "calm") { B.mode = "calm"; B.face.material = faceMats.calm; }
+    bossG.rotation.y += angDiff(0, bossG.rotation.y) * Math.min(1, dt * 0.3);
+    if (!animOnly && state === "playing" && !ride && bossDist() < HOLLOW.r - 3 && player.hp > 0 && !(save.bossDay === save.day && save.bossKills > 0)) startFight();
+}
+
+// =====================================================================
+//  falling stars: at night, now and then, a star comes down somewhere on the island
+// =====================================================================
+const stars3 = []; // fallen stars waiting to be picked up
+const falling = []; // stars still on their way down
+let starT = 40;
+const fallStarMat = new THREE.MeshBasicMaterial({ color: 0xfff4a0 }), starBeamMat = new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, fog: false });
+let starGeo = null;
+function buildStarFx() {
+    const s = new THREE.Shape();
+    for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 + Math.PI / 2, rr = i % 2 ? 0.26 : 0.62; i ? s.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : s.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    s.closePath();
+    starGeo = new THREE.ExtrudeGeometry(s, { depth: 0.16, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 1 }); starGeo.translate(0, 0, -0.08);
+}
+const compass = (dx, dz) => ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"][Math.round(((Math.atan2(dx, -dz) + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
+function randStarSpot(nearX, nearZ, rMin = 0, rMax = 999) {
+    for (let i = 0; i < 80; i++) {
+        let x, z;
+        if (nearX !== undefined) { const a = Math.random() * 6.283, d = rand(rMin, rMax); x = nearX + Math.cos(a) * d; z = nearZ + Math.sin(a) * d; }
+        else { const a = Math.random() * 6.283, d = rand(SAFE_R + 8, shoreR3(a) - 14); x = Math.cos(a) * d; z = Math.sin(a) * d; }
+        const d0 = Math.hypot(x, z);
+        if (d0 < SAFE_R + 4 || d0 > shoreAt3(x, z) - 10 || !treeOk3(x, z)) continue;
+        return { x, z };
+    }
+    return { x: CRATER.x + 4, z: CRATER.z + 4 };
+}
+function dropStar(x, z, announce = true) {
+    const y = groundY(x, z), a = Math.random() * 6.283;
+    const head = new THREE.Mesh(ICO, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false })); head.scale.setScalar(1.1);
+    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.9, 1, 6, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.7, fog: false, depthWrite: false }));
+    isle3G.add(head, tail);
+    falling.push({ head, tail, from: V3(x + Math.cos(a) * 170, y + 150, z + Math.sin(a) * 170), to: V3(x, y + 0.6, z), t: 0, dur: 2.6 });
+    if (announce) { toast(`A star is falling to the ${compass(x - player.pos.x, z - player.pos.z)}!`, "rare"); sfx(1800, 1.4, "sine", 0.05, 0.4); }
+}
+function landStar(F) {
+    isle3G.remove(F.head, F.tail);
+    const x = F.to.x, z = F.to.z, y = groundY(x, z);
+    const g = new THREE.Group(); g.position.set(x, y + 1.2, z); isle3G.add(g);
+    const st = new THREE.Mesh(starGeo, fallStarMat); st.scale.setScalar(1.3); g.add(st);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 70, 8, 1, true), starBeamMat); beam.position.y = 35; g.add(beam);
+    const crater = new THREE.Mesh(new THREE.RingGeometry(0.6, 1.8, 16), new THREE.MeshBasicMaterial({ color: 0x2a2030, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })); crater.rotation.x = -Math.PI / 2; crater.position.set(x, y + 0.05, z); isle3G.add(crater);
+    stars3.push({ g, st, crater, x, z, y });
+    const dd = Math.hypot(player.pos.x - x, player.pos.z - z);
+    burst(V3(x, y + 0.5, z), 30, 8, [fallStarMat, fxWhite]);
+    if (dd < 70) { shake = Math.max(shake, 0.5 * (1 - dd / 70)); flash = Math.max(flash, 0.35 * (1 - dd / 70)); }
+    sfx(80, 0.8, "sawtooth", 0.12 * Math.max(0.2, 1 - dd / 120), 0.4); sfx(1200, 0.5, "triangle", 0.05, 0.3);
+}
+function takeStar(s) {
+    const i = stars3.indexOf(s); if (i < 0) return;
+    stars3.splice(i, 1); isle3G.remove(s.g, s.crater);
+    const n = 1 + (Math.random() < 0.35 ? 1 : 0) + (isBlood() ? 1 : 0), cash = Math.round(2500 * rebirthMult());
+    save.mats.star = (save.mats.star || 0) + n; save.money += cash; save.starsCaught = (save.starsCaught || 0) + 1;
+    flash = 0.5; sfx(784, 0.3, "triangle", 0.1, 1.3); setTimeout(() => sfx(1047, 0.4, "triangle", 0.1, 1.3), 120);
+    burst(V3(s.x, s.y + 1.2, s.z), 20, 5, [fallStarMat]);
+    toast(`You caught a fallen star! +${n} Star Shard${n > 1 ? "s" : ""} and ${money(cash)}`, "cash");
+    writeSave();
+}
+function updateStars(dt, animOnly) {
+    for (let i = falling.length - 1; i >= 0; i--) {
+        const F = falling[i];
+        F.t += dt;
+        const u = Math.min(1, F.t / F.dur), p = F.from.clone().lerp(F.to, u * u);
+        F.head.position.copy(p);
+        const dir = F.from.clone().sub(F.to).normalize(), len = 16;
+        F.tail.position.copy(p).addScaledVector(dir, len / 2); F.tail.scale.set(1, len, 1); F.tail.quaternion.setFromUnitVectors(UP, dir);
+        if (u >= 1) { falling.splice(i, 1); landStar(F); }
+    }
+    for (const s of stars3) { s.st.rotation.y += dt * 1.6; s.g.position.y = s.y + 1.2 + Math.sin(time * 2 + s.x) * 0.18; }
+    if (animOnly || state !== "playing") return;
+    if (isNight() && !inCave()) {
+        starT -= dt;
+        if (starT <= 0) { starT = rand(55, 110) * (isBlood() ? 0.6 : 1); if (stars3.length + falling.length < 4) { const p = randStarSpot(); dropStar(p.x, p.z); } }
+    }
+}
+function clearStars(msg) {
+    if (msg && stars3.length) toast("The fallen stars fade into the morning light.", "");
+    for (const s of stars3) isle3G.remove(s.g, s.crater);
+    stars3.length = 0;
+}
+function useScope() {
+    if (!isNight()) { toast("The sky's too bright to see anything. Come back at night.", "bad"); return; }
+    if (save.scopeDay === save.day) { toast("You already watched the sky tonight. Try again tomorrow night.", ""); return; }
+    save.scopeDay = save.day;
+    sfx(660, 0.3, "sine", 0.06, 1.2);
+    toast("Through the telescope you spot a shooting star... it's coming down close by!", "rare");
+    const p = randStarSpot(OBS.x, OBS.z, 18, 48);
+    setTimeout(() => { if (isle === 3) dropStar(p.x, p.z); }, 3000);
+    writeSave();
+}
+
+// =====================================================================
+//  the Apothecary and the Moonwell: timed buffs
+// =====================================================================
+const BUFFS = {
+    swift:    { name: "SWIFTROOT",  col: "#7affb0", icon: "»" },
+    ironhide: { name: "IRONHIDE",   col: "#a9c0dc", icon: "◆" },
+    fury:     { name: "LUMBERLUST", col: "#ff7a5a", icon: "⚔" },
+    lucky:    { name: "LUCKY SPORE", col: "#ffd040", icon: "✦" },
+    blessed:  { name: "MOONBLESSED", col: "#7affef", icon: "☾" }
+};
+const BUFF_CAP = 900;
+function giveBuff(k, secs) { const now = save.seconds, cur = Math.max(now, save.buffs[k] || 0); save.buffs[k] = Math.min(now + BUFF_CAP, cur + secs); }
+const buffLeft = k => Math.max(0, (save.buffs[k] || 0) - save.seconds);
+const mmss = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+function brewItems() {
+    const b = (k, name, desc, secs, craft, cost) => ({ name, col: BUFFS[k].col, desc: `${desc} for ${secs / 60} min${buffLeft(k) > 0 ? ` · ACTIVE ${mmss(buffLeft(k))} (drinking adds more time)` : ""}`, craft, cost, verb: "Brewed", quiet: true, buy() { giveBuff(k, secs); sfx(300, 0.3, "sine", 0.1, 2); toast(`You drink the ${name}. ${BUFFS[k].name} for ${mmss(buffLeft(k))}.`, "good"); } });
+    return [
+        b("swift", "Swiftroot Tonic", "+30% move speed", 240, { spore: 6 }, 600),
+        b("ironhide", "Ironhide Draught", "Take 40% less damage", 240, { spore: 4, silver: 6 }, 1200),
+        b("fury", "Lumberlust Brew", "+40% axe and gun damage", 240, { spore: 6, amber: 5 }, 2500),
+        b("lucky", "Lucky Spore Elixir", "+50% materials from every tree", 300, { spore: 12, moonstone: 2 }, 3500),
+        { name: "Phoenix Tear", icon: "phoenix", col: "#ffb060", desc: `If you would die, you rise again with 60% health instead. You have ${save.phoenix || 0} (max 3)`, craft: { amber: 10, star: 1 }, cost: 25000, verb: "Brewed", maxed: (save.phoenix || 0) >= 3, maxTxt: "MAX 3", buy() { save.phoenix = (save.phoenix || 0) + 1; sfx(500, 0.4, "triangle", 0.1, 1.8); } }
+    ];
+}
+function drinkWell() {
+    if (save.wellDay === save.day) { toast("The Moonwell is still. It refills at dawn.", ""); return; }
+    save.wellDay = save.day;
+    player.hp = player.maxHp; giveBuff("blessed", 240);
+    flash = 0.5; sfx(523, 0.6, "sine", 0.08, 1.5); setTimeout(() => sfx(784, 0.8, "sine", 0.08, 1.5), 200);
+    burst(V3(player.pos.x, player.pos.y - 0.6, player.pos.z), 20, 4, [glowM(0x7affef), glowM(0xffffff)]);
+    toast("You drink from the Moonwell. Health restored, and you feel MOONBLESSED: +25% damage and healing for 4 min.", "good");
+    writeSave();
+}
+const WITCH_SAY = ["Mushrooms, moonlight, a pinch of panic. Stir.", "Drink it fast. Don't smell it.", "The Elder Heart hates my brews. That's how you know they work.", "Phoenix Tears aren't really tears. Don't ask whose.", "Heh. Another woodcutter. You'll be back."];
+const SMITH3_SAY = ["Moonsilver sings when you hammer it. Annoying, honestly.", "Voidglass cuts the light around it. And trees. Mostly trees.", "Bring me Heartwood and I'll make you the last axe you'll ever need.", "Star shards. Don't touch them bare-handed. ...Too late.", "The lance? It goes through one tree and keeps going. Through the next one too."];
+const DEPOT3_SAY = ["Spores by the sack, stars by the shard. I buy it all.", "Amber's up today. Something about bugs from a million years ago.", "Heartwood? You actually felled it? ...Name your price."];
+const FERRY3_LINES = [
+    "Mooncap Isle. Two moons, and trees that dream out loud.",
+    "Your relic is gone. It burned away on the crossing... that was the price of passage.",
+    "South of camp there's a sunken clearing called the Hollow. The oldest tree in the world sleeps there: the Elder Heart.",
+    "Step inside and it wakes. Fell it and its Heartwood is yours. It always grows back by dawn.",
+    "At night, watch the sky. Stars fall here, and they don't wait around to be picked up.",
+    "This is as far as my ferry goes. For now."
+];
+const FERRY3_QUIPS = ["The Hollow is south. Your nerve is your own business.", "Two moons. Twice the werewolves. Kidding. Probably.", "Stars fall on clear nights. Fast feet catch them.", "I'm building a bigger boat. It's taking a while.", "The Elder Heart has felled more woodcutters than you've felled trees."];
+function openFerry3() {
+    ferryConfirm = 0;
+    $("ferrySay").textContent = "“" + FERRY3_QUIPS[Math.floor(Math.random() * FERRY3_QUIPS.length)] + "”";
+    openPanel("ferry");
+}
+function renderFerry3() {
+    document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
+    const k = save.bossKills || 0;
+    const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage)</span></div>
+      <div class="flist">
+        <div class="${k ? "keep" : "lose"}"><h4>${k ? "✔" : "✘"} THE ELDER HEART</h4>${k ? `felled ${k} time${k === 1 ? "" : "s"}` : "still sleeping in the Hollow, to the south"}</div>
+        <div class="keep"><h4>FALLEN STARS CAUGHT</h4>${save.starsCaught || 0}</div>
+        <div class="gain"><h4>REBIRTH 3</h4>The Ferryman is building a bigger boat. Coming in a future update.</div>
+      </div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    const b = $("ferryBuy"); b.disabled = true; b.classList.remove("danger"); b.textContent = "REBIRTH 3: COMING SOON";
+}
+
+// ---- getting there: the Highland ferry's ride ends here ----
+function finishRebirth2() {
+    save.rebirths = 2; // Mooncap Isle is Rebirth 2
+    resetForRebirth();
+    save.relicSpent = 1; save.bossDay = 0;
+    enterIsle3(); newContract();
+    holdingReset();
+    player.maxHp = maxHpNow(); player.hp = player.maxHp;
+    const a = arr3Pt(ARR3LEN - 9, 0);
+    player.pos.set(a.x, 1.75, a.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(ARR3DIR.x, ARR3DIR.z); player.pitch = 0;
+    player.invuln = 6;
+    ride = null;
+    writeSave();
+    say("");
+    setTimeout(() => {
+        $("rebirthFx").classList.remove("show"); say("MOONCAP ISLE"); setTimeout(() => say(""), 3600);
+        toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage.", "cash");
+        toast("Follow the lanterns to camp. New trees, new materials: craft at the Moonforge, brew at the Apothecary.", "good");
+        toast("Talk to the Ferryman. He knows what sleeps in the Hollow.", "rare");
+    }, 2200);
+}
+function enterIsle3() {
+    leaveWorld();
+    if (!isle3Built) { buildIsle3(); snapWorld(3); } else loadWorld(3);
+    isle = 3; save.isle = 3;
+    showWorld(3);
+    groundFn = groundY3;
+    waterMesh.geometry = isle3.waterGeo; waterMesh.material.needsUpdate = true;
+    smokeEmit.length = 0; isle3.emit.forEach(e => smokeEmit.push(e));
+    RESPAWN.x = 2; RESPAWN.z = 4;
+    save.ghosts = 0; syncGhosts();
+    resetIsleTrees(95);
+    resetChests();
+    syncBoss();
+}
+function dawn3() {
+    clearStars(true);
+    if (save.bossKills > 0 && save.bossDay === save.day - 1 && !fight3.on) toast("Somewhere in the Hollow, the Elder Heart has grown back...", "rare");
+    syncBoss();
+}
+function dusk3() { starT = rand(18, 40); }
+function updateIsle3(dt, animOnly) {
+    if (!isle3Built || isle !== 3) return;
+    updateSky3(dt);
+    updateBoss(dt, animOnly);
+    updateStars(dt, animOnly);
+    updateNpcs(dt, npcs3);
+    if (isle3.foam) { isle3.foam.scale.setScalar(1 + Math.sin(time * 0.8) * 0.004); isle3.foam.material.opacity = 0.38 + Math.sin(time * 0.8) * 0.14; }
+    if (isle3.fireLight) isle3.fireLight.intensity = 16 + Math.sin(time * 9) * 3 + Math.sin(time * 5.3) * 2;
+    if (isle3.wellLight) isle3.wellLight.intensity = 8 + Math.sin(time * 1.3) * 2.5;
+    if (isle3.wellWater) isle3.wellWater.material.emissive.setHex(save.wellDay === save.day ? 0x0a3a40 : 0x1a8a9a);
+    if (isle3.crater) { isle3.crater.rotation.y += dt * 0.2; isle3.crater.scale.setScalar(1 + Math.sin(time * 2.2) * 0.05); }
+    if (isle3.beam) isle3.beam.material.opacity = 0.08 + Math.sin(time * 1.2) * 0.04;
+    if (isle3.boat) { isle3.boat.position.y = -0.15 + Math.sin(time * 1.1) * 0.07; isle3.boat.rotation.z = Math.sin(time * 0.9) * 0.03; }
+    for (const b of isle3.bubbles) { const k = (time * 0.6 + b.ph) % 1; b.m.position.set(b.ox * (1 - k * 0.5), 0.85 + k * 0.6, b.oz * (1 - k * 0.5)); b.m.scale.setScalar((Math.sin(k * Math.PI) + 0.1) * 0.1); }
+    if (ferryman3) {
+        ferryman3.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
+        const base = Math.atan2(ARR3DIR.x, ARR3DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN3.x, player.pos.z - FERRYMAN3.z) < 14;
+        const tg = near ? Math.atan2(player.pos.x - FERRYMAN3.x, player.pos.z - FERRYMAN3.z) : base;
+        ferryman3.rotation.y += angDiff(tg, ferryman3.rotation.y) * Math.min(1, 3 * dt);
+    }
+}
+function nearest3() {
+    const px = player.pos.x, pz = player.pos.z, near = (p, r) => Math.hypot(px - p.x, pz - p.z) < r;
+    if (near(SMITH3_AT, 3.4)) return { k: "smith" };
+    if (near(DEPOT3_AT, 3.4)) return { k: "depot" };
+    if (near(WITCH3_AT, 3.4)) return { k: "witch" };
+    if (near(BED3, 3.2)) return { k: "bed" };
+    if (near(FERRYMAN3, 3.4)) return { k: "ferry3" };
+    for (const s of stars3) if (Math.hypot(px - s.x, pz - s.z) < 2.8) return { k: "star", s };
+    const dw = Math.hypot(px - WELL.x, pz - WELL.z); if (dw > WELL.r - 2.5 && dw < WELL.r + 4.5) return { k: "well" };
+    if (near(OBS_DOOR, 3.2)) return { k: "scope" };
+    for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
+    if (altar && near(altar, 3.2)) return { k: "altar" };
+    return null;
+}
+
+// ---------- the map of Mooncap Isle ----------
+function drawMap3() {
+    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 160;
+    if (!mapBg3) {
+        const N = 320, oc = document.createElement("canvas"); oc.width = oc.height = N;
+        const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color();
+        for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+            const x = ((px + 0.5) / N - 0.5) * 320, z = ((py + 0.5) / N - 0.5) * 320, d = Math.hypot(x, z), inside = shoreAt3(x, z) - d, i = (py * N + px) * 4;
+            let r, gg, b;
+            if (inside < 0) { r = 18; gg = 16; b = 58; }
+            else if (inside < 5) { r = 110; gg = 170; b = 200; }
+            else {
+                const y = terrain3(x, z), sh = clamp((terrain3(x - 2, z - 2) - terrain3(x + 2, z + 2)) * 0.06, -0.5, 0.5);
+                if (Math.hypot(x - WELL.x, z - WELL.z) < WELL.r) col.setRGB(0.3, 0.85, 0.9);
+                else if (Math.hypot(x - HOLLOW.x, z - HOLLOW.z) < HOLLOW.r) col.setRGB(0.32, 0.1, 0.18);
+                else if (Math.hypot(x - MARSH.x, z - MARSH.z) < MARSH.r) col.setRGB(0.1, 0.32, 0.3);
+                else if (inside < 12 && y < 2.2) col.setRGB(0.68, 0.64, 0.76);
+                else { const v = sstep(0.42, 0.58, fbm2(x * 0.03 + 5, z * 0.03 - 7, 3)); col.setHSL(lerp(0.48, 0.78, v), 0.35, 0.24 + clamp(y / 16, 0, 1) * 0.12); }
+                r = clamp((col.r + sh) * 255, 0, 255); gg = clamp((col.g + sh) * 255, 0, 255); b = clamp((col.b + sh) * 255, 0, 255);
+            }
+            img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255;
+        }
+        og.putImageData(img, 0, 0);
+        mapBg3 = oc;
+    }
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#120e36"; g.beginPath(); g.arc(c, c, c - 6, 0, 7); g.fill();
+    g.strokeStyle = "rgba(200,160,255,.45)"; g.lineWidth = 3; g.stroke();
+    g.save(); g.beginPath(); g.arc(c, c, c - 8, 0, 7); g.clip();
+    g.imageSmoothingEnabled = false; g.drawImage(mapBg3, c - 160 * sc, c - 160 * sc, 320 * sc, 320 * sc);
+    g.restore();
+    g.fillStyle = "rgba(200,160,255,.12)"; g.beginPath(); g.arc(c, c, SAFE_R * sc, 0, 7); g.fill();
+    g.setLineDash([6, 6]); g.strokeStyle = "rgba(200,160,255,.85)"; g.lineWidth = 2; g.beginPath(); g.arc(c, c, SAFE_R * sc, 0, 7); g.stroke(); g.setLineDash([]);
+    const X = x => c + x * sc, Z = z => c + z * sc;
+    g.font = "bold 11px Consolas"; g.textAlign = "center";
+    for (const lm of LM3) {
+        if (lm.camp) continue;
+        g.strokeStyle = lm.col; g.lineWidth = 1.5; g.beginPath(); g.arc(X(lm.x), Z(lm.z), lm.r * sc * 0.7, 0, 7); g.stroke();
+        g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4); g.fillStyle = lm.col; g.fillText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4);
+    }
+    { // the Elder Heart: a pulsing skull while it lives, a stump when it doesn't
+        const dead = save.bossDay === save.day && save.bossKills > 0;
+        g.font = "bold 22px Segoe UI Emoji, sans-serif"; g.fillStyle = dead ? "#8a6a7a" : "#ff5a8a";
+        g.fillText(dead ? "🪵" : "💀", X(HOLLOW.x), Z(HOLLOW.z) + 8);
+        g.font = "bold 10px Consolas"; g.fillStyle = dead ? "#b8a0b0" : "#ffb0c8"; g.strokeStyle = "#000"; g.lineWidth = 3;
+        const t = dead ? "regrows at dawn" : "THE ELDER HEART"; g.strokeText(t, X(HOLLOW.x), Z(HOLLOW.z) + 24); g.fillText(t, X(HOLLOW.x), Z(HOLLOW.z) + 24);
+    }
+    { const ae = arr3Pt(ARR3LEN); g.strokeStyle = "#c8a0ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(ARR3B.x), Z(ARR3B.z)); g.lineTo(X(ae.x), Z(ae.z)); g.stroke(); g.fillStyle = "#c8a0ff"; g.font = "bold 12px Consolas"; g.fillText("ARRIVALS · FERRYMAN", X(ae.x), Z(ae.z) + (ae.z < 0 ? -8 : 16)); }
+    for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); g.strokeStyle = "#000"; g.lineWidth = 1; g.strokeRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
+    for (const t of trees) {
+        if (t.gone || t.dying || t.boss) continue;
+        const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14;
+        g.fillStyle = near ? "#ff4a3a" : t.type.rare ? t.type.col : "rgba(40,30,80,.95)";
+        g.beginPath(); g.arc(X(t.x), Z(t.z), (t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill();
+    }
+    g.font = "bold 20px Segoe UI Symbol, sans-serif";
+    for (const s of stars3) { g.fillStyle = "#fff4a0"; g.strokeStyle = "#000"; g.lineWidth = 3; g.strokeText("★", X(s.x), Z(s.z) + 7); g.fillText("★", X(s.x), Z(s.z) + 7); }
+    g.font = "bold 12px Consolas"; g.fillStyle = "#e0c8ff"; g.strokeStyle = "#000"; g.lineWidth = 3;
+    for (const [t, x, z] of [["CAMP", 0, 9], ["FORGE", SMITH3.x - 7, SMITH3.z - 1], ["TRADING", DEPOT3.x + 9, DEPOT3.z - 1], ["APOTHECARY", WITCH3.x, WITCH3.z + 6]]) { g.strokeText(t, X(x), Z(z)); g.fillText(t, X(x), Z(z)); }
+    g.fillStyle = "#fff"; g.fillText("N", c, 22);
+    g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw);
+    g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke();
+    g.restore();
+}
+
+// a save that's already on another island starts there (this must run after everything above is defined)
+if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
+if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1, Mooncap Isle = Rebirth 2
 
 // ---------- HUD ----------
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
@@ -4593,6 +5989,9 @@ const PROMPTS = {
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
+    witch: () => "[F] Visit the Apothecary", ferry3: () => "[F] Talk to the Ferryman", star: () => "[F] Take the fallen star",
+    well: () => (save.wellDay === save.day ? "The Moonwell is still. It refills at dawn" : "[F] Drink from the Moonwell"),
+    scope: () => (!isNight() ? "The Observatory: come back at night" : save.scopeDay === save.day ? "You already watched the sky tonight" : "[F] Look through the telescope"),
     fish: n => (n.spot.blocked ? "Face the water to fish" : "[F] Cast your line"),
     chest: n => (n.c.special ? "[F] Open the cursed chest" : "[F] Open chest"), altar: () => (save.altarDay === save.day ? "The altar is quiet today" : "[F] Pray at the altar")
 };
@@ -4611,9 +6010,13 @@ function hud(dt) {
     const c = Math.floor(save.money);
     el.cash.textContent = money(c);
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
-    if (isle === 2) { const mh = Object.keys(MATS).filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
+    if (isle >= 2) { const mh = isleMats().filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
     else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = inSafe() ? (isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    el.zone.textContent = inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    { // active potions and blessings, with time left
+        const bh = Object.keys(BUFFS).filter(buffOn).map(k => `<span style="color:${BUFFS[k].col};border-color:${BUFFS[k].col}">${BUFFS[k].icon} ${BUFFS[k].name} ${mmss(buffLeft(k))}</span>`).join("") + (save.phoenix > 0 ? `<span style="color:#ffb060;border-color:#ffb060">🔥 PHOENIX ×${save.phoenix}</span>` : "");
+        const be = $("buffs"); if (be.dataset.h !== bh) { be.innerHTML = bh; be.dataset.h = bh; }
+    }
     el.zone.className = inSafe() ? "safe" : "danger";
     el.clock.textContent = (isBlood() ? "🩸 BLOOD MOON " : isNight() ? "🌙 " : "☀ ") + fmtClock() + " · DAY " + save.day + "  " + WX_ICON[wx.type] + (save.rebirths ? "  ★" + save.rebirths : "");
     el.clock.classList.toggle("blood", isBlood());
@@ -4621,7 +6024,7 @@ function hud(dt) {
     el.contract.innerHTML = k ? `<b>CONTRACT</b> <i>${money(k.reward)}</i><br>${k.text} — ${Math.min(k.prog, k.goal)}/${k.goal}` : "";
     el.contract.style.display = k ? "" : "none";
     const n = panel ? null : nearest();
-    const pr = ride ? "" : fishing.on ? fishPrompt() : n ? PROMPTS[n.k](n) : "";
+    const pr = ride ? "" : fishing.on ? fishPrompt() : n && PROMPTS[n.k] ? PROMPTS[n.k](n) : "";
     el.prompt.textContent = pr;
     el.prompt.classList.toggle("show", !!pr);
     el.prompt.classList.toggle("alert", fishing.on && fishing.phase === "bite");
@@ -4638,11 +6041,18 @@ function hud(dt) {
     if (panel === "map") drawMap();
     if (panel === "ferry") renderFerry();
 }
-const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0))); };
+const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0)) * dmgBuff()); };
 
 // ---------- loop ----------
 let last = performance.now();
+// one bad frame shouldn't freeze the whole game: report it and keep going
+let frameErrs = 0;
 function frame(now) {
+    try { frameBody(now); }
+    catch (e) { console.error(e); if (frameErrs++ < 3) toast("Something broke: " + e.message + " (the game kept running)", "bad"); }
+    requestAnimationFrame(frame);
+}
+function frameBody(now) {
     const real = Math.min(0.05, (now - last) / 1000);
     last = now;
     let dt = real;
@@ -4663,7 +6073,7 @@ function frame(now) {
         camera.position.set(Math.cos(orbit) * 15, 4.5, Math.sin(orbit) * 15 - 4);
         camera.lookAt(0, 2.2, -3);
         camera.fov = 70; camera.updateProjectionMatrix();
-        updateWorldAnim(real); updateIsle2Anim(real); updateWeather(real); updateEcosystem(real);
+        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateWeather(real); updateEcosystem(real);
         applySky();
     }
     camera.updateMatrixWorld();
@@ -4677,7 +6087,6 @@ function frame(now) {
         renderer.clearDepth();
         renderer.render(viewScene, viewCam);
     }
-    requestAnimationFrame(frame);
 }
 
 player.maxHp = maxHpNow(); player.hp = player.maxHp;
@@ -4700,5 +6109,12 @@ if (DEBUG) window.__ts4 = {
     respawn,
     send() { return sendLogs(); },
     setState(s) { state = s; renderMenu(); },
-    interact, writeSave, doRebirth, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
+    interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
+    // the dev panel (dev.js) drives the game through these
+    get panel() { return panel; }, togglePanel, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
+    FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z },
+    setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
+    freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
 };
+// the dev panel only exists when running from source (it isn't packed into the installer)
+if (DEBUG) import("./dev.js").catch(e => console.warn("dev panel failed to load:", e));

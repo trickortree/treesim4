@@ -163,6 +163,21 @@
   #rebirthFx.show { opacity: 1; pointer-events: auto; }
   #rebirthFx small { display: block; font: 800 18px Consolas; letter-spacing: 10px; color: #7a4a00; margin-bottom: 8px; }
   #rebirthFx b { font: 900 clamp(32px, 6vw, 72px) "Segoe UI Black", sans-serif; color: #5a3000; text-shadow: 0 4px 0 rgba(255,255,255,.5); letter-spacing: 4px; }
+  #buffs { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; max-width: 290px; }
+  #buffs span { font: 700 11px Consolas; letter-spacing: 1px; background: var(--bg); border: 1px solid; border-radius: 10px; padding: 2px 8px; }
+  #rebirthFx.violet { background: radial-gradient(circle, #f4eaff, #b88aff 60%, #6a3ad8); }
+  #bossBar { position: fixed; top: 18px; left: 50%; transform: translate(-50%, -20px); width: min(640px, 60vw); z-index: 4; opacity: 0; pointer-events: none; transition: opacity .4s, transform .4s; text-align: center; text-shadow: 0 2px 0 #000; }
+  #bossBar.show { opacity: 1; transform: translate(-50%, 0); }
+  #bossBar .bn { font: 900 18px "Segoe UI Black", sans-serif; letter-spacing: 6px; color: #ff9ab8; margin-bottom: 6px; } #bossPh { color: #ff4a6a; }
+  #bossBar .bb { position: relative; height: 18px; background: rgba(0,0,0,.7); border: 2px solid #ff5a8a; border-radius: 6px; overflow: hidden; }
+  #bossBar .bb i, #bossBar .bb u { position: absolute; left: 0; top: 0; bottom: 0; display: block; }
+  #bossFill { background: linear-gradient(#ff6a9a, #b01a4a); } #bossLag { background: rgba(255,255,255,.75); }
+  #bossBar.rage .bb { animation: pulse .5s infinite alternate; }
+  #bossHp { font: 700 12px Consolas; opacity: .8; margin-top: 4px; }
+  #titleCard { position: fixed; left: 0; right: 0; top: 30%; text-align: center; z-index: 5; pointer-events: none; opacity: 0; text-shadow: 0 4px 0 #000, 0 0 30px rgba(255,60,120,.8); }
+  #titleCard.show { animation: tcpop 3.6s ease-out forwards; }
+  @keyframes tcpop { 0% { opacity: 0; transform: translateY(20px) scale(.8); } 12% { opacity: 1; transform: translateY(0) scale(1.06); } 20% { transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-30px); } }
+  #titleCard b { display: block; font: 900 clamp(36px, 6vw, 76px) "Segoe UI Black", sans-serif; color: #ff5a8a; letter-spacing: 8px; } #titleCard small { font: italic 600 18px "Segoe UI"; color: #ffd0e0; }
   #panelFish { width: min(1000px, 94vw); }
   #panelFish .sub { font: 13px Consolas; opacity: .7; margin: -6px 0 12px; }
   #fishGrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; max-height: 58vh; overflow: auto; padding-right: 4px; }
@@ -250,6 +265,7 @@
     <div id="zone" class="safe">SAFE ZONE</div>
     <div id="clock"></div>
     <div id="contract"></div>
+    <div id="buffs"></div>
   </div>
   <div id="wallet" class="hud">
     <div class="chip"><small>CASH</small><span id="cash">$0</span></div>
@@ -317,7 +333,7 @@
 
 <div id="panelFerry" class="panel">
   <button class="xbtn" data-close>✕ <kbd>Esc</kbd></button>
-  <h2>THE FERRY TO REBIRTH ISLAND</h2>
+  <h2>REBIRTH 1: THE FERRY TO THE HIGHLAND ISLE</h2>
   <div id="ferrySay"></div>
   <div id="ferryBody"></div>
   <div class="ferrybtns"><button class="btn" id="ferryBuy">BUY TICKET</button><button class="btn ghost" data-close>NOT YET</button></div>
@@ -329,6 +345,8 @@
   <div id="relicGrid"></div>
   <div class="foot">bring all 6 pieces and $2,500,000 to the Ferryman for Rebirth 2 · K or Esc to close</div>
 </div>
+<div id="bossBar"><div class="bn">THE ELDER HEART <span id="bossPh"></span></div><div class="bb"><u id="bossLag"></u><i id="bossFill"></i></div><div id="bossHp"></div></div>
+<div id="titleCard"><b id="tcBig"></b><small id="tcSmall"></small></div>
 <div id="fadeBlk"></div>
 <div id="rideCap"></div>
 <div id="rebirthFx"><div><small id="rbSmall">REBIRTH</small><b>A NEW LIFE BEGINS</b></div></div>
