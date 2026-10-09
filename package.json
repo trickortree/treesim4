@@ -1,0 +1,59 @@
+{
+  "name": "hypergamous-tree-chopping-simulator-4",
+  "version": "1.0.0",
+  "description": "Hypergamous Tree Chopping Simulator 4",
+  "author": "Tree Chop Studios",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "three": "0.170.0"
+  },
+  "build": {
+    "appId": "com.trickortree.treesim4",
+    "productName": "Hypergamous Tree Chopping Simulator 4",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "game.js",
+      "intro.js",
+      "updater.js",
+      "preload.js",
+      "main.js",
+      "package.json",
+      "build/**/*",
+      "vendor/**/*",
+      "!node_modules/three/{src,docs,examples}/**",
+      "!node_modules/three/build/{three.cjs,three.webgpu*.js,three.tsl*.js,three.module.min.js}"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "TreeChopSim4-Setup.exe"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "trickortree",
+      "repo": "treesim4",
+      "releaseType": "release"
+    },
+    "releaseInfo": {
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.0.0 (first release)\n\n- A living, spooky island: the trees are alive, they watch you, and they creep closer when you look away.\n- Chop with 8 axes, from the Rusty Axe to the Reaper's Axe. Trees get tougher (and pay better) the better your axe is.\n- Day and night. Rare trees come out at night: Elder, Ghost, Blood and Golden Trees, plus tougher species as your axe improves (Ironwood, Frostbark, Emberwood, Titan).\n- Safehouse with a bed (sleep at night to skip to dawn), the Reaper's shop, a log chute that pays you cash, and a daily contract.\n- Explore the island: graveyard, pond, standing stones, watchtower, camps, a well and more. Chests everywhere.\n- The ferry to Rebirth Island is here. Rebirths are coming soon.\n- Auto-updates: the game will tell you when a new version is out."
+    }
+  }
+}
