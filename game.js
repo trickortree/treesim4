@@ -3254,13 +3254,14 @@ const vnoise = (x, z) => {
 const fbm2 = (x, z, o = 4) => { let a = 0.5, f = 1, s = 0; for (let i = 0; i < o; i++) { s += a * vnoise(x * f + i * 17.3, z * f - i * 9.1); f *= 2; a *= 0.5; } return s; };
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const LAKE2 = { x: -70, z: 58, r: 15 };
-const D2TH = (() => { let b = 0, m = 1e9; for (let i = 0; i < 360; i++) { const th = (i / 360) * Math.PI * 2, r = shoreR2(th); if (r < m) { m = r; b = th; } } return b; })();
+const ARRTH = (() => { let b = 0, m = 1e9; for (let i = 0; i < 360; i++) { const th = (i / 360) * Math.PI * 2, r = shoreR2(th); if (r < m) { m = r; b = th; } } return b; })();
+const D2TH = ARRTH + Math.PI; // the Rebirth Ferry: straight across the island from where you land
 const GPEAK = { x: -112, z: -8 };
 function terrain2(x, z) {
     const d = Math.hypot(x, z), inside = shoreAt2(x, z) - d;
     if (inside < 5) return Math.max(-3.4, -(5 - inside) * 0.2);
     const n = fbm2(x * 0.0105 + 3.1, z * 0.0105 + 8.7, 4);
-    const cs = Math.cos(D2TH), sn = Math.sin(D2TH), along = x * cs + z * sn, lane = along > 0 ? Math.abs(z * cs - x * sn) : d;
+    const cs = Math.cos(ARRTH), sn = Math.sin(ARRTH), along = x * cs + z * sn, lane = along > 0 ? Math.abs(z * cs - x * sn) : d;
     const gp = Math.hypot(x - GPEAK.x, z - GPEAK.z);
     let h = sstep(0.35, 0.64, n) * 48 * sstep(62, 112, d) * sstep(20, 52, lane) + fbm2(x * 0.03, z * 0.03, 3) * 7 * sstep(30, 80, d) + fbm2(x * 0.1, z * 0.1, 2) * 1.5 + 16 * sstep(38, 4, gp);
     h *= sstep(24, 36, d) * sstep(5, 34, inside);
@@ -3566,6 +3567,11 @@ const D2DIR = V3(Math.cos(D2TH), 0, Math.sin(D2TH)), D2PERP = V3(-D2DIR.z, 0, D2
 const D2B = V3(D2DIR.x * (D2SHORE - 8), 0, D2DIR.z * (D2SHORE - 8));
 const dock2Pt = (a, s = 0, y = 0) => V3(D2B.x + D2DIR.x * a + D2PERP.x * s, y, D2B.z + D2DIR.z * a + D2PERP.z * s);
 const FERRYMAN2 = { x: dock2Pt(D2LEN - 3.5, -0.9).x, z: dock2Pt(D2LEN - 3.5, -0.9).z };
+const ARRDIR = V3(Math.cos(ARRTH), 0, Math.sin(ARRTH)), ARRPERP = V3(-ARRDIR.z, 0, ARRDIR.x), ARRLEN = 20;
+const ARRB = V3(ARRDIR.x * (shoreR2(ARRTH) - 8), 0, ARRDIR.z * (shoreR2(ARRTH) - 8));
+const arrPt = (a, s = 0, y = 0) => V3(ARRB.x + ARRDIR.x * a + ARRPERP.x * s, y, ARRB.z + ARRDIR.z * a + ARRPERP.z * s);
+// where you are along / across a dock (used for walking on both docks)
+const dockLocal = (x, z, B, DIR, PERP) => { const dx = x - B.x, dz = z - B.z; return { along: dx * DIR.x + dz * DIR.z, side: dx * PERP.x + dz * PERP.z }; };
 const BED2 = { x: -8, z: 7 };
 const DEPOT = { x: 11, z: -7 }, SMITH = { x: -11, z: -7 };
 const standPt = (p, dist = 2.4) => { const r = Math.atan2(-p.x, -p.z); return { x: p.x + Math.sin(r) * dist, z: p.z + Math.cos(r) * dist }; };
@@ -3796,9 +3802,11 @@ function buildIsle2() {
     }
     // sign: ferry this way
     {
-        const sp = batch(woodDark); sp.add(CYL6, 4, 1.2, 16, 0, 0, 0, 0.09, 2.4, 0.09); sp.build();
-        const board = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("FERRY", "↓ SOUTH", "#9fe8ff"), side: THREE.DoubleSide })); board.position.set(4, 2.6, 16); scene.add(board);
-        const bk = board.clone(); bk.rotation.y = Math.PI; bk.position.z += 0.03; scene.add(bk);
+        const sp = batch(woodDark); sp.add(CYL6, 4, 1.2, 16, 0, 0, 0, 0.09, 2.4, 0.09); sp.add(CYL6, 3, 1.2, -18, 0, 0, 0, 0.09, 2.4, 0.09); sp.build();
+        const nb = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH FERRY", "THIS WAY ↑", "#c8a0ff") })); nb.position.set(3, 2.6, -18); scene.add(nb);
+        const nbk = nb.clone(); nbk.rotation.y = Math.PI; scene.add(nbk);
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH FERRY", "↑ NORTH SHORE", "#c8a0ff") })); board.position.set(4, 2.6, 16); scene.add(board);
+        const bk = board.clone(); bk.rotation.y = Math.PI; scene.add(bk);
     }
 
     // ----- dock, ferry 2 ("coming soon"), ferryman -----
@@ -3812,9 +3820,9 @@ function buildIsle2() {
         for (let i = 0; i < D2LEN; i++) for (const s of [-1.9, 1.9]) { const p = dock2Pt(i + 0.5, s, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
         posts.build(); rails.build(); bulbs.build();
         for (const s of [-2.0, 2.0]) { const p = dock2Pt(3.5, s); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
-        const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 2", "COMING SOON", "#c8a0ff"), side: THREE.DoubleSide }));
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 2", "COMING SOON", "#c8a0ff") }));
         board.position.copy(dock2Pt(3.5, 0, 3.3)); board.rotation.y = yaw; scene.add(board);
-        const board2 = board.clone(); board2.rotation.y = yaw + Math.PI; board2.position.add(V3(D2DIR.x * 0.03, 0, D2DIR.z * 0.03)); scene.add(board2);
+        const board2 = board.clone(); board2.rotation.y = yaw + Math.PI; scene.add(board2);
         const fl = label("THE FERRY", "#c8a0ff", 3.2, 0.7); fl.position.copy(dock2Pt(3.5, 0, 4.6)); fl.maxD = 70;
         // boat
         ferryBoat2 = new THREE.Group(); ferryBoat2.position.copy(dock2Pt(D2LEN - 7, 4.4, -0.15)); ferryBoat2.rotation.y = yaw; scene.add(ferryBoat2);
@@ -3843,6 +3851,32 @@ function buildIsle2() {
         const cage = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), new THREE.MeshBasicMaterial({ color: 0x2a1a3e, wireframe: true })); cage.position.copy(orb.position);
         ferryman2.add(coat, hem, shm, hood, peak, ff, sleeve, hand, pole, orb, cage);
         const fm = label("FERRYMAN", "#c8a0ff", 2.6, 0.6); fm.position.set(fp.x, 4.7, fp.z); fm.maxD = 60;
+        // ---- the arrivals dock: where you step off the ferry from Pine Island ----
+        const ayaw = Math.atan2(ARRDIR.x, ARRDIR.z);
+        const ap = batch(new THREE.MeshLambertMaterial({ color: 0x7a6048, flatShading: true }));
+        for (let i = 0; i < ARRLEN; i++) { const p = arrPt(i + 0.5); ap.add(BOX, p.x, 0.22, p.z, 0, ayaw, 0, 3.6, 0.14, 0.92); }
+        ap.build();
+        const apo = batch(woodDark), ara = batch(woodDark), ab = batch(new THREE.MeshBasicMaterial({ color: 0xffd060 }));
+        for (let i = 0; i <= ARRLEN; i += 3) for (const sd of [-1.9, 1.9]) { const p = arrPt(i, sd); apo.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) ab.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
+        for (let i = 0; i < ARRLEN; i++) for (const sd of [-1.9, 1.9]) { const p = arrPt(i + 0.5, sd, 0.95); ara.add(BOX, p.x, 0.95, p.z, 0, ayaw, 0, 0.08, 0.1, 1.02); }
+        apo.build(); ara.build(); ab.build();
+        for (const sd of [-2.0, 2.0]) { const p = arrPt(3.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
+        const wb = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("WELCOME TO THE", "HIGHLAND ISLE", "#ffe080") }));
+        wb.position.copy(arrPt(3.5, 0, 3.3)); wb.rotation.y = ayaw; scene.add(wb);
+        const wb2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("ARRIVALS", "FROM PINE ISLAND", "#ffe080") }));
+        wb2.position.copy(arrPt(3.5, 0, 3.3)); wb2.rotation.y = ayaw + Math.PI; scene.add(wb2);
+        const al = label("ARRIVALS", "#ffe080", 3.2, 0.7); al.position.copy(arrPt(3.5, 0, 4.6)); al.maxD = 70;
+        const ob = new THREE.Group(); ob.position.copy(arrPt(ARRLEN - 7, 4.4, -0.15)); ob.rotation.y = ayaw; scene.add(ob);
+        const ohull = lamb(0x4a2a1a), otrim = lamb(0x8a5a34);
+        const oh = new THREE.Mesh(new THREE.BoxGeometry(2.7, 1.0, 7.6), ohull); oh.position.y = 0.2;
+        const obg = new THREE.ConeGeometry(1.35, 2.4, 4); obg.rotateX(Math.PI / 2); obg.rotateZ(Math.PI / 4);
+        const obw = new THREE.Mesh(obg, ohull); obw.position.set(0, 0.2, 5.0); obw.scale.y = 0.75;
+        const otr = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.18, 7.8), otrim); otr.position.y = 0.72;
+        const ocb = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.3, 2.6), otrim); ocb.position.set(0, 1.5, -1.3);
+        const oms = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 5, 6), woodDark); oms.position.set(0, 3.0, 1.6);
+        const olp = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 5), new THREE.MeshBasicMaterial({ color: 0x9fe8ff })); olp.position.set(0, 5.6, 1.6);
+        ob.add(oh, obw, otr, ocb, oms, olp);
+        isle2.arrBoat = ob;
         // far beacon: the next rebirth
         const FI = dock2Pt(D2LEN + 90, 0, 0);
         const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 200, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xc8a0ff, transparent: true, opacity: 0.18, fog: false, depthWrite: false, side: THREE.DoubleSide }));
@@ -3968,7 +4002,7 @@ function buildIsle2() {
         scatter2(16, (x, z, y) => { stumps.add(CYL6, x, y + 0.3, z, Math.PI / 2, srand() * 3, 0, 0.3, srange(2, 3.4), 0.3); });
         stumps.build();
         // the beach: palms, driftwood, shells
-        const beachSpot = (n, min, max, fn) => { for (let i = 0; i < n; i++) { const a = srand() * 6.283, d = shoreR2(a) - srange(min, max), x = Math.cos(a) * d, z = Math.sin(a) * d, dx = x - D2B.x, dz = z - D2B.z; if (Math.hypot(dx, dz) < 12) continue; if (Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 4) continue; fn(x, z, Math.max(0, terrain2(x, z))); } };
+        const beachSpot = (n, min, max, fn) => { for (let i = 0; i < n; i++) { const a = srand() * 6.283, d = shoreR2(a) - srange(min, max), x = Math.cos(a) * d, z = Math.sin(a) * d, dx = x - D2B.x, dz = z - D2B.z; if (Math.hypot(dx, dz) < 12 || Math.hypot(x - ARRB.x, z - ARRB.z) < 12) continue; if (Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 4) continue; fn(x, z, Math.max(0, terrain2(x, z))); } };
         const palmT = batch(lamb(0x7a5a3a)), palmL = batch(lamb(0x3a8a4a)), drift = batch(lamb(0x9a8a78)), shells = batch(new THREE.MeshBasicMaterial({ color: 0xf2e8d8 }));
         beachSpot(40, 5, 12, (x, z, y) => { const lean = srange(-0.25, 0.25); palmT.add(CYL6, x - lean * 1.1, y + 2.2, z, 0, 0, lean, 0.16, 4.4, 0.16); for (let k = 0; k < 6; k++) { const a2 = k * 1.047 + srand() * 0.3; palmL.add(BOX, x - lean * 2.2 + Math.cos(a2) * 0.95, y + 4.25, z + Math.sin(a2) * 0.95, 0, -a2, -0.4, 2.0, 0.07, 0.5); } circles.push({ x, z, r: 0.35 }); });
         beachSpot(30, 3, 11, (x, z, y) => drift.add(CYL6, x, y + 0.14, z, Math.PI / 2, 0, srand() * 3, 0.12, srange(1.5, 3.2), 0.12));
@@ -3978,15 +4012,17 @@ function buildIsle2() {
     isle2.emit.forEach(e => smokeEmit.push(e));
     addTgt = prevAdd; curBuild = 1;
 }
-const isle2 = { waterGeo: null, foam: null, emit: [], beam: null, fireLight: null };
+const isle2 = { waterGeo: null, foam: null, emit: [], beam: null, fireLight: null, arrBoat: null };
 
 function clampIsle2(p) {
     if (p.x > 1500) { clampCave(p); return; }
-    const dx = p.x - D2B.x, dz = p.z - D2B.z, along = dx * D2DIR.x + dz * D2DIR.z, side = dx * D2PERP.x + dz * D2PERP.z;
-    if (along > 4.5 && along < D2LEN + 3 && Math.abs(side) < 6) {
-        const a = Math.min(along, D2LEN - 0.7), s = clamp(side, -1.65, 1.65);
-        p.x = D2B.x + D2DIR.x * a + D2PERP.x * s; p.z = D2B.z + D2DIR.z * a + D2PERP.z * s;
-        return;
+    for (const [B, DIR, PERP, LEN] of [[D2B, D2DIR, D2PERP, D2LEN], [ARRB, ARRDIR, ARRPERP, ARRLEN]]) {
+        const { along, side } = dockLocal(p.x, p.z, B, DIR, PERP);
+        if (along > 4.5 && along < LEN + 3 && Math.abs(side) < 6) {
+            const a = Math.min(along, LEN - 0.7), s = clamp(side, -1.65, 1.65);
+            p.x = B.x + DIR.x * a + PERP.x * s; p.z = B.z + DIR.z * a + PERP.z * s;
+            return;
+        }
     }
     const lim = shoreAt2(p.x, p.z) - 3, d = Math.hypot(p.x, p.z);
     if (d > lim) { p.x *= lim / d; p.z *= lim / d; }
@@ -3995,8 +4031,7 @@ function clampIsle2(p) {
 // ---------- the ground, once you're on the Highland Isle ----------
 function groundY2(x, z) {
     if (x > 1500) return caveGround(x, z);
-    const dx = x - D2B.x, dz = z - D2B.z, along = dx * D2DIR.x + dz * D2DIR.z, side = dx * D2PERP.x + dz * D2PERP.z;
-    if (along > 4 && along < D2LEN + 3 && Math.abs(side) < 3) return 0;
+    for (const [B, DIR, PERP, LEN] of [[D2B, D2DIR, D2PERP, D2LEN], [ARRB, ARRDIR, ARRPERP, ARRLEN]]) { const { along, side } = dockLocal(x, z, B, DIR, PERP); if (along > 4 && along < LEN + 3 && Math.abs(side) < 3) return 0; }
     return Math.max(-0.4, terrain2(x, z));
 }
 function enterIsle2() {
@@ -4026,6 +4061,7 @@ function updateIsle2Anim(dt) {
     if (isle2.beam) isle2.beam.material.opacity = 0.14 + Math.sin(time * 1.5) * 0.05;
     if (isle2.fireLight) isle2.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
     if (ferryBoat2) { ferryBoat2.position.y = -0.15 + Math.sin(time * 1.1) * 0.07; ferryBoat2.rotation.z = Math.sin(time * 0.9) * 0.03; }
+    if (isle2.arrBoat) { isle2.arrBoat.position.y = -0.15 + Math.sin(time * 1.05 + 1) * 0.07; isle2.arrBoat.rotation.z = Math.sin(time * 0.85 + 1) * 0.03; }
     if (ferryman2) {
         ferryman2.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
         const base = Math.atan2(D2DIR.x, D2DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN2.x, player.pos.z - FERRYMAN2.z) < 14;
@@ -4133,7 +4169,8 @@ function drawMap2() {
         g.strokeStyle = lm.col; g.lineWidth = 1.5; g.beginPath(); g.arc(X(lm.x), Z(lm.z), lm.r * sc * 0.7, 0, 7); g.stroke();
         g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4); g.fillStyle = lm.col; g.fillText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4);
     }
-    { const de = dock2Pt(D2LEN); g.strokeStyle = "#c8a0ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D2B.x), Z(D2B.z)); g.lineTo(X(de.x), Z(de.z)); g.stroke(); g.fillStyle = "#c8a0ff"; g.font = "bold 12px Consolas"; g.fillText("FERRY", X(de.x), Z(de.z) - 8); }
+    { const de = dock2Pt(D2LEN); g.strokeStyle = "#c8a0ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D2B.x), Z(D2B.z)); g.lineTo(X(de.x), Z(de.z)); g.stroke(); g.fillStyle = "#c8a0ff"; g.font = "bold 12px Consolas"; g.fillText("REBIRTH FERRY", X(de.x), Z(de.z) + 16); }
+    { const ae = arrPt(ARRLEN); g.strokeStyle = "#ffe080"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(ARRB.x), Z(ARRB.z)); g.lineTo(X(ae.x), Z(ae.z)); g.stroke(); g.fillStyle = "#ffe080"; g.font = "bold 12px Consolas"; g.fillText("ARRIVALS", X(ae.x), Z(ae.z) - 8); }
     for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); g.strokeStyle = "#000"; g.lineWidth = 1; g.strokeRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
     for (const t of trees) {
         if (t.gone || t.dying) continue;
@@ -4211,13 +4248,13 @@ function finishRebirth() {
     enterIsle2(); newContract();
     holdingReset();
     player.maxHp = maxHpNow(); player.hp = player.maxHp;
-    const a = dock2Pt(D2LEN - 10, 0);
-    player.pos.set(a.x, 1.75, a.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(D2DIR.x, D2DIR.z); player.pitch = 0;
+    const a = arrPt(ARRLEN - 9, 0);
+    player.pos.set(a.x, 1.75, a.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(ARRDIR.x, ARRDIR.z); player.pitch = 0;
     player.invuln = 6;
     ride = null;
     writeSave();
     say("");
-    setTimeout(() => { $("rebirthFx").classList.remove("show"); say("THE HIGHLAND ISLE"); setTimeout(() => say(""), 3600); toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage.", "cash"); toast("Walk inland to Basecamp. Trees here drop materials: sell them at the Trading Post, craft axes and guns at the Forge.", "good"); }, 2200);
+    setTimeout(() => { $("rebirthFx").classList.remove("show"); say("THE HIGHLAND ISLE"); setTimeout(() => say(""), 3600); toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage.", "cash"); toast("Walk inland to Basecamp. Trees here drop materials: sell them at the Trading Post, craft axes and guns at the Forge.", "good"); toast("The Rebirth Ferry docks on the far side of the island (north shore).", "rare"); }, 2200);
 }
 function holdingReset() { reloading = false; reloadT = 0; gun.visible = false; axe.visible = true; }
 
