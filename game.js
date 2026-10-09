@@ -1585,6 +1585,7 @@ function onDawn() {
     toast(`Dawn of day ${save.day}. The night trees burn away.`, "good");
     for (const t of trees) if (t.type.night && !t.gone && !t.dying) t.burn = true;
     resetChests();
+    if (typeof syncVeins === "function" && mineBuilt) syncVeins();
     if (!save.contract) newContract();
     writeSave();
 }
@@ -2238,6 +2239,7 @@ function interact() {
     } else if (n.k === "depot") openShop("trade", ["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."][Math.floor(Math.random() * 3)]);
     else if (n.k === "ferry2") { if (!save.ferry2Talk) { save.ferry2Talk = 1; startTalk("THE FERRYMAN", FERRY2_LINES, () => openFerry2()); } else openFerry2(); }
     else if (n.k === "relic") collectRelic(n.r);
+    else if (n.k === "vein") mineVein(n.v);
     else if (n.k === "shop") {
         const lines = ["Hehehe... welcome, woodcutter.", "Everything has a price. Even your axe.", "The trees talk about you, you know.", "Spend it. You cannot take it with you.", "Smile! It suits you.", "Night is when the good ones grow."];
         openShop("reaper", lines[Math.floor(Math.random() * lines.length)]);
@@ -3582,7 +3584,7 @@ const LM2 = [
     { name: "CRYSTAL GROVE", x: -68, z: -56, r: 12, col: "#7affef" },
     { name: "GOLDEN PEAK", x: GPEAK.x, z: GPEAK.z, r: 10, col: "#ffd040" },
     { name: "RUINED TEMPLE", x: 58, z: -80, r: 11, col: "#ffd080" },
-    { name: "OLD MINE", x: 28, z: -56, r: 9, col: "#c0a080" },
+    { name: "OLD MINE", x: -81, z: -28.5, r: 9, col: "#c0a080" },
     { name: "HUNTER'S LODGE", x: 58, z: -14, r: 9, col: "#ff9a6a" }
 ];
 function curLM() { return isle === 2 ? LM2 : LANDMARKS; }
@@ -3932,17 +3934,9 @@ function buildIsle2() {
         const l = label(lm.name, lm.col, 3.4, 0.8); l.position.set(lm.x, y0 + 7, lm.z);
         const l2 = label("SHRINE", "#ffe080", 2, 0.6); l2.position.set(lm.x, y0 + 3.4, lm.z);
     }
-    {   // old mine
-        const lm = LM2[5], y0 = terrain2(lm.x, lm.z), st = batch(lamb(0x6a6a74)), tb = batch(woodDark);
-        st.add(BOX, lm.x - 2, y0 + 1.6, lm.z, 0, 0, 0, 1.0, 3.4, 1.4); st.add(BOX, lm.x + 2, y0 + 1.6, lm.z, 0, 0, 0, 1.0, 3.4, 1.4); st.add(BOX, lm.x, y0 + 3.6, lm.z, 0, 0, 0, 5.2, 1.0, 1.6);
-        tb.add(BOX, lm.x - 1.2, y0 + 1.5, lm.z + 0.3, 0, 0, 0, 0.25, 3, 0.25); tb.add(BOX, lm.x + 1.2, y0 + 1.5, lm.z + 0.3, 0, 0, 0, 0.25, 3, 0.25); tb.add(BOX, lm.x, y0 + 3.0, lm.z + 0.3, 0, 0, 0, 2.7, 0.25, 0.25);
-        for (let i = 0; i < 6; i++) tb.add(BOX, lm.x + 5, y0 + 0.08, lm.z + 2 + i * 1.2, 0, 0, 0, 1.7, 0.08, 0.2);
-        st.build(); tb.build();
-        const door = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 3), new THREE.MeshBasicMaterial({ color: 0x010204 })); place(door, lm.x, lm.z + 0.75, 1.5);
-        const cart = new THREE.Mesh(BOX, lamb(0x5a3a22)); cart.scale.set(1.3, 0.8, 1.9); place(cart, lm.x + 5, lm.z + 5, 0.6); circles.push({ x: lm.x + 5, z: lm.z + 5, r: 1.2 });
-        colliders.push([lm.x - 2.5, lm.x + 2.5, lm.z - 0.7, lm.z + 0.7]);
-        chestAt(lm.x - 5, lm.z + 3, true);
-        const l = label(lm.name, lm.col, 3.2, 0.8); l.position.set(lm.x, y0 + 6.2, lm.z);
+    {   // old mine: the entrance on the mountainside (the tunnels themselves are built far away and you walk in)
+        buildMineMouth();
+        chestAt(MINE_MOUTH.x + MINE_F.x * 6 + MINE_F.z * 4, MINE_MOUTH.z + MINE_F.z * 6 - MINE_F.x * 4, true);
     }
     {   // hunter's lodge
         const lm = LM2[6], y0 = terrain2(lm.x, lm.z);
@@ -4015,6 +4009,7 @@ function buildIsle2() {
 const isle2 = { waterGeo: null, foam: null, emit: [], beam: null, fireLight: null, arrBoat: null };
 
 function clampIsle2(p) {
+    if (p.x > 2500) { clampMine(p); return; }
     if (p.x > 1500) { clampCave(p); return; }
     for (const [B, DIR, PERP, LEN] of [[D2B, D2DIR, D2PERP, D2LEN], [ARRB, ARRDIR, ARRPERP, ARRLEN]]) {
         const { along, side } = dockLocal(p.x, p.z, B, DIR, PERP);
@@ -4030,6 +4025,7 @@ function clampIsle2(p) {
 
 // ---------- the ground, once you're on the Highland Isle ----------
 function groundY2(x, z) {
+    if (x > 2500) return 0;
     if (x > 1500) return caveGround(x, z);
     for (const [B, DIR, PERP, LEN] of [[D2B, D2DIR, D2PERP, D2LEN], [ARRB, ARRDIR, ARRPERP, ARRLEN]]) { const { along, side } = dockLocal(x, z, B, DIR, PERP); if (along > 4 && along < LEN + 3 && Math.abs(side) < 3) return 0; }
     return Math.max(-0.4, terrain2(x, z));
@@ -4037,6 +4033,7 @@ function groundY2(x, z) {
 function enterIsle2() {
     if (!isle2Built) buildIsle2();
     if (!caveBuilt) buildRelics();
+    if (!mineBuilt) buildMine();
     isle = 2; save.isle = 2;
     isle1.visible = false;
     groundFn = groundY2;
@@ -4056,7 +4053,7 @@ function enterIsle2() {
 }
 function updateIsle2Anim(dt) {
     if (!isle2Built) return;
-    updateRelics(dt);
+    updateRelics(dt); updateMine(dt);
     if (isle2.foam) { isle2.foam.scale.setScalar(1 + Math.sin(time * 0.8) * 0.004); isle2.foam.material.opacity = 0.38 + Math.sin(time * 0.8) * 0.14; }
     if (isle2.beam) isle2.beam.material.opacity = 0.14 + Math.sin(time * 1.5) * 0.05;
     if (isle2.fireLight) isle2.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
@@ -4124,6 +4121,7 @@ function nearest2() {
     if (Math.hypot(px - BED2.x, pz - BED2.z) < 3.2) return { k: "bed" };
     if (Math.hypot(px - FERRYMAN2.x, pz - FERRYMAN2.z) < 3.4) return { k: "ferry2" };
     for (const r of relicObjs) if (!save.relic[r.i] && Math.hypot(px - r.x, pz - r.z) < 2.6) return { k: "relic", r };
+    for (const v of veins) if (v.g.visible && Math.hypot(px - v.x, pz - v.z) < 2.8) return { k: "vein", v };
     for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
     if (altar && Math.hypot(px - altar.x, pz - altar.z) < 3.2) return { k: "altar" };
     return null;
@@ -4258,7 +4256,6 @@ function finishRebirth() {
 }
 function holdingReset() { reloading = false; reloadT = 0; gun.visible = false; axe.visible = true; }
 
-if (save.isle === 2) enterIsle2();
 
 
 // =====================================================================
@@ -4266,7 +4263,7 @@ if (save.isle === 2) enterIsle2();
 // =====================================================================
 const REBIRTH2_COST = 2500000;
 const RELIC_N = 6;
-const RELIC_HINTS = ["Somewhere deep underground...", "Beside the Golden Tree", "Among the crystals", "Inside the Ruined Temple", "At the mouth of the Old Mine", "Behind the Hunter's Lodge"];
+const RELIC_HINTS = ["Somewhere deep underground...", "Beside the Golden Tree", "Among the crystals", "Inside the Ruined Temple", "Deep inside the Old Mine", "Behind the Hunter's Lodge"];
 const relicCount = () => save.relic.filter(Boolean).length;
 // the cave lives far away from everything (x = 2000) and you get there through a hidden mouth in the eastern hills
 const CX = 2000, CAVE_MOUTH = { x: 101.5, z: 21 }, CAVE_OUT = { x: 97.5, z: 21 };
@@ -4381,7 +4378,7 @@ function buildRelics() {
     at(1, GPEAK.x + 7, GPEAK.z - 1);
     at(2, LM2[2].x - 2, LM2[2].z + 3);
     at(3, LM2[4].x - 3.5, LM2[4].z - 2.5, 1.9);
-    at(4, LM2[5].x + 1.5, LM2[5].z + 3);
+    makeRelicPiece(4, MX, 1.7, 50);
     const a = 0.5, lx = LM2[6].x - Math.sin(a) * 5.5, lz = LM2[6].z - Math.cos(a) * 5.5;
     at(5, lx, lz);
     buildCaveMouth();
@@ -4458,13 +4455,143 @@ function renderFerry2() {
     b.textContent = !relicOk ? `FIND ${RELIC_N - n} MORE RELIC PIECE${RELIC_N - n === 1 ? "" : "S"}` : !cashOk ? "NEED " + money(REBIRTH2_COST - save.money) + " MORE" : "READY. REBIRTH 2 IS COMING SOON";
 }
 
+
+// =====================================================================
+//  the Old Mine: walk in, follow the rails, mine ore veins with F (they grow back every day)
+// =====================================================================
+const MX = 3000;
+const MINE_UP = 2.75; // the direction the hillside rises (the mouth faces the other way, toward camp)
+const MINE_F = { x: -Math.cos(MINE_UP), z: -Math.sin(MINE_UP) };
+const MINE_MOUTH = { x: -80.9, z: -28.6 };
+const MINE_OUT = { x: MINE_MOUTH.x + MINE_F.x * 4, z: MINE_MOUTH.z + MINE_F.z * 4 };
+function inMine() { return player.pos.x > 2500; }
+// the tunnels, as rectangles [x0, x1, z0, z1] relative to (MX, 0)
+const MINE_R = [[-1.8, 1.8, -5, 40], [-24, 24, 18, 21.6], [-24, -20.4, 21.6, 44], [20.4, 24, -4, 21.6], [-7.5, 7.5, 40, 54], [-24, -12, 44, 47.6], [12.4, 24, -4, -0.4]];
+const MINE_H = 3.4;
+const inRect = (x, z, r, m = 0) => x >= MX + r[0] + m && x <= MX + r[1] - m && z >= r[2] + m && z <= r[3] - m;
+function clampMine(p) {
+    for (const r of MINE_R) if (inRect(p.x, p.z, r, 0.45)) return;
+    let bx = p.x, bz = p.z, bd = 1e9;
+    for (const r of MINE_R) { const cx = clamp(p.x, MX + r[0] + 0.45, MX + r[1] - 0.45), cz = clamp(p.z, r[2] + 0.45, r[3] - 0.45), d = Math.hypot(cx - p.x, cz - p.z); if (d < bd) { bd = d; bx = cx; bz = cz; } }
+    p.x = bx; p.z = bz;
+}
+const MINE_VEINS = [
+    ["stone", 1.8, 6], ["copper", -1.8, 11], ["iron", 1.8, 15], ["stone", -1.8, 26], ["iron", 1.8, 33], ["copper", -1.8, 37],
+    ["iron", -10, 21.6], ["copper", 8, 18], ["gold", 16, 21.6], ["iron", -24, 30], ["gold", -20.4, 38], ["copper", 24, 6],
+    ["iron", 20.4, 12], ["gold", -18, 47.6], ["crystal", -7.5, 47], ["gold", 7.5, 50], ["iron", 0, 54], ["crystal", 5, 40.3]
+];
+const VEIN_AMT = { stone: [6, 10], copper: [4, 7], iron: [4, 7], gold: [2, 4], crystal: [1, 2] };
+const veins = [];
+let mineBuilt = false;
+function buildMine() {
+    mineBuilt = true;
+    const prev = addTgt; addTgt = null;
+    const rock = batch(new THREE.MeshLambertMaterial({ color: 0x4a4038, flatShading: true })), floorB = batch(new THREE.MeshLambertMaterial({ color: 0x3a2e24, flatShading: true }));
+    const ceil = batch(new THREE.MeshLambertMaterial({ color: 0x3a3430, flatShading: true })), tim = batch(new THREE.MeshLambertMaterial({ color: 0x6a4a2a, flatShading: true })), rail = batch(new THREE.MeshLambertMaterial({ color: 0x6a6a74, flatShading: true }));
+    const inside = (x, z) => MINE_R.some(r => inRect(x, z, r));
+    for (const r of MINE_R) {
+        const w = r[1] - r[0], d = r[3] - r[2], cx = MX + (r[0] + r[1]) / 2, cz = (r[2] + r[3]) / 2;
+        floorB.add(BOX, cx, -0.1, cz, 0, 0, 0, w, 0.2, d);
+        ceil.add(BOX, cx, MINE_H + 0.15, cz, 0, 0, 0, w + 0.6, 0.3, d + 0.6);
+        // walls: rough rock blocks along every edge that doesn't open into another tunnel
+        const edge = (x0, z0, x1, z1, ox, oz) => {
+            const len = Math.hypot(x1 - x0, z1 - z0), n = Math.ceil(len);
+            for (let k = 0; k < n; k++) {
+                const u = (k + 0.5) / n, x = x0 + (x1 - x0) * u, z = z0 + (z1 - z0) * u;
+                if (inside(x + ox * 0.3, z + oz * 0.3)) continue;
+                const j = (hash2(Math.round(x * 3), Math.round(z * 3)) - 0.5) * 0.5;
+                rock.add(BOX, x + ox * (0.45 + j * 0.3), MINE_H / 2, z + oz * (0.45 + j * 0.3), 0, j, 0, ox ? 0.9 : len / n + 0.15, MINE_H + 0.3, oz ? 0.9 : len / n + 0.15);
+            }
+        };
+        edge(MX + r[0], r[2], MX + r[0], r[3], -1, 0); edge(MX + r[1], r[2], MX + r[1], r[3], 1, 0);
+        edge(MX + r[0], r[2], MX + r[1], r[2], 0, -1); edge(MX + r[0], r[3], MX + r[1], r[3], 0, 1);
+        // timber supports every few metres along the long corridors
+        const long = d > w ? "z" : "x", L = Math.max(w, d);
+        if (Math.min(w, d) < 5) for (let s = 2; s < L - 1; s += 4) {
+            if (long === "z") { const z = r[2] + s; tim.add(BOX, MX + r[0] + 0.15, MINE_H / 2, z, 0, 0, 0, 0.22, MINE_H, 0.22); tim.add(BOX, MX + r[1] - 0.15, MINE_H / 2, z, 0, 0, 0, 0.22, MINE_H, 0.22); tim.add(BOX, cx, MINE_H - 0.15, z, 0, 0, 0, w, 0.22, 0.25); }
+            else { const x = MX + r[0] + s; tim.add(BOX, x, MINE_H / 2, r[2] + 0.15, 0, 0, 0, 0.22, MINE_H, 0.22); tim.add(BOX, x, MINE_H / 2, r[3] - 0.15, 0, 0, 0, 0.22, MINE_H, 0.22); tim.add(BOX, x, MINE_H - 0.15, cz, 0, 0, 0, 0.25, 0.22, d); }
+        }
+    }
+    // rails down the main shaft
+    for (const sx of [-0.45, 0.45]) rail.add(BOX, MX + sx, 0.06, 17.5, 0, 0, 0, 0.08, 0.08, 45);
+    for (let z = -4.5; z < 40; z += 0.9) tim.add(BOX, MX, 0.03, z, 0, 0, 0, 1.3, 0.06, 0.2);
+    rock.build(); floorB.build(); ceil.build(); tim.build(); rail.build();
+    // carts, crates, and lanterns hanging from the beams
+    for (const [x, z, ry] of [[MX, 30, 0], [MX - 22, 34, 0], [MX + 4, 52, 0.6]]) { const c = new THREE.Group(); c.position.set(x, 0, z); c.rotation.y = ry; part(c, BOX, lamb(0x5a3a22), 0, 0.55, 0, 1.1, 0.7, 1.6); part(c, BOX, lamb(0x7a6a5a), 0, 0.95, 0, 0.9, 0.2, 1.4); for (const [wx, wz] of [[-0.6, -0.5], [0.6, -0.5], [-0.6, 0.5], [0.6, 0.5]]) part(c, CYL8, lamb(0x2a2a30), wx, 0.18, wz, 0.18, 0.08, 0.18, 0, 0, Math.PI / 2); scene.add(c); }
+    for (const [x, z] of [[0, 4], [0, 20], [-14, 19.8], [14, 19.8], [-22, 32], [22, 8], [0, 47], [-18, 46]]) {
+        const lx = MX + x;
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.3, 0.22), new THREE.MeshBasicMaterial({ color: 0xffc060 })); lamp.position.set(lx, MINE_H - 0.55, z); scene.add(lamp);
+        const L = new THREE.PointLight(0xffb050, 10, 13, 1.6); L.position.set(lx, MINE_H - 0.8, z); scene.add(L);
+    }
+    const exitGlow = new THREE.Mesh(new THREE.PlaneGeometry(3.6, MINE_H), new THREE.MeshBasicMaterial({ color: 0xcfe8ff })); exitGlow.position.set(MX, MINE_H / 2, -4.95); scene.add(exitGlow);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1), new THREE.MeshBasicMaterial({ map: signTex("THE DEEP VEIN", "MIND YOUR HEAD", "#ffb060") })); sign.position.set(MX, 2.6, 39.7); sign.rotation.y = Math.PI; scene.add(sign);
+    // ore veins: glowing lumps in the walls
+    MINE_VEINS.forEach(([k, x, z], i) => {
+        const g = new THREE.Group(); g.position.set(MX + x, 1.1 + (i % 3) * 0.35, z); scene.add(g);
+        const m = matMeshMat[k];
+        part(g, ICO, lamb(0x4a4038), 0, 0, 0, 0.65, 0.55, 0.65);
+        for (let c = 0; c < 5; c++) part(g, ICO, m, Math.cos(c * 1.3) * 0.42, Math.sin(c * 2.1) * 0.3, Math.sin(c * 1.3) * 0.42, 0.2, 0.18, 0.2);
+        veins.push({ i, k, g, x: MX + x, z, y: g.position.y });
+    });
+    addTgt = prev;
+    syncVeins();
+}
+function syncVeins() { if (!Array.isArray(save.veins)) save.veins = []; for (const v of veins) v.g.visible = save.veins[v.i] !== save.day; }
+function buildMineMouth() {
+    const gy = terrain2(MINE_MOUTH.x, MINE_MOUTH.z), yaw = Math.atan2(MINE_F.x, MINE_F.z);
+    const g = new THREE.Group(); g.position.set(MINE_MOUTH.x, gy, MINE_MOUTH.z); g.rotation.y = yaw; scene.add(g);
+    const st = lamb(0x6a6a74), tb = woodDark;
+    part(g, BOX, st, -2.2, 1.7, -0.6, 1.2, 3.6, 2.2); part(g, BOX, st, 2.2, 1.7, -0.6, 1.2, 3.6, 2.2); part(g, BOX, st, 0, 3.9, -0.6, 5.6, 1.2, 2.4);
+    part(g, ICO, lamb(0x5a5660), -3.4, 1.0, -1.2, 1.6, 1.8, 1.6); part(g, ICO, lamb(0x5a5660), 3.4, 1.2, -1.2, 1.6, 2.0, 1.6);
+    part(g, BOX, tb, -1.35, 1.5, 0.35, 0.28, 3.0, 0.28); part(g, BOX, tb, 1.35, 1.5, 0.35, 0.28, 3.0, 0.28); part(g, BOX, tb, 0, 3.05, 0.35, 3.0, 0.28, 0.3);
+    part(g, BOX, new THREE.MeshBasicMaterial({ color: 0x010204 }), 0, 1.45, -0.9, 2.5, 2.9, 2.6);
+    for (let i = 0; i < 7; i++) part(g, BOX, tb, 0, 0.06, 1.2 + i * 1.1, 1.4, 0.08, 0.2);
+    for (const sx of [-0.45, 0.45]) part(g, BOX, lamb(0x6a6a74), sx, 0.12, 4.5, 0.08, 0.08, 7.5);
+    part(g, BOX, lamb(0x5a3a22), 2.6, 0.55, 3.2, 1.2, 0.8, 1.7); part(g, BOX, lamb(0x8a8a96), 2.6, 1.0, 3.2, 1.0, 0.3, 1.4);
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.3, 0.22), new THREE.MeshBasicMaterial({ color: 0xffc060 })); lamp.position.set(0, 2.7, 0.55); g.add(lamp);
+    const L = new THREE.PointLight(0xffb050, 8, 12, 1.6); L.position.set(0, 2.6, 1.2); g.add(L);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.95), new THREE.MeshBasicMaterial({ map: signTex("OLD MINE", "ORE INSIDE", "#c0a080") })); sign.position.set(0, 4.95, 0.62); g.add(sign);
+    const sw = (lx, lz) => ({ x: MINE_MOUTH.x + Math.cos(yaw) * lx + Math.sin(yaw) * lz, z: MINE_MOUTH.z - Math.sin(yaw) * lx + Math.cos(yaw) * lz });
+    for (const [lx, lz, r] of [[-2.2, -0.6, 1.3], [2.2, -0.6, 1.3], [2.6, 3.2, 1.0], [-3.4, -1.2, 1.5], [3.4, -1.2, 1.5]]) { const p = sw(lx, lz); circles.push({ x: p.x, z: p.z, r }); }
+    const l = label("OLD MINE", "#c0a080", 3.2, 0.8); l.position.set(MINE_MOUTH.x, gy + 6.4, MINE_MOUTH.z);
+}
+let mineCd = 0;
+function updateMine(dt) {
+    if (!mineBuilt) return;
+    for (const v of veins) if (v.g.visible) v.g.rotation.y += dt * 0.15;
+    mineCd -= dt;
+    if (state !== "playing" || ride || mineCd > 0 || caveFx) return;
+    const px = player.pos.x, pz = player.pos.z;
+    if (!inCave() && Math.hypot(px - (MINE_MOUTH.x - MINE_F.x * 0.3), pz - (MINE_MOUTH.z - MINE_F.z * 0.3)) < 1.3) {
+        mineCd = 1.5;
+        fadeTo(() => { player.pos.set(MX, 1.7, -2.5); player.vel.set(0, 0, 0); player.yaw = Math.PI; player.pitch = 0; syncVeins(); sfx(120, 0.5, "sine", 0.07, 0.6); if (!save.mineFound) { save.mineFound = 1; toast("The Old Mine. Press F on glowing ore veins to mine them. They grow back every day.", "rare"); writeSave(); } });
+    } else if (inMine() && pz < -4.1) {
+        mineCd = 1.5;
+        fadeTo(() => { player.pos.set(MINE_OUT.x, terrain2(MINE_OUT.x, MINE_OUT.z) + 1.7, MINE_OUT.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(-MINE_F.x, -MINE_F.z); player.pitch = 0; });
+    }
+}
+function mineVein(v) {
+    if (save.veins[v.i] === save.day) return;
+    save.veins[v.i] = save.day; v.g.visible = false;
+    const [lo, hi] = VEIN_AMT[v.k], n = Math.round(rand(lo, hi) * (1 + bestIdx() * 0.12));
+    save.mats[v.k] = (save.mats[v.k] || 0) + n;
+    swing.t = 0; swing.hit = true; shake = 0.25;
+    burst(V3(v.x, v.y, v.z), 14, 4, [matMeshMat[v.k], chipMats[2]]);
+    sfx(900, 0.08, "square", 0.08, 0.5); setTimeout(() => sfx(1300, 0.06, "square", 0.06, 0.6), 90);
+    toast(`+${n} ${MATS[v.k].name}`, "log");
+    writeSave();
+}
+
+// a save that's already on the Highland Isle starts there (this must run after everything above is defined)
+if (save.isle === 2) enterIsle2();
+
 // ---------- HUD ----------
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
     shop: () => "[F] Talk to the Reaper", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
-    ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, smith: () => "[F] Use the Forge",
+    ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
     fish: n => (n.spot.blocked ? "Face the water to fish" : "[F] Cast your line"),
     chest: n => (n.c.special ? "[F] Open the cursed chest" : "[F] Open chest"), altar: () => (save.altarDay === save.day ? "The altar is quiet today" : "[F] Pray at the altar")
@@ -4573,5 +4700,5 @@ if (DEBUG) window.__ts4 = {
     respawn,
     send() { return sendLogs(); },
     setState(s) { state = s; renderMenu(); },
-    interact, writeSave, doRebirth, relicObjs, collectRelic, CAVE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
+    interact, writeSave, doRebirth, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
 };
