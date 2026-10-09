@@ -151,6 +151,14 @@
   .mp { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; font-size: 17px; } .mp img { width: 24px; height: 24px; } #logsN:has(.mp) { font-size: 17px; }
   #rideCap { position: fixed; left: 0; right: 0; bottom: 18%; text-align: center; z-index: 3; font: 800 clamp(18px, 3vw, 34px) "Segoe UI", sans-serif; letter-spacing: 6px; color: #fff; text-shadow: 0 3px 0 #000, 0 0 24px rgba(0,0,0,.9); opacity: 0; transition: opacity .8s; pointer-events: none; }
   #rideCap.show { opacity: 1; }
+  #panelRelic { width: min(520px, 94vw); border-color: rgba(255,208,64,.7); }
+  #panelRelic h2 { padding-right: 140px; font-size: 24px; } #relicN { font-size: 18px; color: #fff; opacity: .8; }
+  #relicSay { opacity: .8; font-style: italic; margin: 4px 0 12px; }
+  #relicGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; width: min(380px, 80vw); aspect-ratio: 509 / 602; margin: 0 auto; background: #120c04; border: 3px solid #ffd040; padding: 4px; }
+  .rtile { background: rgba(255,255,255,.04); border: 1px dashed rgba(255,208,64,.35); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; }
+  .rtile b { font: 900 38px "Segoe UI Black", sans-serif; color: rgba(255,208,64,.4); } .rtile small { font: 11px Consolas; opacity: .6; padding: 0 6px; }
+  .rtile.got { border: none; background-image: url(assets/relic.jpg); background-size: 200% 300%; animation: pop .4s; }
+  #fadeBlk { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .35s; z-index: 130; } #fadeBlk.show { opacity: 1; }
   #rebirthFx { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; text-align: center; background: radial-gradient(circle, #fff6d0, #ffd860 60%, #ffb020); opacity: 0; pointer-events: none; transition: opacity 1.6s ease; }
   #rebirthFx.show { opacity: 1; pointer-events: auto; }
   #rebirthFx small { display: block; font: 800 18px Consolas; letter-spacing: 10px; color: #7a4a00; margin-bottom: 8px; }
@@ -314,6 +322,14 @@
   <div id="ferryBody"></div>
   <div class="ferrybtns"><button class="btn" id="ferryBuy">BUY TICKET</button><button class="btn ghost" data-close>NOT YET</button></div>
 </div>
+<div id="panelRelic" class="panel">
+  <button class="xbtn" data-close>✕ CLOSE <kbd>K</kbd></button>
+  <h2>HYPERGAMOUS RELIC <span id="relicN"></span></h2>
+  <div id="relicSay">Six pieces, scattered across the Highland Isle. The Ferryman wants them all.</div>
+  <div id="relicGrid"></div>
+  <div class="foot">bring all 6 pieces and $2,500,000 to the Ferryman for Rebirth 2 · K or Esc to close</div>
+</div>
+<div id="fadeBlk"></div>
 <div id="rideCap"></div>
 <div id="rebirthFx"><div><small id="rbSmall">REBIRTH</small><b>A NEW LIFE BEGINS</b></div></div>
 

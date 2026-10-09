@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -32,6 +32,7 @@
       "package.json",
       "build/**/*",
       "vendor/**/*",
+      "assets/**/*",
       "!node_modules/three/{src,docs,examples}/**",
       "!node_modules/three/build/{three.cjs,three.webgpu*.js,three.tsl*.js,three.module.min.js}"
     ],
@@ -53,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.1.0 (the REBIRTH update)\n\n- REBIRTH IS HERE: buy a ticket from the Ferryman ($250,000), walk onto the ferry and sail across to a brand new life. Every rebirth gives +50% cash and +10% damage, forever.\n- THE HIGHLAND ISLE: a huge new island with hills, snowy mountains, a lake, the Golden Peak, Crystal Grove, a Ruined Temple, an Old Mine and a Hunter's Lodge.\n- MATERIALS + CRAFTING: Highland trees drop Wood, Stone, Copper, Iron, Gunpowder, Gold, Crystal and Magma. Craft new axes and GUNS at the Forge, make bullets from Copper and Gunpowder, and sell the rest at the Trading Post.\n- GUNS: Revolver, Pump Shotgun, SMG, Timber Rifle and the Lumberjack Minigun. R reloads, the mouse wheel switches weapon.\n- 3 new axes, 11 new tree species, new upgrades (Kevlar Vest, Extended Mags, Whetstone, Gunpowder Mix, Log Magnet).\n- New 5-slot hotbar: drag weapons onto it from the inventory (E).\n- Real item pictures instead of emojis, shop pages, better-looking trees and new characters.\n- Rebirth 2 is coming soon..."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.1.1\n\n- FIXED: the camera sometimes flew up or down on its own when moving the mouse. The game now uses raw mouse input and ignores glitchy mouse jumps.\n- SECRET CAVE: somewhere in the eastern hills of the Highland Isle there is a hidden cave. Follow it all the way down...\n- THE HYPERGAMOUS RELIC: collect all 6 pieces hidden across the Highland Isle (press K to see your progress).\n- REBIRTH 2 now needs all 6 relic pieces + $2,500,000. Talk to the Ferryman to see what you still need. (Rebirth 2 itself is still coming soon.)"
     }
   }
 }

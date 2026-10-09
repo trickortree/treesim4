@@ -17,6 +17,12 @@ const srange = (a, b) => a + srand() * (b - a);
 
 // ---------- renderer / scenes ----------
 const canvas = $("c");
+// raw mouse input (no Windows acceleration); falls back to a normal lock where it isn't supported
+function lockPointer() {
+    try { const p = canvas.requestPointerLock({ unadjustedMovement: true }); if (p && p.catch) p.catch(() => { try { const q = canvas.requestPointerLock(); if (q && q.catch) q.catch(() => {}); } catch (e) { /* needs a click */ } }); }
+    catch (e) { try { canvas.requestPointerLock(); } catch (e2) { /* needs a click */ } }
+}
+let lookSkip = 0;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
 renderer.autoClear = false;
 const SCALE = 3; // render at 1/3 res, CSS upscales with pixelated sampling
@@ -90,7 +96,7 @@ const save = {
     hpLvl: 0, bootLvl: 0, oilLvl: 0, felled: 0, rareFelled: 0, deaths: 0, sold: 0, seconds: 0, day: 1, clock: 8,
     contract: null, chestsDay: 0, altarDay: 0, chestsOpened: 0,
     rodLvl: 0, fishBag: [], fishDex: {}, fishSold: 0, ghostCash: 0, ghostFelled: 0, bmSurvived: 0, rebirths: 0,
-    isle: 1, gunOwned: [], gunEq: -1, gunAmmo: {}, vestLvl: 0, magLvl: 0, whetLvl: 0, powderLvl: 0, magnetLvl: 0, ferryTalks: 0, ferry2Talk: 0, mats: {}, hotbar: null
+    isle: 1, gunOwned: [], gunEq: -1, gunAmmo: {}, vestLvl: 0, magLvl: 0, whetLvl: 0, powderLvl: 0, magnetLvl: 0, ferryTalks: 0, ferry2Talk: 0, mats: {}, hotbar: null, relic: [0, 0, 0, 0, 0, 0], caveFound: 0
 };
 try { Object.assign(save, JSON.parse(localStorage.getItem(SAVE_KEY) || localStorage.getItem("ts4_test3_save") || "{}")); } catch (e) { /* fresh save */ }
 if (!Array.isArray(save.owned)) save.owned = [1, 0, 0, 0, 0, 0, 0, 0];
@@ -102,6 +108,7 @@ if (!Array.isArray(save.gunOwned)) save.gunOwned = [];
 if (!save.gunAmmo || typeof save.gunAmmo !== "object") save.gunAmmo = {};
 if (typeof save.gunEq !== "number" || !save.gunOwned[save.gunEq]) save.gunEq = -1;
 if (!save.mats || typeof save.mats !== "object") save.mats = {};
+if (!Array.isArray(save.relic) || save.relic.length !== 6) save.relic = [0, 0, 0, 0, 0, 0];
 function writeSave() { save.clock = hourNow(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
 // difficulty follows your best axe, so a strong axe never one-shots everything
 const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; }); return b; };
@@ -236,6 +243,7 @@ function applySky() {
     viewAmb.intensity = lerp(1.1, 1.6, d);
     lantern.intensity = (lerp(26, 8, d) + save.oilLvl * 6) * (player && player.lantern ? 1 : 0);
     lantern.distance = 24 + save.oilLvl * 6;
+    if (inCave()) caveSky();
 }
 
 addTgt = isle1;
@@ -1666,7 +1674,7 @@ function respawn() {
     state = "playing";
     $("death").classList.remove("show");
     toast("You wake up in the safehouse. The logs are gone.", "bad");
-    if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch (e) { /* needs a gesture */ } }
+    if (document.pointerLockElement !== canvas) { try { lockPointer(); } catch (e) { /* needs a gesture */ } }
 }
 
 function useBandage() {
@@ -1877,6 +1885,7 @@ function renderInv() {
         `<div class="card" data-act="lantern"><img class="big" src="${iconURL("lantern")}"><b>Lantern</b><small>${player.lantern ? "On" : "Off"} · click to toggle</small></div>`,
         `<div class="card"><img class="big" src="${iconURL("cash")}"><b>Cash</b><small>${money(save.money)}</small></div>`
     );
+    if (isle === 2) items.push(`<div class="card" data-act="relic"><img class="big" src="assets/relic.jpg" style="width:52px;height:60px;object-fit:cover"><b style="color:#ffd040">Hypergamous Relic</b><small>${relicCount()} / 6 pieces · click to view</small></div>`);
     if (isle === 1) items.push(`<div class="card" data-act="fish"><img class="big" src="${iconURL("fish")}"><b>Fish</b><small>${save.fishBag.length} in bag · click for the journal</small></div>`);
     const iHtml = items.join("");
     if ($("invItems").dataset.h !== iHtml) { $("invItems").innerHTML = iHtml; $("invItems").dataset.h = iHtml; }
@@ -1930,6 +1939,8 @@ function showPanels() {
     $("panelShop").classList.toggle("show", panel === "shop");
     $("panelFish").classList.toggle("show", panel === "fish");
     $("panelFerry").classList.toggle("show", panel === "ferry");
+    $("panelRelic").classList.toggle("show", panel === "relic");
+    if (panel === "relic") renderRelic();
     $("panelTalk").classList.toggle("show", panel === "talk");
     $("panelBack").classList.toggle("show", panel !== null && panel !== "talk");
     if (panel === "inv") renderInv();
@@ -1948,7 +1959,7 @@ function closePanel() {
     if (!panel) return;
     panel = null;
     showPanels();
-    if (state === "playing" && document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch (e) { /* click the game to re-lock */ } }
+    if (state === "playing" && document.pointerLockElement !== canvas) { try { lockPointer(); } catch (e) { /* click the game to re-lock */ } }
 }
 const togglePanel = p => (panel === p ? closePanel() : openPanel(p));
 document.addEventListener("click", e => {
@@ -1968,6 +1979,7 @@ document.addEventListener("click", e => {
         else if (card.dataset.act === "bandage") useBandage();
         else if (card.dataset.act === "lantern") toggleLantern();
         else if (card.dataset.act === "fish") { openPanel("fish"); return; }
+        else if (card.dataset.act === "relic") { openPanel("relic"); return; }
         renderInv();
     }
 });
@@ -2112,7 +2124,7 @@ function drawMap() {
 
 // ---------- menus (title / pause) ----------
 const CONTROLS = [["WASD", "Move"], ["Mouse", "Look"], ["Click", "Swing / shoot"], ["Drag", "Weapons onto hotbar (E)"], ["Shift", "Sprint"], ["Space", "Jump"], ["Q", "Dash"],
-    ["E", "Inventory"], ["M", "Map"], ["F", "Interact"], ["1-5", "Hotbar slot"], ["R", "Reload"], ["Wheel", "Next weapon"], ["H", "Bandage"], ["L", "Lantern"], ["J", "Fish journal"]];
+    ["E", "Inventory"], ["M", "Map"], ["F", "Interact"], ["1-5", "Hotbar slot"], ["R", "Reload"], ["Wheel", "Next weapon"], ["H", "Bandage"], ["K", "Relic"], ["L", "Lantern"], ["J", "Fish journal"]];
 function renderMenu() {
     if ($("ver")) $("ver").textContent = "TREE CHOP STUDIOS · v" + VERSION;
     const menu = $("menu");
@@ -2140,13 +2152,14 @@ function startPlaying() {
     if (state === "title") { if (isle === 2) player.pos.set(RESPAWN.x, 1.7, RESPAWN.z); else player.pos.set(0, 1.7, -0.5); }
     state = "playing";
     renderMenu();
-    if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch (e) { /* needs gesture */ } }
+    if (document.pointerLockElement !== canvas) { try { lockPointer(); } catch (e) { /* needs gesture */ } }
 }
 $("menuBtn").addEventListener("click", startPlaying);
 $("menuQuit").addEventListener("click", () => { writeSave(); window.close(); });
 $("death").addEventListener("mousedown", respawn);
 document.addEventListener("pointerlockchange", () => {
     locked = document.pointerLockElement === canvas;
+    lookSkip = 3;
     if (!locked && state === "playing" && !panel) { showPanels(); endFishing(); state = "paused"; mouseDown = false; renderMenu(); }
 });
 
@@ -2167,6 +2180,7 @@ addEventListener("keydown", e => {
     if (e.code === "KeyM") { togglePanel("map"); return; }
     if (e.code === "KeyF") { if (fishing.on) { fishAction(); return; } interact(); return; }
     if (e.code === "KeyJ") { togglePanel("fish"); return; }
+    if (e.code === "KeyK") { togglePanel("relic"); return; }
     if (panel === "shop" && /^Digit[1-4]$/.test(e.code)) { buy(shopPage * PER_PAGE + (+e.code.slice(5) - 1)); return; }
     if (panel === "shop" && /^(ArrowLeft|ArrowRight|BracketLeft|BracketRight)$/.test(e.code)) { shopPage += /Right/.test(e.code) ? 1 : -1; renderShop(); return; }
     if (/^Digit[1-9]$/.test(e.code)) { equipSlot(+e.code.slice(5) - 1); return; }
@@ -2187,14 +2201,17 @@ addEventListener("wheel", e => { if (state === "playing" && !panel && locked && 
 addEventListener("mousedown", e => {
     if ($("intro")) return;
     if (e.button !== 0 || state !== "playing") return;
-    if (!locked && !panel) { try { canvas.requestPointerLock(); } catch (er) { /* ignore */ } return; }
+    if (!locked && !panel) { try { lockPointer(); } catch (er) { /* ignore */ } return; }
     if (locked) { if (fishing.on) fishAction(); else mouseDown = true; }
 });
 addEventListener("mouseup", e => { if (e.button === 0) mouseDown = false; });
 addEventListener("mousemove", e => {
     if (state !== "playing" || !locked || panel === "inv" || panel === "map") return;
-    player.yaw -= e.movementX * 0.0022;
-    player.pitch = clamp(player.pitch - e.movementY * 0.0022, -1.45, 1.45);
+    if (lookSkip > 0) { lookSkip--; return; } // the first events after locking can carry the whole cursor jump
+    const mx = e.movementX, my = e.movementY;
+    if (Math.abs(mx) > 300 || Math.abs(my) > 200) return; // a browser glitch spike, not a real flick: ignore it
+    player.yaw -= mx * 0.0022;
+    player.pitch = clamp(player.pitch - my * 0.0022, -1.45, 1.45);
 });
 
 function nearest() {
@@ -2219,7 +2236,8 @@ function interact() {
     if (n.k === "smith") {
         openShop("forge", SMITH_SAY[Math.floor(Math.random() * SMITH_SAY.length)]);
     } else if (n.k === "depot") openShop("trade", ["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."][Math.floor(Math.random() * 3)]);
-    else if (n.k === "ferry2") { startTalk("THE FERRYMAN", save.ferry2Talk ? [FERRY2_QUIPS[Math.floor(Math.random() * FERRY2_QUIPS.length)]] : FERRY2_LINES); save.ferry2Talk = 1; }
+    else if (n.k === "ferry2") { if (!save.ferry2Talk) { save.ferry2Talk = 1; startTalk("THE FERRYMAN", FERRY2_LINES, () => openFerry2()); } else openFerry2(); }
+    else if (n.k === "relic") collectRelic(n.r);
     else if (n.k === "shop") {
         const lines = ["Hehehe... welcome, woodcutter.", "Everything has a price. Even your axe.", "The trees talk about you, you know.", "Spend it. You cannot take it with you.", "Smile! It suits you.", "Night is when the good ones grow."];
         openShop("reaper", lines[Math.floor(Math.random() * lines.length)]);
@@ -2864,7 +2882,7 @@ rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3).setUsage(
 const rainLines = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xaed0ff, transparent: true, opacity: 0.4, fog: false }));
 rainLines.frustumCulled = false; rainLines.visible = false;
 scene.add(rainLines);
-const insideBuilding = () => { const x = player.pos.x, z = player.pos.z; return (Math.abs(x) < 4.2 && Math.abs(z) < 3.2) || (x > -16.2 && x < -5.8 && z > -17.2 && z < -8.8); };
+const insideBuilding = () => { const x = player.pos.x, z = player.pos.z; return x > 1500 || (Math.abs(x) < 4.2 && Math.abs(z) < 3.2) || (x > -16.2 && x < -5.8 && z > -17.2 && z < -8.8); };
 function updateRain(dt) {
     const on = wx.rain > 0.05 && !insideBuilding();
     rainLines.visible = on;
@@ -3189,6 +3207,7 @@ function openFerry() {
     openPanel("ferry");
 }
 function renderFerry() {
+    if (isle === 2) { renderFerry2(); return; }
     const cost = rebirthCost(), n = (save.rebirths || 0) + 1, can = save.money >= cost;
     const html = `<div class="fprice">Ticket #${n}: <b>${money(cost)}</b> <span>(you have ${money(save.money)})</span></div>
       <div class="flist">
@@ -3203,6 +3222,7 @@ function renderFerry() {
     b.classList.toggle("danger", !!ferryConfirm);
 }
 $("ferryBuy").addEventListener("click", () => {
+    if (isle === 2) return;
     if (save.money < rebirthCost()) return;
     if (!ferryConfirm) { ferryConfirm = 1; renderFerry(); setTimeout(() => { ferryConfirm = 0; if (panel === "ferry") renderFerry(); }, 5000); return; }
     doRebirth();
@@ -3961,6 +3981,7 @@ function buildIsle2() {
 const isle2 = { waterGeo: null, foam: null, emit: [], beam: null, fireLight: null };
 
 function clampIsle2(p) {
+    if (p.x > 1500) { clampCave(p); return; }
     const dx = p.x - D2B.x, dz = p.z - D2B.z, along = dx * D2DIR.x + dz * D2DIR.z, side = dx * D2PERP.x + dz * D2PERP.z;
     if (along > 4.5 && along < D2LEN + 3 && Math.abs(side) < 6) {
         const a = Math.min(along, D2LEN - 0.7), s = clamp(side, -1.65, 1.65);
@@ -3973,12 +3994,14 @@ function clampIsle2(p) {
 
 // ---------- the ground, once you're on the Highland Isle ----------
 function groundY2(x, z) {
+    if (x > 1500) return caveGround(x, z);
     const dx = x - D2B.x, dz = z - D2B.z, along = dx * D2DIR.x + dz * D2DIR.z, side = dx * D2PERP.x + dz * D2PERP.z;
     if (along > 4 && along < D2LEN + 3 && Math.abs(side) < 3) return 0;
     return Math.max(-0.4, terrain2(x, z));
 }
 function enterIsle2() {
     if (!isle2Built) buildIsle2();
+    if (!caveBuilt) buildRelics();
     isle = 2; save.isle = 2;
     isle1.visible = false;
     groundFn = groundY2;
@@ -3998,6 +4021,7 @@ function enterIsle2() {
 }
 function updateIsle2Anim(dt) {
     if (!isle2Built) return;
+    updateRelics(dt);
     if (isle2.foam) { isle2.foam.scale.setScalar(1 + Math.sin(time * 0.8) * 0.004); isle2.foam.material.opacity = 0.38 + Math.sin(time * 0.8) * 0.14; }
     if (isle2.beam) isle2.beam.material.opacity = 0.14 + Math.sin(time * 1.5) * 0.05;
     if (isle2.fireLight) isle2.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
@@ -4014,11 +4038,12 @@ function updateIsle2Anim(dt) {
 // ---------- island 2: shops, talking, selling ----------
 const FERRY2_LINES = [
     "You made it across. Most people just stare at the glow and never buy the ticket.",
-    "There is another light out there, past the horizon. A third life. Bigger than this one, and worse.",
-    "But the second ferry isn't finished. The planks are still standing in the forest, hating me.",
-    "Rebirth 2 is coming soon. Keep your pockets heavy."
+    "There is another light out there, past the horizon. A third life. But I won't sail there for cash alone.",
+    "Bring me the Hypergamous Relic. It shattered into six pieces, and every one of them is somewhere on this island.",
+    "One sleeps at the bottom of a cave nobody is supposed to find. Look for a dark mouth in the eastern hills.",
+    "Six pieces and $2,500,000. Then we talk. Rebirth 2 is coming soon."
 ];
-const FERRY2_QUIPS = ["Not yet, woodcutter. Not yet.", "The next ferry is still being cut and nailed.", "I can see it out there, in the dark. It's coming.", "Chop. Save. Wait. That's the whole job."];
+const FERRY2_QUIPS = ["Six pieces. No fewer.", "The cave is in the east. Bring a lantern.", "Not yet, woodcutter. Not yet.", "The next ferry is still being cut and nailed.", "I can see it out there, in the dark. It's coming.", "Chop. Save. Wait. That's the whole job."];
 const SMITH_SAY = ["Bring me the trees' insides and I'll make you something that hurts.", "Iron from Ironbark, powder from Powderwood. Copper makes bullets.", "Nothing here is for sale. Everything here is earned.", "Hammer's hot. What are we making?", "Gold makes it pretty. Magma makes it scary."];
 const costOf = (base, g, n) => Math.floor(base * Math.pow(g, n));
 const vestCost = () => costOf(6000, 2.2, save.vestLvl || 0), magCost = () => costOf(4000, 2.4, save.magLvl || 0), whetCost = () => costOf(5000, 2, save.whetLvl || 0);
@@ -4062,6 +4087,7 @@ function nearest2() {
     if (Math.hypot(px - DEPOT_AT.x, pz - DEPOT_AT.z) < 3.4) return { k: "depot" };
     if (Math.hypot(px - BED2.x, pz - BED2.z) < 3.2) return { k: "bed" };
     if (Math.hypot(px - FERRYMAN2.x, pz - FERRYMAN2.z) < 3.4) return { k: "ferry2" };
+    for (const r of relicObjs) if (!save.relic[r.i] && Math.hypot(px - r.x, pz - r.z) < 2.6) return { k: "relic", r };
     for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
     if (altar && Math.hypot(px - altar.x, pz - altar.z) < 3.2) return { k: "altar" };
     return null;
@@ -4179,7 +4205,7 @@ function finishRebirth() {
     save.bandages = 1; save.priceLvl = 0; save.hpLvl = 0; save.bootLvl = 0; save.oilLvl = 0; save.rodLvl = 0;
     save.vestLvl = 0; save.magLvl = 0; save.whetLvl = 0; save.powderLvl = 0; save.magnetLvl = 0;
     save.fishBag = []; save.day = 1; save.altarDay = 0; save.contract = null; save.ghosts = 0;
-    save.mats = {}; save.hotbar = ["a0", null, null, null, null];
+    save.mats = {}; save.hotbar = ["a0", null, null, null, null]; save.relic = [0, 0, 0, 0, 0, 0];
     applyAxeLook(); syncGhosts();
     clockT = (8 / 24) * DAY_LEN; bmFelled = 0; setWeather("clear", false);
     enterIsle2(); newContract();
@@ -4197,13 +4223,211 @@ function holdingReset() { reloading = false; reloadT = 0; gun.visible = false; a
 
 if (save.isle === 2) enterIsle2();
 
+
+// =====================================================================
+//  1.1.1: the secret cave and the Hypergamous Relic (6 pieces = the ticket to Rebirth 2)
+// =====================================================================
+const REBIRTH2_COST = 2500000;
+const RELIC_N = 6;
+const RELIC_HINTS = ["Somewhere deep underground...", "Beside the Golden Tree", "Among the crystals", "Inside the Ruined Temple", "At the mouth of the Old Mine", "Behind the Hunter's Lodge"];
+const relicCount = () => save.relic.filter(Boolean).length;
+// the cave lives far away from everything (x = 2000) and you get there through a hidden mouth in the eastern hills
+const CX = 2000, CAVE_MOUTH = { x: 101.5, z: 21 }, CAVE_OUT = { x: 97.5, z: 21 };
+function inCave() { return player.pos.x > 1500; }
+const CAVE_PTS = [[0, -5, 0], [0, 0, 0], [0, 8, -0.5], [3, 16, -2], [10, 22, -4], [18, 26, -6], [26, 26, -8], [32, 20, -10], [34, 12, -12], [32, 4, -14], [28, -2, -15.6]];
+const CHAMBER = { x: CX + 26, z: -10, y: -16, r: 9.5 };
+const caveCurve = new THREE.CatmullRomCurve3(CAVE_PTS.map(([x, z, y]) => V3(CX + x, y, z)));
+const CAVE_S = caveCurve.getSpacedPoints(400);
+function caveNear(x, z) {
+    let bi = 0, bd = 1e9;
+    for (let i = 0; i < CAVE_S.length; i++) { const p = CAVE_S[i], d = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z); if (d < bd) { bd = d; bi = i; } }
+    return { p: CAVE_S[bi], d: Math.sqrt(bd), i: bi };
+}
+function caveGround(x, z) {
+    if (Math.hypot(x - CHAMBER.x, z - CHAMBER.z) < CHAMBER.r) return CHAMBER.y;
+    return caveNear(x, z).p.y;
+}
+function clampCave(p) {
+    const dc = Math.hypot(p.x - CHAMBER.x, p.z - CHAMBER.z), lim = CHAMBER.r - 1.1;
+    if (dc < lim) return;
+    const n = caveNear(p.x, p.z);
+    if (n.d <= 1.7) return;
+    if (dc < CHAMBER.r + 1.5) { p.x = CHAMBER.x + (p.x - CHAMBER.x) * lim / dc; p.z = CHAMBER.z + (p.z - CHAMBER.z) * lim / dc; return; }
+    p.x = n.p.x + (p.x - n.p.x) * 1.7 / n.d; p.z = n.p.z + (p.z - n.p.z) * 1.7 / n.d;
+}
+
+// the relic picture, cut into a 2 x 3 grid
+const relicImg = new Image();
+const relicTex = [];
+function drawRelicTile(i) {
+    const cv = relicTex[i].image, g = cv.getContext("2d"), col = i % 2, row = Math.floor(i / 2);
+    g.fillStyle = "#1a1208"; g.fillRect(0, 0, cv.width, cv.height);
+    if (relicImg.complete && relicImg.naturalWidth) { const sw = relicImg.naturalWidth / 2, sh = relicImg.naturalHeight / 3; g.drawImage(relicImg, col * sw, row * sh, sw, sh, 10, 10, cv.width - 20, cv.height - 20); }
+    g.strokeStyle = "#ffd040"; g.lineWidth = 10; g.strokeRect(5, 5, cv.width - 10, cv.height - 10);
+    relicTex[i].needsUpdate = true;
+}
+for (let i = 0; i < RELIC_N; i++) { const cv = document.createElement("canvas"); cv.width = 256; cv.height = 304; const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; relicTex.push(t); drawRelicTile(i); }
+relicImg.onload = () => { for (let i = 0; i < RELIC_N; i++) drawRelicTile(i); };
+relicImg.src = "assets/relic.jpg";
+
+const relicObjs = [];
+let caveBuilt = false, caveFx = 0;
+function makeRelicPiece(i, x, y, z) {
+    const g = new THREE.Group(); g.position.set(x, y, z); scene.add(g);
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 1.07), new THREE.MeshBasicMaterial({ map: relicTex[i], side: THREE.DoubleSide })); g.add(card);
+    const halo = new THREE.Mesh(new THREE.RingGeometry(0.75, 0.95, 24), new THREE.MeshBasicMaterial({ color: 0xffd040, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false })); g.add(halo);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 9, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe080, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide })); beam.position.y = 3.6; g.add(beam);
+    const light = new THREE.PointLight(0xffd060, 6, 9, 1.6); g.add(light);
+    const o = { i, g, card, halo, x, y, z, ph: Math.random() * 6 };
+    relicObjs.push(o);
+    g.visible = !save.relic[i];
+    return o;
+}
+function buildCave() {
+    caveBuilt = true;
+    const prev = addTgt; addTgt = null;
+    const rockM = new THREE.MeshLambertMaterial({ color: 0x3e3846, flatShading: true, side: THREE.BackSide });
+    // the tunnel: a rough rock tube winding down into the dark
+    const tg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(CAVE_PTS.map(([x, z, y]) => V3(CX + x, y + 1.6, z))), 220, 2.9, 9, false);
+    { const p = tg.attributes.position; for (let k = 0; k < p.count; k++) { const s = Math.sin(p.getX(k) * 1.7) * Math.cos(p.getZ(k) * 1.3) * 0.35 + (hash2(Math.round(p.getX(k) * 3), Math.round(p.getZ(k) * 3 + p.getY(k) * 5)) - 0.5) * 0.5; p.setXYZ(k, p.getX(k) + s, p.getY(k) + s * 0.6, p.getZ(k) - s); } tg.computeVertexNormals(); }
+    scene.add(new THREE.Mesh(tg, rockM));
+    // a walkable floor ribbon along the path
+    const fp = [], fi = [], N = 220;
+    for (let k = 0; k <= N; k++) {
+        const u = k / N, p = caveCurve.getPointAt(u), t = caveCurve.getTangentAt(u), sx = -t.z, sz = t.x, l = Math.hypot(sx, sz) || 1;
+        fp.push(p.x + sx / l * 2.5, p.y, p.z + sz / l * 2.5, p.x - sx / l * 2.5, p.y, p.z - sz / l * 2.5);
+        if (k < N) { const a = k * 2; fi.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    }
+    const fg = new THREE.BufferGeometry(); fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3)); fg.setIndex(fi); fg.computeVertexNormals();
+    scene.add(new THREE.Mesh(fg, new THREE.MeshLambertMaterial({ color: 0x2c2620, flatShading: true, side: THREE.DoubleSide })));
+    // the chamber at the bottom
+    const sg = new THREE.SphereGeometry(CHAMBER.r + 1.2, 16, 10);
+    { const p = sg.attributes.position; for (let k = 0; k < p.count; k++) { const f = 1 + (hash2(Math.round(p.getX(k) * 2), Math.round(p.getY(k) * 2 + p.getZ(k) * 3)) - 0.5) * 0.18; p.setXYZ(k, p.getX(k) * f, p.getY(k) * f, p.getZ(k) * f); } sg.computeVertexNormals(); }
+    const ch = new THREE.Mesh(sg, rockM); ch.scale.set(1, 0.62, 1); ch.position.set(CHAMBER.x, CHAMBER.y + 2.2, CHAMBER.z); scene.add(ch);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(CHAMBER.r + 1.4, 24), new THREE.MeshLambertMaterial({ color: 0x2c2620, flatShading: true })); floor.rotation.x = -Math.PI / 2; floor.position.set(CHAMBER.x, CHAMBER.y, CHAMBER.z); scene.add(floor);
+    // crystals in the walls, torches along the way, a pool of light where the relic sleeps
+    const cA = batch(new THREE.MeshBasicMaterial({ color: 0x7affef })), cB = batch(new THREE.MeshBasicMaterial({ color: 0xc08aff }));
+    for (let k = 0; k < 46; k++) {
+        const u = srand(), p = caveCurve.getPointAt(u), t = caveCurve.getTangentAt(u), side = srand() < 0.5 ? 1 : -1, sx = -t.z * side, sz = t.x * side;
+        (k % 2 ? cA : cB).add(CONE6, p.x + sx * 2.3, p.y + srange(0.4, 3.2), p.z + sz * 2.3, srange(-0.6, 0.6), 0, side * 0.9, 0.1, srange(0.4, 0.9), 0.1);
+    }
+    for (let k = 0; k < 26; k++) { const a = srand() * 6.283; (k % 2 ? cA : cB).add(CONE6, CHAMBER.x + Math.cos(a) * (CHAMBER.r - 0.4), CHAMBER.y + srange(0.3, 4), CHAMBER.z + Math.sin(a) * (CHAMBER.r - 0.4), srange(-0.4, 0.4), 0, srange(-0.4, 0.4), srange(0.15, 0.3), srange(0.6, 1.6), srange(0.15, 0.3)); }
+    cA.build(); cB.build();
+    for (const u of [0.12, 0.38, 0.64, 0.88]) {
+        const p = caveCurve.getPointAt(u), t = caveCurve.getTangentAt(u);
+        const tx = p.x - t.z * 2.2, tz = p.z + t.x * 2.2;
+        const stick = new THREE.Mesh(BOX, woodDark); stick.scale.set(0.08, 0.6, 0.08); stick.position.set(tx, p.y + 1.6, tz); scene.add(stick);
+        const fl = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 5), new THREE.MeshBasicMaterial({ color: 0xffa040 })); fl.position.set(tx, p.y + 2.05, tz); scene.add(fl);
+        const L = new THREE.PointLight(0xff9a40, 9, 14, 1.5); L.position.set(tx, p.y + 2.2, tz); scene.add(L);
+        fires.push({ flame: fl, core: fl, ph: srand() * 6 });
+    }
+    const exitGlow = new THREE.Mesh(new THREE.CircleGeometry(2.6, 16), new THREE.MeshBasicMaterial({ color: 0xcfe8ff })); exitGlow.position.set(CX, 1.6, -4.6); scene.add(exitGlow);
+    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.95, 1.1, 8), new THREE.MeshLambertMaterial({ color: 0x6a6070, flatShading: true })); ped.position.set(CHAMBER.x, CHAMBER.y + 0.55, CHAMBER.z); scene.add(ped);
+    const runes = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.5, 6), new THREE.MeshBasicMaterial({ color: 0xffd040, side: THREE.DoubleSide, transparent: true, opacity: 0.6 })); runes.rotation.x = -Math.PI / 2; runes.position.set(CHAMBER.x, CHAMBER.y + 0.03, CHAMBER.z); scene.add(runes);
+    const cl = new THREE.PointLight(0xb08aff, 14, 22, 1.4); cl.position.set(CHAMBER.x, CHAMBER.y + 4.5, CHAMBER.z); scene.add(cl);
+    makeRelicPiece(0, CHAMBER.x, CHAMBER.y + 2.0, CHAMBER.z);
+    addTgt = prev;
+}
+function buildCaveMouth() {
+    // a dark mouth in the eastern hillside, half hidden by boulders and bushes
+    const gy = terrain2(CAVE_MOUTH.x, CAVE_MOUTH.z);
+    const rk = batch(lamb(0x5a5660)), bu = batch(lamb(0x2e5a34));
+    for (const [dx, dz, sx, sy, sz] of [[0.5, -2.1, 1.5, 2.6, 1.6], [0.5, 2.1, 1.5, 2.6, 1.6], [0.8, 0, 1.9, 1.0, 3.4], [-0.6, -3.4, 1.4, 1.2, 1.4], [1.6, 3.2, 1.8, 1.8, 1.6], [2.2, -3, 2, 2.2, 2]]) rk.add(ICO, CAVE_MOUTH.x + dx, gy + sy * 0.55 + (dx === 0.8 ? 2.2 : 0), CAVE_MOUTH.z + dz, srand(), srand() * 3, 0, sx, sy, sz);
+    for (const [dx, dz] of [[-2.4, -2.6], [-2.8, 2.4], [-3.4, -0.8]]) bu.add(ICO, CAVE_MOUTH.x + dx, gy + 0.5, CAVE_MOUTH.z + dz, 0, srand() * 3, 0, 1.1, 0.9, 1.1);
+    rk.build(); bu.build();
+    const dark = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.8), new THREE.MeshBasicMaterial({ color: 0x020203 })); dark.position.set(CAVE_MOUTH.x + 0.9, gy + 1.4, CAVE_MOUTH.z); dark.rotation.y = -Math.PI / 2; scene.add(dark);
+    const darkIn = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.8, 2.6), new THREE.MeshBasicMaterial({ color: 0x020203 })); darkIn.position.set(CAVE_MOUTH.x + 2.3, gy + 1.4, CAVE_MOUTH.z); scene.add(darkIn);
+    circles.push({ x: CAVE_MOUTH.x + 0.5, z: CAVE_MOUTH.z - 2.1, r: 1.3 }, { x: CAVE_MOUTH.x + 0.5, z: CAVE_MOUTH.z + 2.1, r: 1.3 });
+}
+function buildRelics() {
+    const at = (i, x, z, up = 1.4) => makeRelicPiece(i, x, terrain2(x, z) + up, z);
+    at(1, GPEAK.x + 7, GPEAK.z - 1);
+    at(2, LM2[2].x - 2, LM2[2].z + 3);
+    at(3, LM2[4].x - 3.5, LM2[4].z - 2.5, 1.9);
+    at(4, LM2[5].x + 1.5, LM2[5].z + 3);
+    const a = 0.5, lx = LM2[6].x - Math.sin(a) * 5.5, lz = LM2[6].z - Math.cos(a) * 5.5;
+    at(5, lx, lz);
+    buildCaveMouth();
+    buildCave();
+}
+let caveCd = 0;
+function fadeTo(fn) {
+    if (caveFx) return;
+    caveFx = 1; $("fadeBlk").classList.add("show");
+    setTimeout(() => { fn(); setTimeout(() => { $("fadeBlk").classList.remove("show"); caveFx = 0; }, 120); }, 380);
+}
+function updateRelics(dt) {
+    if (!caveBuilt) return;
+    for (const o of relicObjs) {
+        if (!o.g.visible) continue;
+        o.card.rotation.y += dt * 1.2;
+        o.g.position.y = o.y + Math.sin(time * 1.6 + o.ph) * 0.15;
+        o.halo.rotation.z += dt * 0.8; o.halo.lookAt(camera.position);
+    }
+    caveCd -= dt;
+    if (state !== "playing" || ride || caveCd > 0 || caveFx) return;
+    const px = player.pos.x, pz = player.pos.z;
+    if (!inCave() && Math.hypot(px - CAVE_MOUTH.x - 0.9, pz - CAVE_MOUTH.z) < 1.5) {
+        caveCd = 1.5;
+        fadeTo(() => { player.pos.set(CX, 1.7, 1.5); player.vel.set(0, 0, 0); player.yaw = Math.PI; player.pitch = -0.1; sfx(90, 0.6, "sine", 0.08, 0.6); if (!save.caveFound) { save.caveFound = 1; toast("You found a secret cave...", "rare"); writeSave(); } });
+    } else if (inCave() && Math.hypot(px - CX, pz + 3.6) < 1.4) {
+        caveCd = 1.5;
+        fadeTo(() => { player.pos.set(CAVE_OUT.x, terrain2(CAVE_OUT.x, CAVE_OUT.z) + 1.7, CAVE_OUT.z); player.vel.set(0, 0, 0); player.yaw = Math.PI / 2; player.pitch = 0; });
+    }
+}
+function collectRelic(o) {
+    if (save.relic[o.i]) return;
+    save.relic[o.i] = 1; o.g.visible = false;
+    flash = 0.7; shake = 0.3;
+    sfx(392, 0.5, "triangle", 0.12, 1.5); setTimeout(() => sfx(523, 0.5, "triangle", 0.12, 1.5), 140); setTimeout(() => sfx(784, 0.9, "triangle", 0.12, 1.2), 300);
+    const n = relicCount();
+    toast(`Hypergamous Relic (Piece ${o.i + 1}) found! ${n}/6`, "rare");
+    writeSave();
+    $("relicSay").textContent = n === RELIC_N ? "The relic is whole. Take it to the Ferryman." : `Piece ${o.i + 1} found. ${RELIC_N - n} still out there.`;
+    openPanel("relic");
+}
+function renderRelic() {
+    const n = relicCount();
+    $("relicN").textContent = n + " / " + RELIC_N;
+    const html = Array.from({ length: RELIC_N }, (_, i) => save.relic[i]
+        ? `<div class="rtile got" style="background-position:${(i % 2) * 100}% ${Math.floor(i / 2) * 50}%"></div>`
+        : `<div class="rtile"><b>?</b><small>Piece ${i + 1}<br>${RELIC_HINTS[i]}</small></div>`).join("");
+    if ($("relicGrid").dataset.h !== html) { $("relicGrid").innerHTML = html; $("relicGrid").dataset.h = html; }
+}
+function caveSky() {
+    scene.background.setHex(0x07060a); scene.fog.color.setHex(0x07060a);
+    scene.fog.near = 4; scene.fog.far = 34;
+    ambL.color.setHex(0x6a5a8a); ambL.intensity = 0.9;
+    sunL.intensity = 0.05;
+    sunMesh.visible = moonMesh.visible = false; starMat.opacity = 0; wisps.visible = false; cloudMat.opacity = 0;
+}
+function openFerry2() {
+    ferryConfirm = 0;
+    $("ferrySay").textContent = "“" + FERRY2_QUIPS[Math.floor(Math.random() * FERRY2_QUIPS.length)] + "”";
+    openPanel("ferry");
+}
+function renderFerry2() {
+    const n = relicCount(), cashOk = save.money >= REBIRTH2_COST, relicOk = n === RELIC_N;
+    document.querySelector("#panelFerry h2").textContent = "THE FERRY TO REBIRTH 2";
+    const html = `<div class="fprice">Ticket #2: <b>${money(REBIRTH2_COST)}</b> + <b>the Hypergamous Relic</b></div>
+      <div class="flist">
+        <div class="${cashOk ? "keep" : "lose"}"><h4>${cashOk ? "✔" : "✘"} CASH</h4>${money(save.money)} of ${money(REBIRTH2_COST)}</div>
+        <div class="${relicOk ? "keep" : "lose"}"><h4>${relicOk ? "✔" : "✘"} RELIC PIECES</h4>${n} / ${RELIC_N} found · press K to see them</div>
+        <div class="gain"><h4>REBIRTH 2</h4>The next island isn't finished yet. Coming soon. Get ready now.</div>
+      </div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    const b = $("ferryBuy");
+    b.disabled = true; b.classList.remove("danger");
+    b.textContent = !relicOk ? `FIND ${RELIC_N - n} MORE RELIC PIECE${RELIC_N - n === 1 ? "" : "S"}` : !cashOk ? "NEED " + money(REBIRTH2_COST - save.money) + " MORE" : "READY. REBIRTH 2 IS COMING SOON";
+}
+
 // ---------- HUD ----------
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
     shop: () => "[F] Talk to the Reaper", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
-    ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", smith: () => "[F] Use the Forge",
+    ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
     fish: n => (n.spot.blocked ? "Face the water to fish" : "[F] Cast your line"),
     chest: n => (n.c.special ? "[F] Open the cursed chest" : "[F] Open chest"), altar: () => (save.altarDay === save.day ? "The altar is quiet today" : "[F] Pray at the altar")
@@ -4312,5 +4536,5 @@ if (DEBUG) window.__ts4 = {
     respawn,
     send() { return sendLogs(); },
     setState(s) { state = s; renderMenu(); },
-    interact, writeSave, doRebirth, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
+    interact, writeSave, doRebirth, relicObjs, collectRelic, CAVE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
 };
