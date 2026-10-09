@@ -77,11 +77,14 @@ const QS = new URLSearchParams(location.search), VERSION = QS.get("v") || "dev",
 const save = {
     logs: 0, logBonus: 0, money: 0, owned: [1, 0, 0, 0, 0, 0, 0, 0], equipped: 0, ghosts: 0, bandages: 1, priceLvl: 0,
     hpLvl: 0, bootLvl: 0, oilLvl: 0, felled: 0, rareFelled: 0, deaths: 0, sold: 0, seconds: 0, day: 1, clock: 8,
-    contract: null, chestsDay: 0, altarDay: 0, chestsOpened: 0
+    contract: null, chestsDay: 0, altarDay: 0, chestsOpened: 0,
+    rodLvl: 0, fishBag: [], fishDex: {}, fishSold: 0, ghostCash: 0, ghostFelled: 0, bmSurvived: 0
 };
 try { Object.assign(save, JSON.parse(localStorage.getItem(SAVE_KEY) || localStorage.getItem("ts4_test3_save") || "{}")); } catch (e) { /* fresh save */ }
 if (!Array.isArray(save.owned)) save.owned = [1, 0, 0, 0, 0, 0, 0, 0];
 while (save.owned.length < N_AXES) save.owned.push(0);
+if (!Array.isArray(save.fishBag)) save.fishBag = [];
+if (!save.fishDex || typeof save.fishDex !== "object") save.fishDex = {};
 if (!save.owned[save.equipped]) save.equipped = 0;
 function writeSave() { save.clock = hourNow(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
 // difficulty follows your best axe, so a strong axe never one-shots everything
@@ -97,7 +100,7 @@ const bootCost = () => Math.floor(150 * Math.pow(1.9, save.bootLvl));
 const oilCost = () => Math.floor(90 * Math.pow(2, save.oilLvl));
 const BANDAGE_COST = 25;
 const logValue = () => 4 + save.priceLvl * 2;
-const ghostIncome = () => save.ghosts * 0.8;
+const ghostIncome = () => 0; // ghosts now earn by really chopping trees
 const maxHpNow = () => 100 + save.hpLvl * 20;
 
 // ---------- time of day ----------
@@ -121,19 +124,6 @@ function sfx(freq, dur, type = "square", vol = 0.12, slide = 0.5) {
     o.connect(gn).connect(actx.destination);
     o.start();
     o.stop(actx.currentTime + dur);
-}
-function startAmbience() {
-    if (!actx || windGain) return;
-    const len = actx.sampleRate * 2, buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    const src = actx.createBufferSource();
-    src.buffer = buf; src.loop = true;
-    const f = actx.createBiquadFilter();
-    f.type = "lowpass"; f.frequency.value = 360;
-    windGain = actx.createGain();
-    windGain.gain.value = 0.02;
-    src.connect(f).connect(windGain).connect(actx.destination);
-    src.start();
 }
 const owl = () => { sfx(430, 0.28, "sine", 0.05, 0.85); setTimeout(() => sfx(380, 0.4, "sine", 0.05, 0.8), 380); };
 
@@ -193,14 +183,17 @@ function applySky() {
     const d = dayAmt(), el = sunElev();
     const dusk = clamp(1 - Math.abs(el) * 4.5, 0, 1) * 0.65;
     tmpC.copy(cNightFog).lerp(cDayFog, d).lerp(cDusk, dusk * 0.7);
+    const gray = clamp(wx.rain * 0.8 + wx.cloud * 0.25 + wx.fog * 0.6, 0, 1), blood = isBlood() ? 1 - d : 0;
+    tmpC.lerp(cGray, gray * (0.25 + 0.5 * d)).lerp(cBlood, blood * 0.7);
+    if (wx.light > 0) tmpC.lerp(cLightning, wx.light * 0.6);
     scene.background.copy(tmpC);
     scene.fog.color.copy(tmpC);
-    scene.fog.near = lerp(6, 16, d);
-    scene.fog.far = lerp(56, 120, d);
-    ambL.color.copy(cNightAmb).lerp(cDayAmb, d);
-    ambL.intensity = lerp(1.5, 2.0, d);
-    sunL.color.copy(cNightSun).lerp(cDaySun, d).lerp(cDusk, dusk * 0.5);
-    sunL.intensity = lerp(1.1, 2.6, d);
+    scene.fog.near = lerp(6, 16, d) * (1 - wx.fog * 0.75) * (1 - wx.rain * 0.25);
+    scene.fog.far = lerp(lerp(56, 120, d), 34, wx.fog) * (1 - wx.rain * 0.25) * (1 - blood * 0.25);
+    ambL.color.copy(cNightAmb).lerp(cDayAmb, d).lerp(cRed, blood * 0.45);
+    ambL.intensity = lerp(1.5, 2.0, d) * (1 - 0.3 * gray) + wx.light * 3;
+    sunL.color.copy(cNightSun).lerp(cDaySun, d).lerp(cDusk, dusk * 0.5).lerp(cRed, blood * 0.6);
+    sunL.intensity = lerp(1.1, 2.6, d) * (1 - 0.65 * gray) * (1 + blood * 0.5);
     const a = ((hourNow() - 6) / 24) * Math.PI * 2;
     const dir = V3(Math.cos(a), Math.sin(a), -0.35).normalize();
     const lightDir = el >= 0 ? dir : dir.clone().negate();
@@ -209,9 +202,15 @@ function applySky() {
     moonMesh.position.copy(camera.position).addScaledVector(dir, -330);
     sunMesh.visible = el > -0.12;
     moonMesh.visible = el < 0.12;
-    starMat.opacity = clamp(1 - d * 1.6, 0, 1);
+    moonMesh.material.color.setHex(isBlood() ? 0xff3030 : 0xe8e4ff);
+    moonMesh.scale.setScalar(isBlood() ? 1.35 : 1);
+    sunMesh.visible = sunMesh.visible && wx.cloud < 0.85;
+    starMat.color.setHex(isBlood() ? 0xffb0b0 : 0xffffff);
+    starMat.opacity = clamp(1 - d * 1.6, 0, 1) * (1 - clamp(wx.cloud * 0.6 + wx.rain, 0, 1));
     wisps.material.opacity = (1 - d) * 0.9;
     wisps.visible = d < 0.9;
+    cloudMat.color.copy(cNightAmb).lerp(cWhite, d).lerp(cGray, gray * 0.7).lerp(cRed, blood * 0.4);
+    cloudMat.opacity = 0.25 + 0.7 * wx.cloud * (0.4 + 0.6 * d);
     viewAmb.intensity = lerp(1.1, 1.6, d);
     lantern.intensity = (lerp(26, 8, d) + save.oilLvl * 6) * (player && player.lantern ? 1 : 0);
     lantern.distance = 24 + save.oilLvl * 6;
@@ -1281,10 +1280,10 @@ function makeTree(x, z, h, key = "pine") {
 function pickType() {
     const night = isNight();
     let total = 0;
-    const tier = bestIdx();
-    for (const T of Object.values(TYPES)) if ((T.minTier || 0) <= tier) total += night ? T.wn : T.wd;
+    const tier = bestIdx(), blood = isBlood(), tw = T => (night ? T.wn : T.wd) * (blood && T.rare ? 2.2 : 1);
+    for (const T of Object.values(TYPES)) if ((T.minTier || 0) <= tier) total += tw(T);
     let r = Math.random() * total;
-    for (const [k, T] of Object.entries(TYPES)) { if ((T.minTier || 0) > tier) continue; r -= night ? T.wn : T.wd; if (r <= 0) return k; }
+    for (const [k, T] of Object.entries(TYPES)) { if ((T.minTier || 0) > tier) continue; r -= tw(T); if (r <= 0) return k; }
     return "pine";
 }
 let lastRareToast = -99;
@@ -1427,6 +1426,7 @@ let pickupAcc = 0, pickupT = 0, soldAcc = 0, soldT = 0;
 let locked = false, saveT = 0, ghostAcc = 0, owlT = 18, wasNight = isNight(), dirT = 0;
 const flashEl = $("flash"), hurtEl = $("hurt");
 const ACTIVATE = 16; // trees ignore you until you get this close
+const activateR = () => ACTIVATE * (isBlood() ? 1.4 : 1) * (1 - 0.3 * wx.fog);
 
 // ---------- toasts ----------
 function toast(msg, kind = "") {
@@ -1461,9 +1461,14 @@ function contractProgress(kind, n = 1) {
     }
 }
 function resetChests() { for (const c of chests) { c.opened = false; c.beacon.visible = true; } }
-function onDusk() { toast("Night falls. Rare trees are stirring in the woods...", "rare"); sfx(190, 0.7, "sine", 0.07, 0.5); owl(); }
+function onDusk() {
+    if (isBlood()) { toast("THE BLOOD MOON RISES. The woods are hungry... and pay double.", "bad"); sfx(80, 1.6, "sawtooth", 0.16, 0.4); bmFelled = 0; }
+    else { toast("Night falls. Rare trees are stirring in the woods...", "rare"); sfx(190, 0.7, "sine", 0.07, 0.5); owl(); }
+}
 function onDawn() {
+    const wasBlood = save.day % 3 === 0;
     save.day++;
+    if (wasBlood) { const bonus = 100 + bmFelled * 25; save.money += bonus; save.bmSurvived = (save.bmSurvived || 0) + 1; toast("You survived the Blood Moon! +" + money(bonus) + " bonus.", "cash"); bmFelled = 0; }
     toast(`Dawn of day ${save.day}. The night trees burn away.`, "good");
     for (const t of trees) if (t.type.night && !t.gone && !t.dying) t.burn = true;
     resetChests();
@@ -1503,6 +1508,7 @@ function tryHit() {
 function fellTree(t) {
     t.dying = true; t.t = 0;
     save.felled++;
+    if (isBlood()) bmFelled++;
     contractProgress("fell");
     if (t.type.rare) { save.rareFelled++; contractProgress("rare"); toast(`You felled a ${t.type.name}!`, "rare"); }
     sfx(90, 0.4, "sawtooth", 0.15, 0.4);
@@ -1525,6 +1531,7 @@ function hurtPlayer(dmg, sx, sz) {
     if (player.hp <= 0) die();
 }
 function die() {
+    endFishing();
     player.hp = 0;
     state = "dead";
     deadT = 0;
@@ -1598,7 +1605,7 @@ function equipAxe(i) {
 function openChest(c) {
     if (c.opened) return;
     c.opened = true; c.beacon.visible = false; save.chestsOpened++;
-    const m = 1 + 0.15 * (save.day - 1), r = Math.random();
+    const m = (1 + 0.15 * (save.day - 1)) * (isBlood() ? 2 : 1), r = Math.random();
     let msg;
     if (c.special) { const cash = Math.round(rand(120, 260) * m); save.money += cash; save.bandages++; msg = `Cursed chest: +${money(cash)} and a bandage`; }
     else if (r < 0.6) { const cash = Math.round(rand(25, 85) * m); save.money += cash; msg = `Chest: +${money(cash)}`; }
@@ -1613,6 +1620,7 @@ function openChest(c) {
 // ---------- shop / inventory ----------
 function shopItems() {
     const out = [];
+    if (shopTab === "sell") return sellItems();
     if (shopTab === "axes") {
         AXES.forEach((a, i) => {
             if (i === 0) return;
@@ -1626,12 +1634,13 @@ function shopItems() {
         });
     } else {
         out.push(
-            { name: "Ghost Lumberjack", desc: `Chops while you're away. Owned: ${save.ghosts} (+$0.8/s each)`, cost: ghostCost(), buy() { save.ghosts++; } },
+            { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees in the woods and pays you for each one. Owned: ${save.ghosts}`, cost: ghostCost(), buy() { save.ghosts++; syncGhosts(); } },
             { name: "Bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST, buy() { save.bandages++; } },
             { name: "Better Log Price", desc: `Each log sells for $${logValue()} → $${logValue() + 2}`, cost: priceCost(), buy() { save.priceLvl++; } },
             { name: "Vitality", desc: `+20 max health (${save.hpLvl}/5)`, cost: hpCost(), maxed: save.hpLvl >= 5, buy() { save.hpLvl++; player.maxHp = maxHpNow(); player.hp = player.maxHp; } },
             { name: "Swift Boots", desc: `+7% move speed (${save.bootLvl}/4)`, cost: bootCost(), maxed: save.bootLvl >= 4, buy() { save.bootLvl++; } },
-            { name: "Lantern Oil", desc: `A brighter, longer-reaching lantern (${save.oilLvl}/3)`, cost: oilCost(), maxed: save.oilLvl >= 3, buy() { save.oilLvl++; } }
+            { name: "Lantern Oil", desc: `A brighter, longer-reaching lantern (${save.oilLvl}/3)`, cost: oilCost(), maxed: save.oilLvl >= 3, buy() { save.oilLvl++; } },
+            { name: "Better Fishing Rod", desc: `Wider catch zone, faster bites, rarer fish (${save.rodLvl}/3)`, cost: rodCost(), maxed: save.rodLvl >= 3, buy() { save.rodLvl++; } }
         );
     }
     return out;
@@ -1639,6 +1648,7 @@ function shopItems() {
 function buy(i) {
     const it = shopItems()[i];
     if (!it) return;
+    if (it.sell) { it.buy(); renderShop(); return; }
     if (it.owned) { if (it.axe !== undefined) equipAxe(it.axe); return; }
     if (it.maxed) { toast("Already maxed out.", "bad"); return; }
     if (save.money < it.cost) { toast("Not enough cash.", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return; }
@@ -1653,8 +1663,8 @@ function renderShop() {
     $("shopCash").textContent = money(save.money);
     document.querySelectorAll("#panelShop .tab").forEach(b => b.classList.toggle("on", b.dataset.tab === shopTab));
     const shopHtml = shopItems().map((it, i) => {
-        const cls = it.owned ? "owned" : it.maxed ? "owned" : save.money >= it.cost ? "ok" : "no";
-        const costTxt = it.owned ? (save.equipped === it.axe ? "EQUIPPED" : "OWNED · click to equip") : it.maxed ? "MAX" : money(it.cost);
+        const cls = it.sell ? (it.value > 0 ? "ok" : "no") : it.owned ? "owned" : it.maxed ? "owned" : save.money >= it.cost ? "ok" : "no";
+        const costTxt = it.sell ? (it.value > 0 ? "+" + money(it.value) : "—") : it.owned ? (save.equipped === it.axe ? "EQUIPPED" : "OWNED · click to equip") : it.maxed ? "MAX" : money(it.cost);
         return `<div class="row ${cls}" data-i="${i}"><span class="key">${i + 1}</span><div class="info"><b${it.col ? ` style="color:${it.col}"` : ""}>${it.name}</b><small>${it.desc}</small></div><span class="cost">${costTxt}</span></div>`;
     }).join("");
     if ($("shopList").dataset.h !== shopHtml) { $("shopList").innerHTML = shopHtml; $("shopList").dataset.h = shopHtml; }
@@ -1668,7 +1678,8 @@ function renderInv() {
         `<div class="card"><div class="big">🪵</div><b>Logs</b><small>${save.logs} carried · $${logValue()} each${save.logBonus ? " + $" + Math.floor(save.logBonus) + " bonus" : ""}</small></div>`,
         `<div class="card" data-act="bandage"><div class="big">🩹</div><b>Bandages</b><small>${save.bandages} · click to heal 40</small></div>`,
         `<div class="card" data-act="lantern"><div class="big">🔦</div><b>Lantern</b><small>${player.lantern ? "On" : "Off"} · click to toggle</small></div>`,
-        `<div class="card"><div class="big">💰</div><b>Cash</b><small>${money(save.money)}</small></div>`
+        `<div class="card"><div class="big">💰</div><b>Cash</b><small>${money(save.money)}</small></div>`,
+        `<div class="card" data-act="fish"><div class="big">🎣</div><b>Fish</b><small>${save.fishBag.length} in bag · click for the journal</small></div>`
     );
     while (cards.length < 12) cards.push(`<div class="card empty"></div>`);
     const invHtml = cards.join("");
@@ -1684,7 +1695,9 @@ function renderInv() {
         ["Chests opened", save.chestsOpened],
         ["Logs sold", save.sold],
         ["Deaths", save.deaths],
-        ["Ghost income", `$${ghostIncome().toFixed(1)}/s`],
+        ["Ghost earnings", money(save.ghostCash || 0)],
+        ["Fish caught", Object.values(save.fishDex || {}).reduce((a, d) => a + d.n, 0)],
+        ["Blood moons survived", save.bmSurvived || 0],
         ["Time played", fmtTime(save.seconds)]
     ].map(r => `<div><span>${r[0]}</span><b>${r[1]}</b></div>`).join("");
     if ($("invStats").dataset.h !== statsHtml) { $("invStats").innerHTML = statsHtml; $("invStats").dataset.h = statsHtml; }
@@ -1693,11 +1706,13 @@ function showPanels() {
     $("panelInv").classList.toggle("show", panel === "inv");
     $("panelMap").classList.toggle("show", panel === "map");
     $("panelShop").classList.toggle("show", panel === "shop");
+    $("panelFish").classList.toggle("show", panel === "fish");
     $("panelTalk").classList.toggle("show", panel === "talk");
     $("panelBack").classList.toggle("show", panel !== null && panel !== "talk");
     if (panel === "inv") renderInv();
     if (panel === "map") drawMap();
     if (panel === "shop") renderShop();
+    if (panel === "fish") renderFishLog();
 }
 function openPanel(p) {
     if (state !== "playing") return;
@@ -1724,6 +1739,7 @@ document.addEventListener("click", e => {
         if (card.dataset.act === "axe") equipAxe(+card.dataset.i);
         else if (card.dataset.act === "bandage") useBandage();
         else if (card.dataset.act === "lantern") toggleLantern();
+        else if (card.dataset.act === "fish") { openPanel("fish"); return; }
         renderInv();
     }
 });
@@ -1780,8 +1796,8 @@ function updateBars(dt) {
 // ---------- tree nameplates (name, damage, logs) ----------
 const plates = [];
 const plateV = new THREE.Vector3();
-const treeDmg = t => (t.type.flee ? 0 : Math.round((8 + t.h) * t.type.dmg * (1 + 0.05 * (save.day - 1)) * dmgScale()));
-const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale()));
+const treeDmg = t => (t.type.flee ? 0 : Math.round((8 + t.h) * t.type.dmg * (1 + 0.05 * (save.day - 1)) * dmgScale() * (isBlood() ? 1.25 : 1)));
+const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1)));
 function hidePlates() { for (const p of plates) p.style.display = "none"; }
 function updateNameplates() {
     const cands = [];
@@ -1867,7 +1883,7 @@ function drawMap() {
 
 // ---------- menus (title / pause) ----------
 const CONTROLS = [["WASD", "Move"], ["Mouse", "Look"], ["Click", "Swing axe"], ["Shift", "Sprint"], ["Space", "Jump"], ["Q", "Dash"],
-    ["E", "Inventory"], ["M", "Map"], ["F", "Interact"], ["1-9", "Equip axe"], ["H", "Bandage"], ["L", "Lantern"]];
+    ["E", "Inventory"], ["M", "Map"], ["F", "Interact"], ["1-9", "Equip axe"], ["H", "Bandage"], ["L", "Lantern"], ["J", "Fish journal"]];
 function renderMenu() {
     if ($("ver")) $("ver").textContent = "TREE CHOP STUDIOS · v" + VERSION;
     const menu = $("menu");
@@ -1902,7 +1918,7 @@ $("menuQuit").addEventListener("click", () => { writeSave(); window.close(); });
 $("death").addEventListener("mousedown", respawn);
 document.addEventListener("pointerlockchange", () => {
     locked = document.pointerLockElement === canvas;
-    if (!locked && state === "playing" && !panel) { showPanels(); state = "paused"; mouseDown = false; renderMenu(); }
+    if (!locked && state === "playing" && !panel) { showPanels(); endFishing(); state = "paused"; mouseDown = false; renderMenu(); }
 });
 
 // ---------- input ----------
@@ -1917,7 +1933,8 @@ addEventListener("keydown", e => {
     if (e.code === "Tab") { e.preventDefault(); if (panel === "shop") { shopTab = shopTab === "axes" ? "gear" : "axes"; renderShop(); } return; }
     if (e.code === "KeyE") { togglePanel("inv"); return; }
     if (e.code === "KeyM") { togglePanel("map"); return; }
-    if (e.code === "KeyF") { interact(); return; }
+    if (e.code === "KeyF") { if (fishing.on) { fishAction(); return; } interact(); return; }
+    if (e.code === "KeyJ") { togglePanel("fish"); return; }
     if (panel === "shop" && /^Digit[1-9]$/.test(e.code)) { buy(+e.code.slice(5) - 1); return; }
     if (/^Digit[1-9]$/.test(e.code)) { const l = ownedList(), i = l[+e.code.slice(5) - 1]; if (i !== undefined) equipAxe(i); return; }
     if (e.code === "KeyH") useBandage();
@@ -1936,7 +1953,7 @@ addEventListener("mousedown", e => {
     if ($("intro")) return;
     if (e.button !== 0 || state !== "playing") return;
     if (!locked && !panel) { try { canvas.requestPointerLock(); } catch (er) { /* ignore */ } return; }
-    if (locked) mouseDown = true;
+    if (locked) { if (fishing.on) fishAction(); else mouseDown = true; }
 });
 addEventListener("mouseup", e => { if (e.button === 0) mouseDown = false; });
 addEventListener("mousemove", e => {
@@ -1953,6 +1970,8 @@ function nearest() {
     if (Math.hypot(px - FERRYMAN.x, pz - FERRYMAN.z) < 3.4) return { k: "ferry" };
     for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
     if (altar && Math.hypot(px - altar.x, pz - altar.z) < 3.2) return { k: "altar" };
+    const fs2 = fishSpot();
+    if (fs2) return { k: "fish", spot: fs2 };
     return null;
 }
 function interact() {
@@ -1979,6 +1998,8 @@ function interact() {
         const first = !save.ferryTalks;
         save.ferryTalks = (save.ferryTalks || 0) + 1;
         startTalk("THE FERRYMAN", first ? FERRY_FIRST : FERRY_AGAIN[Math.floor(Math.random() * FERRY_AGAIN.length)]);
+    } else if (n.k === "fish") {
+        if (n.spot.blocked) toast("Face the water to cast your line.", "bad"); else startFishing(n.spot);
     } else if (n.k === "chest") openChest(n.c);
     else if (n.k === "altar") {
         if (save.altarDay === save.day) toast("The altar is quiet. Come back tomorrow.");
@@ -2018,10 +2039,10 @@ function updateTrees(dt, safe, lookX, lookZ) {
         const dx = player.pos.x - t.x, dz = player.pos.z - t.z, dist = Math.hypot(dx, dz) || 1;
         t._d = dist; t._nx = dx / dist; t._nz = dz / dist;
         t._seen = dist < 50 && (-t._nx * lookX - t._nz * lookZ) > 0.55;
-        if (!t.type.flee && !safe && !t._seen && dist < ACTIVATE && dist > t.r + 2.1 && t.atk === "idle") cands.push(t);
+        if (!t.type.flee && !safe && !t._seen && dist < activateR() && dist > t.r + 2.1 && t.atk === "idle") cands.push(t);
     }
     cands.sort((a, b) => a._d - b._d);
-    const movers = new Set(cands.slice(0, 3)); // at most three trees stalk you at once, so they never swarm
+    const movers = new Set(cands.slice(0, isBlood() ? 5 : 3)); // at most three (five on a blood moon) trees stalk you at once, so they never swarm
 
     for (const t of trees) {
         if (t.gone) continue;
@@ -2036,7 +2057,8 @@ function updateTrees(dt, safe, lookX, lookZ) {
             t.t += dt / 0.9;
             t.body.rotation.x = -Math.min(1, t.t * t.t) * Math.PI / 2;
             if (t.t >= 1) {
-                const bx = -Math.sin(t.g.rotation.y), bz = -Math.cos(t.g.rotation.y);
+                if (t.byGhost) { burst(V3(t.x, 0.6, t.z), 14, 4, [chipMats[1], new THREE.MeshBasicMaterial({ color: 0x9fe8ff })]); sfx(120, 0.2, "square", 0.08, 0.5); scene.remove(t.g); t.gone = true; continue; }
+    const bx = -Math.sin(t.g.rotation.y), bz = -Math.cos(t.g.rotation.y);
                 dropLogs(t.x, t.z, treeLogs(t), { x: bx, z: bz }, t.key);
                 burst(V3(t.x + bx * t.h * 0.5, 0.3, t.z + bz * t.h * 0.5), 18, 5);
                 sfx(70, 0.35, "square", 0.2, 0.3);
@@ -2047,7 +2069,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
             continue;
         }
         const dist = t._d, seen = t._seen;
-        if (dist < ACTIVATE * 1.6) t.g.rotation.y += angDiff(Math.atan2(player.pos.x - t.x, player.pos.z - t.z), t.g.rotation.y) * Math.min(1, 4 * dt);
+        if (dist < activateR() * 1.6) t.g.rotation.y += angDiff(Math.atan2(player.pos.x - t.x, player.pos.z - t.z), t.g.rotation.y) * Math.min(1, 4 * dt);
 
         let mx = 0, mz = 0, sp = 0;
         if (t.type.flee) {
@@ -2071,7 +2093,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         const reach = t.r + 2.7;
         if (!t.type.flee) {
             if (t.atk === "idle" && !safe && dist < reach && t.cool <= 0) {
-                if (Math.random() < 0.4) { t.atk = "wind"; t.atkT = 0; sfx(180, 0.3, "sawtooth", 0.05, 0.5); floatWorld(V3(t.x, Math.min(t.h * 0.7, 3.4), t.z), "!", "warn"); }
+                if (Math.random() < (isBlood() ? 0.6 : 0.4)) { t.atk = "wind"; t.atkT = 0; sfx(180, 0.3, "sawtooth", 0.05, 0.5); floatWorld(V3(t.x, Math.min(t.h * 0.7, 3.4), t.z), "!", "warn"); }
                 else t.cool = 1 + Math.random() * 2.5; // it hesitates
             } else if (t.atk === "wind") {
                 t.atkT += dt;
@@ -2090,7 +2112,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         const mode = faceMode(t, dist);
         if (mode !== t.mode) { t.mode = mode; t.face.material = faceMats[mode]; }
         t.g.position.set(t.x + (Math.random() - 0.5) * t.hurt * 0.15, 0, t.z + (Math.random() - 0.5) * t.hurt * 0.15);
-        t.body.rotation.z = Math.sin(time * 0.9 + t.phase) * 0.025 + (sp > 0 ? Math.sin(time * 9 + t.phase) * 0.04 : 0);
+        t.body.rotation.z = Math.sin(time * 0.9 + t.phase) * 0.025 * swayK + (sp > 0 ? Math.sin(time * 9 + t.phase) * 0.04 : 0);
         t.body.rotation.x = t.hurt * 0.1;
         const raise = t.atk === "wind" ? 1 : (!seen && dist < 18 ? 0.55 : 0);
         t.armUp = lerp(t.armUp, raise, Math.min(1, 8 * dt));
@@ -2115,7 +2137,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
     for (let i = trees.length - 1; i >= 0; i--) if (trees[i].gone) trees.splice(i, 1);
     let alive = 0;
     for (const t of trees) if (!t.dying && !t.burn) alive++;
-    if (alive < 60 && Math.random() < dt * 0.7) spawnTree();
+    if (alive < (isBlood() ? 82 : 60) && Math.random() < dt * (isBlood() ? 1.4 : 0.7)) spawnTree();
 }
 
 function updateWorldAnim(dt) {
@@ -2192,7 +2214,7 @@ function update(dt) {
     if (swing.t < 1) {
         swing.t = Math.min(1, swing.t + dt / 0.36);
         if (!swing.hit && swing.t >= 0.46) { swing.hit = true; tryHit(); }
-    } else if (mouseDown && !panel) {
+    } else if (mouseDown && !panel && !fishing.on) {
         swing.t = 0; swing.hit = false;
         sfx(260, 0.15, "sawtooth", 0.04, 0.5);
     }
@@ -2201,6 +2223,7 @@ function update(dt) {
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
     updateWorldAnim(dt);
+    updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
     for (let i = chips.length - 1; i >= 0; i--) {
@@ -2253,7 +2276,6 @@ function update(dt) {
     if (saveT > 5) { saveT = 0; writeSave(); }
 
     // ambience
-    if (windGain) windGain.gain.value = 0.014 + Math.sin(time * 0.35) * 0.008 + (night ? 0.008 : 0);
     if (night && (owlT -= dt) <= 0) { owl(); owlT = 18 + Math.random() * 30; }
 
     // camera feel
@@ -2273,6 +2295,651 @@ function update(dt) {
     applySky();
 }
 
+// =====================================================================
+//  1.0.1: a living island (water, clouds, flowers, wildlife, smoke)
+// =====================================================================
+const lamb = c => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
+const part = (g, geo, m, x, y, z, sx, sy, sz, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.scale.set(sx, sy, sz); o.rotation.set(rx, ry, rz); g.add(o); return o; };
+const POND = LANDMARKS[1];
+
+// ---------- water: turquoise shallows fading to deep blue, plus a lapping foam line ----------
+{
+    const wg = new THREE.PlaneGeometry(720, 720, 144, 144);
+    wg.rotateX(-Math.PI / 2);
+    const pos = wg.attributes.position, col = [], c = new THREE.Color(), shallow = new THREE.Color(0x56d8d0), mid = new THREE.Color(0x2f86b8), deep = new THREE.Color(0x174a7a);
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), z = pos.getZ(i), k = clamp((Math.hypot(x, z) - shoreAt(x, z)) / 30, 0, 1);
+        c.copy(shallow).lerp(mid, clamp(k * 2, 0, 1)).lerp(deep, clamp(k * 2 - 1, 0, 1));
+        col.push(c.r, c.g, c.b);
+    }
+    wg.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    waterMesh.geometry.dispose();
+    waterMesh.geometry = wg;
+    waterMesh.material.color.setHex(0xffffff);
+    waterMesh.material.vertexColors = true;
+    waterMesh.material.needsUpdate = true;
+}
+const foam = (() => {
+    const N = 260, p = [], idx = [];
+    for (let i = 0; i <= N; i++) {
+        const th = (i / N) * Math.PI * 2, r = shoreR(th);
+        p.push(Math.cos(th) * (r - 3.5), -0.4, Math.sin(th) * (r - 3.5), Math.cos(th) * (r - 2.2), -0.4, Math.sin(th) * (r - 2.2));
+        if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
+    g.setIndex(idx);
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+    scene.add(m);
+    return m;
+})();
+
+// ---------- clouds ----------
+const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false });
+const clouds = [];
+for (let i = 0; i < 14; i++) {
+    const b = batch(cloudMat), n = 5 + Math.floor(srand() * 3);
+    for (let k = 0; k < n; k++) b.add(ICO, (k - n / 2) * 4.5 + srange(-1, 1), srange(-1, 1.2), srange(-3, 3), 0, 0, 0, srange(4, 7), srange(2.4, 3.6), srange(3.5, 5.5));
+    const m = b.build();
+    m.position.set(srange(-170, 170), srange(62, 92), srange(-170, 170));
+    clouds.push(m);
+}
+
+// ---------- flowers, tall grass ----------
+const flowerPatches = [];
+{
+    const cols = [0xff7aa8, 0xffe060, 0xf4f4f4, 0x8ab8ff, 0xc08aff];
+    const heads = cols.map(c => batch(lamb(c))), stems = batch(lamb(0x4a7a3a));
+    const patch = (x, z) => {
+        const a = Math.floor(srand() * cols.length), b = Math.floor(srand() * cols.length), n = 10 + Math.floor(srand() * 8);
+        for (let i = 0; i < n; i++) {
+            const fx = x + srange(-2.6, 2.6), fz = z + srange(-2.6, 2.6);
+            stems.add(CYL6, fx, 0.22, fz, 0, 0, 0, 0.02, 0.44, 0.02);
+            heads[srand() < 0.6 ? a : b].add(ICO, fx, 0.5, fz, 0, 0, 0, 0.12, 0.1, 0.12);
+        }
+        flowerPatches.push({ x, z });
+    };
+    scatter(30, patch, false, 2);
+    scatter(8, patch, true, 0);
+    heads.forEach(h => h.build()); stems.build();
+    const g1 = batch(lamb(0x4a8a3a)), g2 = batch(lamb(0x6a9a42));
+    scatter(170, (x, z) => { const gb = srand() < 0.5 ? g1 : g2; for (let i = 0; i < 4; i++) gb.add(CONE6, x + srange(-0.3, 0.3), 0.32, z + srange(-0.3, 0.3), srange(-0.25, 0.25), 0, srange(-0.25, 0.25), 0.05, srange(0.45, 0.8), 0.05); }, false, 0);
+    g1.build(); g2.build();
+}
+
+// ---------- chimney + smoke ----------
+const smokePuffs = [], smokeEmit = [];
+const smokeMat = new THREE.MeshBasicMaterial({ color: 0xc8c8d4, transparent: true, opacity: 0.45, depthWrite: false });
+for (let i = 0; i < 48; i++) { const m = new THREE.Mesh(ICO, smokeMat); m.visible = false; scene.add(m); smokePuffs.push({ m, life: 0, vx: 0, vz: 0 }); }
+const addSmoke = (x, y, z, rate = 0.6) => smokeEmit.push({ x, y, z, rate, acc: srand() });
+{
+    addBox(-3.3, -2.5, 0.2, 1.0, 3.4, 6.0, new THREE.MeshLambertMaterial({ color: 0x5a5a66, flatShading: true }), false);
+    addSmoke(-2.9, 6.1, 0.6, 0.9);
+    addSmoke(MILL.x + 1, 5.4, MILL.z + 1, 0.8);
+    for (const lm of LANDMARKS) if (lm.name.includes("CAMP")) addSmoke(lm.x, 1.6, lm.z, 0.7);
+}
+
+// ---------- wildlife ----------
+const critters = [];
+const bx = (g, m, x, y, z, sx, sy, sz, rx = 0, ry = 0, rz = 0) => part(g, BOX, m, x, y, z, sx, sy, sz, rx, ry, rz);
+function randLand(margin = 14) { for (let i = 0; i < 40; i++) { const a = Math.random() * 6.283, d = SAFE_R + 4 + Math.random() * (shoreR(a) - margin - SAFE_R - 4), x = Math.cos(a) * d, z = Math.sin(a) * d; if (okSpot(x, z, 4)) return { x, z }; } return { x: 40, z: 40 }; }
+function randBeach() { for (let i = 0; i < 40; i++) { const a = Math.random() * 6.283, d = shoreR(a) - rand(4, 9), x = Math.cos(a) * d, z = Math.sin(a) * d, dx = x - FB.x, dz = z - FB.z, al = dx * FDIR.x + dz * FDIR.z, sd = dx * FPERP.x + dz * FPERP.z; if (al > -6 && al < 12 && Math.abs(sd) < 8) continue; return { x, z, a }; } return { x: 80, z: 0, a: 0 }; }
+function addCritter(kind, g, x, z, y = 0, extra = {}) {
+    g.position.set(x, y, z); scene.add(g);
+    const c = Object.assign({ kind, g, x, z, y0: y, ph: srand() * 6, state: "idle", t: srand() * 3, tx: x, tz: z, hx: x, hz: z, hide: 0 }, extra);
+    critters.push(c); return c;
+}
+function makeDeer() {
+    const g = new THREE.Group(), body = lamb(0x8a5a30), pale = lamb(0xe8d8b8), dark = lamb(0x3a2412);
+    bx(g, body, 0, 1.0, 0, 0.55, 0.55, 1.2); bx(g, pale, 0, 0.78, 0, 0.5, 0.18, 1.0);
+    bx(g, body, 0, 1.45, 0.62, 0.22, 0.7, 0.22, 0.4); bx(g, body, 0, 1.85, 0.9, 0.26, 0.28, 0.42); bx(g, dark, 0, 1.8, 1.14, 0.1, 0.1, 0.1);
+    bx(g, pale, 0, 1.2, -0.66, 0.14, 0.16, 0.14);
+    for (const [x, z] of [[-0.18, 0.45], [0.18, 0.45], [-0.18, -0.45], [0.18, -0.45]]) bx(g, dark, x, 0.4, z, 0.1, 0.8, 0.1);
+    for (const s of [-1, 1]) { bx(g, dark, s * 0.1, 2.12, 0.85, 0.04, 0.4, 0.04, 0, 0, s * 0.35); bx(g, dark, s * 0.2, 2.2, 0.85, 0.04, 0.22, 0.04, 0, 0, s * 0.9); }
+    return g;
+}
+function makeRabbit() {
+    const g = new THREE.Group(), fur = lamb(0xb8a894), white = lamb(0xf4f0e8);
+    part(g, ICO, fur, 0, 0.28, 0, 0.26, 0.24, 0.34); part(g, ICO, fur, 0, 0.42, 0.28, 0.16, 0.15, 0.17); part(g, ICO, white, 0, 0.3, -0.34, 0.09, 0.09, 0.09);
+    for (const s of [-1, 1]) bx(g, fur, s * 0.06, 0.66, 0.26, 0.05, 0.3, 0.05, 0, 0, s * 0.15);
+    return g;
+}
+function makeCrab() {
+    const g = new THREE.Group(), red = lamb(0xe0502a);
+    part(g, ICO, red, 0, 0.14, 0, 0.26, 0.12, 0.2);
+    for (const s of [-1, 1]) { part(g, ICO, red, s * 0.34, 0.18, 0.16, 0.1, 0.08, 0.1); bx(g, red, s * 0.1, 0.3, 0.14, 0.03, 0.08, 0.03); }
+    return g;
+}
+function makeGull() {
+    const g = new THREE.Group(), white = lamb(0xf2f2f2), grey = lamb(0x9a9aa2), yel = lamb(0xffc030);
+    part(g, ICO, white, 0, 0.32, 0, 0.18, 0.18, 0.34); part(g, ICO, white, 0, 0.5, 0.26, 0.1, 0.1, 0.1); bx(g, yel, 0, 0.48, 0.38, 0.04, 0.04, 0.12);
+    const wl = bx(g, grey, -0.3, 0.4, 0, 0.5, 0.03, 0.22), wr = bx(g, grey, 0.3, 0.4, 0, 0.5, 0.03, 0.22);
+    g.userData.wings = [wl, wr];
+    return g;
+}
+function makeFrog() {
+    const g = new THREE.Group(), grn = lamb(0x58b04a);
+    part(g, ICO, grn, 0, 0.1, 0, 0.14, 0.09, 0.17); part(g, ICO, grn, -0.07, 0.2, 0.1, 0.04, 0.04, 0.04); part(g, ICO, grn, 0.07, 0.2, 0.1, 0.04, 0.04, 0.04);
+    return g;
+}
+const birdMat = lamb(0xeeeeee);
+function makeBird() {
+    const g = new THREE.Group();
+    part(g, ICO, birdMat, 0, 0, 0, 0.14, 0.1, 0.3);
+    const wl = bx(g, birdMat, -0.3, 0, 0, 0.5, 0.02, 0.22), wr = bx(g, birdMat, 0.3, 0, 0, 0.5, 0.02, 0.22);
+    g.userData.wings = [wl, wr];
+    return g;
+}
+function makeButterfly() {
+    const g = new THREE.Group(), c = [0xff7ad8, 0xffd040, 0x7fd8ff, 0xffffff][Math.floor(Math.random() * 4)], m = new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide });
+    const wl = part(g, BOX, m, -0.1, 0, 0, 0.18, 0.01, 0.16), wr = part(g, BOX, m, 0.1, 0, 0, 0.18, 0.01, 0.16);
+    g.userData.wings = [wl, wr];
+    return g;
+}
+for (let i = 0; i < 6; i++) { const p = randLand(16); addCritter("deer", makeDeer(), p.x, p.z, 0, { hx: p.x, hz: p.z }); }
+for (let i = 0; i < 11; i++) { const p = randLand(14); addCritter("rabbit", makeRabbit(), p.x, p.z, 0, { hx: p.x, hz: p.z }); }
+for (let i = 0; i < 14; i++) { const p = randBeach(); addCritter("crab", makeCrab(), p.x, p.z, 0.02, { hx: p.x, hz: p.z, ang: p.a }); }
+for (let i = 0; i < 8; i++) { const p = randBeach(); addCritter("gull", makeGull(), p.x, p.z, 0, { hx: p.x, hz: p.z }); }
+for (let i = 0; i < 4; i++) { const p = dockPt(5 + i * 5.5, i % 2 ? 1.9 : -1.9, 1.15); addCritter("gull", makeGull(), p.x, p.z, 1.15, { hx: p.x, hz: p.z, perch: true }); }
+for (let i = 0; i < 5; i++) { const a = srand() * 6.283, d = srange(6.7, 8); addCritter("frog", makeFrog(), POND.x + Math.cos(a) * d, POND.z + Math.sin(a) * d, 0.02, { hx: POND.x + Math.cos(a) * d, hz: POND.z + Math.sin(a) * d }); }
+for (let i = 0; i < 10; i++) addCritter("bird", makeBird(), 0, 0, 22, { cx: srange(-40, 40), cz: srange(-40, 40), rad: srange(25, 70), spd: srange(0.07, 0.14) * (srand() < 0.5 ? 1 : -1), alt: srange(16, 30) });
+for (let i = 0; i < 12; i++) { const fp = flowerPatches[Math.floor(srand() * flowerPatches.length)] || { x: 30, z: 30 }; addCritter("butterfly", makeButterfly(), fp.x, fp.z, 1, { hx: fp.x, hz: fp.z }); }
+
+const WALK_OK = (x, z) => Math.hypot(x, z) < shoreAt(x, z) - 8 && Math.hypot(x - POND.x, z - POND.z) > 7.5;
+function step(c, tx, tz, sp, dt) {
+    const dx = tx - c.x, dz = tz - c.z, d = Math.hypot(dx, dz) || 1, m = Math.min(d, sp * dt);
+    const nx = c.x + dx / d * m, nz = c.z + dz / d * m;
+    if (WALK_OK(nx, nz)) { c.x = nx; c.z = nz; }
+    c.g.rotation.y += angDiff(Math.atan2(dx, dz), c.g.rotation.y) * Math.min(1, 8 * dt);
+    return d;
+}
+function updateCritters(dt) {
+    const px = player.pos.x, pz = player.pos.z, dayA = dayAmt(), night = dayA < 0.25, calm = wx.rain < 0.3;
+    birdMat.color.setHex(dayA > 0.3 ? 0xeeeeee : 0x3a2a4a);
+    for (const c of critters) {
+        const dp = Math.hypot(px - c.x, pz - c.z);
+        const far = dp > 95;
+        c.g.visible = !far;
+        if (far && c.kind !== "bird") continue;
+        c.t -= dt; c.ph += dt;
+        switch (c.kind) {
+            case "deer": {
+                if (dp < 13 && state === "playing") { c.state = "flee"; const ax = c.x - px, az = c.z - pz, al = Math.hypot(ax, az) || 1; step(c, c.x + ax / al * 10, c.z + az / al * 10, 7.5, dt); c.g.position.y = Math.abs(Math.sin(c.ph * 9)) * 0.18; }
+                else if (c.state === "flee" && dp < 22) { step(c, c.x + (c.x - px), c.z + (c.z - pz), 5, dt); }
+                else { c.state = "idle"; if (c.t <= 0) { c.t = rand(2, 6); if (Math.random() < 0.6) { const a = Math.random() * 6.283, r = rand(4, 16); c.tx = c.hx + Math.cos(a) * r; c.tz = c.hz + Math.sin(a) * r; c.walking = true; } else c.walking = false; }
+                    if (c.walking) { if (step(c, c.tx, c.tz, 1.5, dt) < 0.5) c.walking = false; c.g.position.y = Math.sin(c.ph * 4) * 0.03; } else c.g.position.y = 0; }
+                break;
+            }
+            case "rabbit": {
+                const fleeing = dp < 7 && state === "playing";
+                if (c.t <= 0) { c.t = fleeing ? 0.25 : rand(1, 3.5); const a = fleeing ? Math.atan2(c.x - px, c.z - pz) + rand(-0.6, 0.6) : Math.random() * 6.283, r = fleeing ? 4 : rand(1, 3); c.tx = c.x + Math.sin(a) * r; c.tz = c.z + Math.cos(a) * r; c.hop = 0.35; }
+                if (c.hop > 0) { c.hop -= dt; step(c, c.tx, c.tz, fleeing ? 9 : 3.5, dt); c.g.position.y = Math.sin((1 - c.hop / 0.35) * Math.PI) * 0.4; } else c.g.position.y = 0;
+                break;
+            }
+            case "crab": {
+                if (c.hide > 0) { c.hide -= dt; c.g.visible = false; if (c.hide <= 0) { c.x = c.hx; c.z = c.hz; } break; }
+                if (dp < 5 && state === "playing") { const a = Math.atan2(c.z, c.x); c.x += Math.cos(a) * 5.5 * dt; c.z += Math.sin(a) * 5.5 * dt; if (Math.hypot(c.x, c.z) > shoreAt(c.x, c.z) - 3.2) { c.hide = 12; burst(V3(c.x, 0.1, c.z), 4, 2, [new THREE.MeshBasicMaterial({ color: 0xcfeaff })]); } }
+                else if (c.t <= 0) { c.t = rand(0.6, 2.4); c.dir = Math.random() < 0.5 ? 1 : -1; c.go = Math.random() < 0.6 ? rand(0.3, 0.8) : 0; }
+                if (c.go > 0) { c.go -= dt; const a = Math.atan2(c.z, c.x) + Math.PI / 2; c.x += Math.cos(a) * c.dir * 1.4 * dt; c.z += Math.sin(a) * c.dir * 1.4 * dt; }
+                c.g.position.set(c.x, 0.02 + Math.abs(Math.sin(c.ph * 14)) * (c.go > 0 ? 0.03 : 0), c.z); c.g.rotation.y = Math.atan2(c.x, c.z);
+                break;
+            }
+            case "gull": {
+                c.g.visible = !far && !night;
+                if (c.state === "fly") {
+                    c.fly -= dt; c.ang += dt * 0.55; const r = 14;
+                    c.x = c.cx + Math.cos(c.ang) * r; c.z = c.cz + Math.sin(c.ang) * r; c.g.position.y = 11 + Math.sin(c.ph) * 1.2;
+                    c.g.rotation.y = -c.ang + Math.PI; c.g.userData.wings.forEach((w, i) => { w.rotation.z = Math.sin(c.ph * 9) * 0.6 * (i ? -1 : 1); });
+                    if (c.fly <= 0) { c.state = "idle"; if (!c.perch) { const p = randBeach(); c.x = p.x; c.z = p.z; } else { c.x = c.hx; c.z = c.hz; } c.g.position.y = c.y0; c.g.userData.wings.forEach(w => (w.rotation.z = 0)); }
+                } else {
+                    c.g.rotation.y += angDiff(Math.atan2(px - c.x, pz - c.z) + Math.PI, c.g.rotation.y) * Math.min(1, dt);
+                    if (dp < 7 && state === "playing" && !night) { c.state = "fly"; c.fly = rand(7, 12); c.ang = Math.random() * 6.283; c.cx = c.x - Math.cos(c.ang) * 14; c.cz = c.z - Math.sin(c.ang) * 14; sfx(900, 0.25, "triangle", 0.03, 1.5); }
+                }
+                c.g.position.x = c.x; c.g.position.z = c.z;
+                break;
+            }
+            case "frog": {
+                c.g.visible = !far && !night;
+                if (c.hide > 0) { c.hide -= dt; c.g.visible = false; if (c.hide <= 0) { c.x = c.hx; c.z = c.hz; } break; }
+                if (dp < 4 && state === "playing") { c.hide = 10; pondRipple(POND.x + (c.hx - POND.x) * 0.7, POND.z + (c.hz - POND.z) * 0.7); sfx(380, 0.12, "sine", 0.05, 0.7); }
+                if (c.t <= 0) { c.t = rand(2, 7); c.jump = 0.3; }
+                if (c.jump > 0) { c.jump -= dt; c.g.position.y = 0.02 + Math.sin((1 - c.jump / 0.3) * Math.PI) * 0.25; } else c.g.position.y = 0.02;
+                break;
+            }
+            case "bird": {
+                const showBird = dayA > 0.3 || (c.ph | 0) % 2 === 0 && night; // fewer, darker bats at night
+                c.g.visible = showBird && calm;
+                c.ang = (c.ang || c.ph) + c.spd * dt * (night ? 2.2 : 1);
+                const bx2 = c.cx + Math.cos(c.ang) * c.rad, bz2 = c.cz + Math.sin(c.ang) * c.rad;
+                c.g.position.set(bx2, c.alt + Math.sin(c.ph * 0.7) * 2, bz2);
+                c.g.rotation.y = -c.ang + (c.spd > 0 ? 0 : Math.PI);
+                c.g.userData.wings.forEach((w, i) => { w.rotation.z = Math.sin(c.ph * (night ? 18 : 10)) * 0.7 * (i ? -1 : 1); });
+                break;
+            }
+            case "butterfly": {
+                c.g.visible = !far && dayA > 0.5 && calm;
+                const t = c.ph * 0.6;
+                c.g.position.set(c.hx + Math.sin(t * 1.3) * 2.6, 0.8 + Math.sin(t * 2.1) * 0.35 + 0.3, c.hz + Math.sin(t * 0.9 + 1) * 2.6);
+                c.g.rotation.y = t;
+                c.g.userData.wings.forEach((w, i) => { w.rotation.z = Math.sin(c.ph * 16) * 0.9 * (i ? -1 : 1); });
+                break;
+            }
+        }
+        if (c.kind !== "gull" && c.kind !== "bird" && c.kind !== "butterfly" && c.kind !== "crab") { c.g.position.x = c.x; c.g.position.z = c.z; }
+    }
+}
+
+// ---------- the pond: fish shadows, ripples, and the odd jumping fish ----------
+const ripples = [];
+{
+    const rm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 });
+    for (let i = 0; i < 10; i++) { const m = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 20), rm.clone()); m.rotation.x = -Math.PI / 2; m.visible = false; scene.add(m); ripples.push({ m, life: 0 }); }
+}
+function pondRipple(x, z, y = 0.08, scale = 1) { const r = ripples.find(q => q.life <= 0); if (!r) return; r.life = 1; r.sc = scale; r.m.position.set(x, y, z); r.m.visible = true; }
+const pondFish = [], jumpFish = { m: null, t: -1, a: 0, sx: 0, sz: 0, ex: 0, ez: 0 };
+{
+    const sm = new THREE.MeshBasicMaterial({ color: 0x06202c, transparent: true, opacity: 0.4, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -7, polygonOffsetUnits: -7 });
+    for (let i = 0; i < 9; i++) {
+        const g = new THREE.Group();
+        part(g, ICO, sm, 0, 0, 0, 0.13, 0.02, 0.38); part(g, CONE6, sm, 0, 0, -0.42, 0.1, 0.02, 0.2, -Math.PI / 2, 0, 0);
+        g.position.y = 0.07; scene.add(g);
+        pondFish.push({ g, a: srand() * 6.283, r: srange(1.2, 5), sp: srange(0.25, 0.6) * (srand() < 0.5 ? 1 : -1), ph: srand() * 6 });
+    }
+    const jg = new THREE.Group(), fm = new THREE.MeshLambertMaterial({ color: 0xff9a3a, flatShading: true });
+    part(jg, ICO, fm, 0, 0, 0, 0.12, 0.12, 0.34); part(jg, CONE6, fm, 0, 0, -0.38, 0.1, 0.1, 0.22, -Math.PI / 2, 0, 0);
+    jg.visible = false; scene.add(jg); jumpFish.m = jg; jumpFish.cd = 4;
+}
+function updatePond(dt) {
+    if (Math.hypot(player.pos.x - POND.x, player.pos.z - POND.z) > 60) return;
+    for (const f of pondFish) {
+        f.a += f.sp * dt;
+        f.g.position.set(POND.x + Math.cos(f.a) * f.r, 0.07, POND.z + Math.sin(f.a) * f.r);
+        f.g.rotation.y = -f.a + (f.sp > 0 ? Math.PI : 0) + (f.sp > 0 ? 0 : Math.PI) + Math.PI / 2;
+        f.g.rotation.z = Math.sin(time * 5 + f.ph) * 0.15;
+    }
+    if (jumpFish.t < 0) { jumpFish.cd -= dt; if (jumpFish.cd <= 0) { jumpFish.t = 0; jumpFish.cd = rand(6, 14); const a = Math.random() * 6.283, r = rand(1, 4.5); jumpFish.sx = POND.x + Math.cos(a) * r; jumpFish.sz = POND.z + Math.sin(a) * r; const a2 = a + rand(-0.8, 0.8); jumpFish.ex = POND.x + Math.cos(a2) * rand(1, 4.8); jumpFish.ez = POND.z + Math.sin(a2) * rand(1, 4.8); jumpFish.m.visible = true; pondRipple(jumpFish.sx, jumpFish.sz); sfx(620, 0.08, "sine", 0.05, 1.8); } }
+    else {
+        jumpFish.t += dt / 0.9;
+        const k = jumpFish.t, x = lerp(jumpFish.sx, jumpFish.ex, k), z = lerp(jumpFish.sz, jumpFish.ez, k), y = Math.sin(k * Math.PI) * 1.1;
+        jumpFish.m.position.set(x, y + 0.05, z);
+        jumpFish.m.rotation.set(-Math.cos(k * Math.PI) * 0.9, Math.atan2(jumpFish.ex - jumpFish.sx, jumpFish.ez - jumpFish.sz), 0);
+        if (k >= 1) { jumpFish.t = -1; jumpFish.m.visible = false; pondRipple(jumpFish.ex, jumpFish.ez); sfx(300, 0.1, "sine", 0.05, 0.6); }
+    }
+}
+function updateRipples(dt) {
+    for (const r of ripples) if (r.life > 0) { r.life -= dt * 0.8; const s = (1.6 - r.life) * 1.8 * r.sc; r.m.scale.set(s, s, s); r.m.material.opacity = Math.max(0, r.life) * 0.6; if (r.life <= 0) r.m.visible = false; }
+}
+
+function updateEcosystem(dt) {
+    const wind = 0.5 + wx.storm * 2;
+    foam.scale.setScalar(1 + Math.sin(time * 0.8) * 0.004); foam.material.opacity = 0.38 + Math.sin(time * 0.8) * 0.14;
+    for (const c of clouds) { c.position.x += dt * (1.2 + wind * 2); if (c.position.x > 190) c.position.x = -190; }
+    updateCritters(dt); updatePond(dt); updateRipples(dt);
+    for (const e of smokeEmit) {
+        e.acc += dt * e.rate;
+        if (e.acc >= 1) { e.acc -= 1; const p = smokePuffs.find(q => q.life <= 0); if (p) { p.life = 4; p.age = 0; p.m.position.set(e.x + srange(-0.15, 0.15), e.y, e.z + srange(-0.15, 0.15)); p.vx = 0.4 + wind * 0.6; p.vz = srange(-0.1, 0.1); p.m.visible = true; } }
+    }
+    for (const p of smokePuffs) if (p.life > 0) { p.life -= dt; p.age += dt; p.m.position.x += p.vx * dt; p.m.position.y += 0.9 * dt; p.m.position.z += p.vz * dt; const s = Math.sin(Math.min(1, p.age / 4) * Math.PI) * 0.55 + 0.05; p.m.scale.setScalar(s); if (p.life <= 0) p.m.visible = false; }
+}
+
+// =====================================================================
+//  1.0.1: weather, blood moon, ghost lumberjacks, ambience
+// =====================================================================
+function isBlood() { return isNight() && save.day % 3 === 0; }
+let bmFelled = 0, bmBeat = 0;
+
+const WX_ICON = { clear: "☀", cloudy: "☁", rain: "🌧", storm: "⛈", fog: "🌫" };
+const WX_MSG = { clear: "The sky clears.", cloudy: "Clouds roll in...", rain: "It starts to rain.", storm: "A storm is rolling in!", fog: "A thick fog creeps over the island." };
+const wx = { type: "clear", t: rand(60, 110), rain: 0, cloud: 0.12, fog: 0, storm: 0, light: 0, nextBolt: 6 };
+let swayK = 1, rainGain = null, waveGain = null;
+const cGray = new THREE.Color(0x8a94a0), cBlood = new THREE.Color(0x5a0a14), cRed = new THREE.Color(0xff4a4a), cLightning = new THREE.Color(0xd8e4ff), cWhite = new THREE.Color(0xffffff);
+
+function setWeather(type, announce = true) {
+    wx.type = type; wx.t = rand(70, 170);
+    if (announce) toast(WX_MSG[type], "");
+}
+function pickWeather() {
+    const w = isBlood() ? [["clear", 0.2], ["fog", 0.3], ["cloudy", 0.2], ["storm", 0.3]] : [["clear", 0.38], ["cloudy", 0.26], ["rain", 0.18], ["fog", 0.1], ["storm", 0.08]];
+    let r = Math.random();
+    for (const [k, p] of w) { r -= p; if (r <= 0) return k === wx.type ? "clear" : k; }
+    return "clear";
+}
+function thunder() { sfx(70, 1.4, "sawtooth", 0.2, 0.25); setTimeout(() => sfx(55, 0.9, "square", 0.12, 0.4), 260); }
+
+const RAIN_N = 650;
+const rainPos = new Float32Array(RAIN_N * 6), rainSeed = new Float32Array(RAIN_N * 3);
+for (let i = 0; i < RAIN_N; i++) { rainSeed[i * 3] = (Math.random() - 0.5) * 44; rainSeed[i * 3 + 1] = Math.random() * 26 - 4; rainSeed[i * 3 + 2] = (Math.random() - 0.5) * 44; }
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3).setUsage(THREE.DynamicDrawUsage));
+const rainLines = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xaed0ff, transparent: true, opacity: 0.4, fog: false }));
+rainLines.frustumCulled = false; rainLines.visible = false;
+scene.add(rainLines);
+const insideBuilding = () => { const x = player.pos.x, z = player.pos.z; return (Math.abs(x) < 4.2 && Math.abs(z) < 3.2) || (x > -16.2 && x < -5.8 && z > -17.2 && z < -8.8); };
+function updateRain(dt) {
+    const on = wx.rain > 0.05 && !insideBuilding();
+    rainLines.visible = on;
+    if (!on) return;
+    rainLines.material.opacity = 0.12 + 0.38 * wx.rain;
+    const c = camera.position, fall = 20 + wx.storm * 10, slant = 0.04 + wx.storm * 0.05;
+    for (let i = 0; i < RAIN_N; i++) {
+        let y = rainSeed[i * 3 + 1] - dt * fall;
+        if (y < -4) y += 26;
+        rainSeed[i * 3 + 1] = y;
+        const x = c.x + rainSeed[i * 3], z = c.z + rainSeed[i * 3 + 2], yy = c.y + y;
+        rainPos[i * 6] = x; rainPos[i * 6 + 1] = yy; rainPos[i * 6 + 2] = z;
+        rainPos[i * 6 + 3] = x + slant * 14; rainPos[i * 6 + 4] = yy + 0.9; rainPos[i * 6 + 5] = z;
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+}
+function updateWeather(dt) {
+    wx.t -= dt;
+    if (wx.t <= 0) setWeather(pickWeather());
+    const T = wx.type, k = Math.min(1, dt * 0.25);
+    wx.rain = lerp(wx.rain, T === "rain" ? 0.8 : T === "storm" ? 1 : 0, k);
+    wx.cloud = lerp(wx.cloud, T === "clear" ? 0.12 : T === "cloudy" ? 0.7 : 1, k);
+    wx.fog = lerp(wx.fog, T === "fog" ? 1 : 0, k);
+    wx.storm = lerp(wx.storm, T === "storm" ? 1 : 0, k);
+    if (T === "storm") { wx.nextBolt -= dt; if (wx.nextBolt <= 0) { wx.nextBolt = rand(4, 11); wx.light = 1; flash = Math.max(flash, 0.5); setTimeout(thunder, rand(300, 2200)); } }
+    wx.light = Math.max(0, wx.light - dt * 4);
+    swayK = 1 + wx.storm * 2.2 + wx.rain * 0.6;
+    if (rainGain) rainGain.gain.value = wx.rain * 0.05 * (insideBuilding() ? 0.3 : 1);
+    updateRain(dt);
+}
+
+// ---------- ghost lumberjacks: spectral helpers that really chop the trees and pay you ----------
+const ghostObjs = [];
+const ghostMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.6, depthWrite: false });
+const ghostDark = new THREE.MeshBasicMaterial({ color: 0x08222e });
+const ghostWood = lamb(0x6a4a2a), ghostSteel = new THREE.MeshBasicMaterial({ color: 0xe8f6ff });
+function makeGhost(i) {
+    const g = new THREE.Group();
+    part(g, CONE6, ghostMat, 0, 0.8, 0, 0.55, 1.6, 0.55);
+    part(g, ICO, ghostMat, 0, 1.78, 0, 0.3, 0.32, 0.3);
+    for (const s of [-1, 1]) part(g, BOX, ghostDark, s * 0.1, 1.82, 0.27, 0.07, 0.1, 0.04);
+    const arm = new THREE.Group(); arm.position.set(0.36, 1.35, 0.05);
+    part(arm, BOX, ghostWood, 0, 0.3, 0.2, 0.05, 0.7, 0.05, 0.4, 0, 0);
+    part(arm, BOX, ghostSteel, 0, 0.62, 0.34, 0.05, 0.2, 0.26);
+    g.add(arm); g.userData.arm = arm;
+    g.position.set(0, 1.6, -8); scene.add(g);
+    return { g, arm, tgt: null, cd: rand(0.3, 1), swing: 0, ph: srand() * 6, i };
+}
+function syncGhosts() {
+    const want = Math.min(save.ghosts, 10);
+    while (ghostObjs.length < want) ghostObjs.push(makeGhost(ghostObjs.length));
+    while (ghostObjs.length > want) { const o = ghostObjs.pop(); scene.remove(o.g); }
+}
+function updateGhosts(dt) {
+    if (!ghostObjs.length) return;
+    ghostMat.opacity = 0.32 + 0.34 * (1 - dayAmt() * 0.5);
+    const claimed = new Set(ghostObjs.map(o => o.tgt).filter(Boolean)), mult = Math.max(1, save.ghosts / ghostObjs.length);
+    for (const o of ghostObjs) {
+        o.ph += dt;
+        if (!o.tgt || o.tgt.gone || o.tgt.dying || o.tgt.burn) {
+            o.tgt = null;
+            let best = null, bd = 70;
+            for (const t of trees) {
+                if (t.gone || t.dying || t.burn || t.type.flee || claimed.has(t)) continue;
+                if (Math.hypot(t.x, t.z) < SAFE_R + 2) continue;
+                const d = Math.hypot(t.x - o.g.position.x, t.z - o.g.position.z);
+                if (d < bd) { bd = d; best = t; }
+            }
+            if (best) { o.tgt = best; claimed.add(best); }
+        }
+        let tx, tz, ty = 1.5 + Math.sin(o.ph * 1.6) * 0.18, speed = 7;
+        if (o.tgt) {
+            const t = o.tgt, dx = o.g.position.x - t.x, dz = o.g.position.z - t.z, dl = Math.hypot(dx, dz) || 1, off = t.r + 1.7;
+            tx = t.x + dx / dl * off; tz = t.z + dz / dl * off;
+        } else {
+            const a = o.ph * 0.35 + o.i * 1.1, r = 5 + (o.i % 3) * 2;
+            tx = Math.cos(a) * r; tz = -8 + Math.sin(a) * r; speed = 4;
+        }
+        const gx = tx - o.g.position.x, gz = tz - o.g.position.z, gd = Math.hypot(gx, gz), m = Math.min(gd, speed * dt);
+        if (gd > 0.05) { o.g.position.x += gx / gd * m; o.g.position.z += gz / gd * m; }
+        o.g.position.y += (ty - o.g.position.y) * Math.min(1, 4 * dt);
+        if (o.tgt) o.g.rotation.y += angDiff(Math.atan2(o.tgt.x - o.g.position.x, o.tgt.z - o.g.position.z), o.g.rotation.y) * Math.min(1, 8 * dt);
+        else if (gd > 0.2) o.g.rotation.y += angDiff(Math.atan2(gx, gz), o.g.rotation.y) * Math.min(1, 4 * dt);
+        // chop
+        if (o.tgt && gd < 0.9) {
+            o.cd -= dt;
+            if (o.cd <= 0) {
+                o.cd = 1.15; o.swing = 0.35;
+                const t = o.tgt, dmg = Math.max(1, Math.round(bestDmg() * 0.5 * mult));
+                t.hp -= dmg; t.hurt = 1;
+                burst(V3(t.x, Math.min(t.h * 0.3, 1.8), t.z), 4, 3, [new THREE.MeshBasicMaterial({ color: 0x9fe8ff }), chipMats[0]]);
+                if (Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 30) sfx(210, 0.08, "square", 0.04, 0.5);
+                if (t.hp <= 0) {
+                    t.dying = true; t.t = 0; t.byGhost = true;
+                    const pay = Math.round(treeLogs(t) * (logValue() + t.type.bonus * 0.8) * 0.65);
+                    save.money += pay; save.ghostCash = (save.ghostCash || 0) + pay; save.ghostFelled = (save.ghostFelled || 0) + 1;
+                    floatWorld(V3(t.x, Math.min(t.h * 0.7, 4), t.z), "+$" + pay, "cash");
+                    o.tgt = null;
+                }
+            }
+        }
+        if (o.swing > 0) { o.swing -= dt; o.arm.rotation.x = Math.sin((1 - Math.max(0, o.swing) / 0.35) * Math.PI) * -2.0; } else o.arm.rotation.x = -0.2 + Math.sin(o.ph * 2) * 0.08;
+    }
+}
+
+// ---------- ambience: surf, rain, birdsong, crickets, frogs, footsteps ----------
+function startAmbience() {
+    if (!actx || windGain) return;
+    const len = actx.sampleRate * 2, buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const mk = (type, freq, gainVal) => {
+        const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
+        const f = actx.createBiquadFilter(); f.type = type; f.frequency.value = freq;
+        const g = actx.createGain(); g.gain.value = gainVal;
+        src.connect(f).connect(g).connect(actx.destination); src.start();
+        return g;
+    };
+    windGain = mk("lowpass", 360, 0.02);
+    waveGain = mk("lowpass", 700, 0.0);
+    rainGain = mk("highpass", 1400, 0.0);
+}
+let birdT = 4, cricketT = 0.3, frogT = 3, gullT = 8, stepAcc = 0, stepSide = 0;
+function ambienceTick(dt) {
+    if (!actx) return;
+    const px = player.pos.x, pz = player.pos.z, night = isNight(), outside = !insideBuilding();
+    const near = clamp(1 - (shoreAt(px, pz) - Math.hypot(px, pz)) / 34, 0, 1);
+    if (waveGain) waveGain.gain.value = (0.012 + 0.05 * near * near) * (0.65 + 0.35 * Math.sin(time * 0.45)) * (outside ? 1 : 0.3);
+    if (windGain) windGain.gain.value = (0.014 + Math.sin(time * 0.35) * 0.008 + (night ? 0.008 : 0) + wx.storm * 0.03) * (outside ? 1 : 0.4);
+    if (!outside) return;
+    if (!night && wx.rain < 0.3 && (birdT -= dt) <= 0) { birdT = rand(2.5, 8); const b = rand(2200, 3200); sfx(b, 0.07, "sine", 0.02, 1.5); setTimeout(() => sfx(b * 1.2, 0.06, "sine", 0.018, 1.3), 110); }
+    if (night && (cricketT -= dt) <= 0) { cricketT = rand(0.1, 0.22); sfx(4300, 0.025, "sine", 0.008, 1); }
+    if (Math.hypot(px - POND.x, pz - POND.z) < 45 && (dayAmt() < 0.6) && (frogT -= dt) <= 0) { frogT = rand(2, 6); sfx(150, 0.12, "square", 0.025, 0.6); setTimeout(() => sfx(180, 0.1, "square", 0.02, 0.6), 160); }
+    if (near > 0.7 && !night && (gullT -= dt) <= 0) { gullT = rand(7, 16); sfx(1100, 0.3, "triangle", 0.025, 0.7); }
+    if (isBlood()) { bmBeat -= dt; if (bmBeat <= 0) { bmBeat = 1.4; sfx(60, 0.18, "sine", 0.16, 0.6); setTimeout(() => sfx(52, 0.15, "sine", 0.12, 0.6), 190); } }
+}
+function footsteps(dt) {
+    const sp = Math.hypot(player.vel.x, player.vel.z);
+    if (!player.onGround || sp < 1.2) { stepAcc = 0; return; }
+    stepAcc += sp * dt;
+    if (stepAcc < (keys.ShiftLeft ? 3.0 : 2.3)) return;
+    stepAcc = 0; stepSide = 1 - stepSide;
+    const x = player.pos.x, z = player.pos.z, dx = x - FB.x, dz = z - FB.z, along = dx * FDIR.x + dz * FDIR.z;
+    const onDock = along > 4.5 && Math.abs(dx * FPERP.x + dz * FPERP.z) < 2.2;
+    const inHouse = insideBuilding(), beach = shoreAt(x, z) - Math.hypot(x, z) < 12;
+    const f = onDock || inHouse ? 150 : beach ? 85 : 110;
+    sfx(f + stepSide * 14, onDock || inHouse ? 0.07 : 0.1, onDock || inHouse ? "square" : "triangle", onDock || inHouse ? 0.03 : 0.025, 0.55);
+}
+
+// =====================================================================
+//  1.0.1: fishing (the pond and the open sea) + the fish journal
+// =====================================================================
+const RCOL = { common: "#d8d8d8", uncommon: "#7dff9a", rare: "#7fd8ff", epic: "#ff7ad8", junk: "#a08a70" };
+const RIDX = { junk: 0, common: 0, uncommon: 1, rare: 2, epic: 3 };
+const FISH = {
+    pond: [
+        { n: "Minnow", r: "common", v: 5, w: [0.05, 0.2], wt: 30 }, { n: "Bluegill", r: "common", v: 9, w: [0.2, 0.9], wt: 22 }, { n: "Carp", r: "common", v: 14, w: [1, 5], wt: 20 },
+        { n: "Catfish", r: "uncommon", v: 32, w: [2, 9], wt: 9 }, { n: "Pike", r: "uncommon", v: 40, w: [2, 8], wt: 7 }, { n: "Golden Koi", r: "rare", v: 150, w: [1, 4], wt: 2.2 },
+        { n: "Old Boot", r: "junk", v: 1, wt: 6 }, { n: "Message in a Bottle", r: "rare", v: 120, wt: 1.4 },
+        { n: "Rain Trout", r: "uncommon", v: 48, w: [1, 4], wt: 9, rain: true }, { n: "Ghost Carp", r: "rare", v: 120, w: [2, 6], wt: 5, night: true }, { n: "Blood Piranha", r: "epic", v: 220, w: [0.5, 2], wt: 8, blood: true }
+    ],
+    sea: [
+        { n: "Sardine", r: "common", v: 6, w: [0.05, 0.3], wt: 30 }, { n: "Mackerel", r: "common", v: 12, w: [0.4, 1.5], wt: 22 }, { n: "Snapper", r: "uncommon", v: 28, w: [1, 6], wt: 12 },
+        { n: "Pufferfish", r: "uncommon", v: 40, w: [0.3, 1.5], wt: 8 }, { n: "Tuna", r: "uncommon", v: 60, w: [8, 40], wt: 8 }, { n: "Swordfish", r: "rare", v: 170, w: [20, 90], wt: 2.4 },
+        { n: "Old Boot", r: "junk", v: 1, wt: 6 }, { n: "Pearl Oyster", r: "rare", v: 150, wt: 1.4 },
+        { n: "Glowing Squid", r: "rare", v: 130, w: [0.5, 3], wt: 5, night: true }, { n: "Storm Eel", r: "uncommon", v: 70, w: [1, 4], wt: 8, storm: true }, { n: "Kraken Tooth", r: "epic", v: 320, wt: 7, blood: true }
+    ]
+};
+const ALL_FISH = [...FISH.pond.map(f => ({ ...f, where: "Pond" })), ...FISH.sea.filter(f => !FISH.pond.some(p => p.n === f.n)).map(f => ({ ...f, where: "Sea" }))];
+const rodCost = () => Math.floor(80 * Math.pow(2, save.rodLvl));
+const BAG_MAX = 40;
+
+const fishing = { on: false, phase: "", t: 0, spot: null, fish: null, m: 0, dir: 1, zc: 0.5, zw: 0.2, sx: 0, sz: 0, tx: 0, tz: 0, speed: 1 };
+const bobber = new THREE.Group(), rodGroup = new THREE.Group();
+let fishLine = null;
+{
+    part(bobber, ICO, new THREE.MeshBasicMaterial({ color: 0xff3a3a }), 0, 0.07, 0, 0.1, 0.1, 0.1);
+    part(bobber, ICO, new THREE.MeshBasicMaterial({ color: 0xffffff }), 0, -0.03, 0, 0.09, 0.07, 0.09);
+    bobber.visible = false; scene.add(bobber);
+    const rod = new THREE.MeshLambertMaterial({ color: 0x8a5a34, flatShading: true });
+    part(rodGroup, CYL6, rod, 0, 0.8, 0, 0.012, 1.7, 0.012);
+    part(rodGroup, BOX, new THREE.MeshLambertMaterial({ color: 0x2a2230, flatShading: true }), 0, 0.0, 0, 0.08, 0.34, 0.08);
+    part(rodGroup, CYL6, new THREE.MeshLambertMaterial({ color: 0xb8c2d8, flatShading: true }), 0.06, 0.18, 0, 0.05, 0.04, 0.05, 0, 0, Math.PI / 2);
+    rodGroup.position.set(0.5, -0.62, -0.75); rodGroup.rotation.set(-1.15, 0.12, -0.12); rodGroup.visible = false;
+    viewScene.add(rodGroup);
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+    fishLine = new THREE.Line(lg, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
+    fishLine.frustumCulled = false; fishLine.visible = false; scene.add(fishLine);
+}
+
+function fishSpot() {
+    const px = player.pos.x, pz = player.pos.z, fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+    const dp = Math.hypot(px - POND.x, pz - POND.z);
+    if (dp > 6.4 && dp < 12.5) {
+        const dot = ((POND.x - px) * fx + (POND.z - pz) * fz) / dp;
+        let tx = px + fx * 6, tz = pz + fz * 6, dd = Math.hypot(tx - POND.x, tz - POND.z);
+        if (dd > 5.2) { tx = POND.x + (tx - POND.x) / dd * 5.2; tz = POND.z + (tz - POND.z) / dd * 5.2; }
+        return { kind: "pond", blocked: dot < 0.2, tx, tz };
+    }
+    const dx = px - FB.x, dz = pz - FB.z, along = dx * FDIR.x + dz * FDIR.z, onDock = along > 5 && Math.abs(dx * FPERP.x + dz * FPERP.z) < 2.4;
+    if (onDock || shoreAt(px, pz) - Math.hypot(px, pz) < 8) {
+        const tx = px + fx * 7, tz = pz + fz * 7, water = Math.hypot(tx, tz) > shoreAt(tx, tz) - 0.8;
+        return { kind: "sea", blocked: !water, tx, tz };
+    }
+    return null;
+}
+function rollFish(kind) {
+    const night = isNight(), rain = wx.rain > 0.3, storm = wx.storm > 0.3, blood = isBlood();
+    const pool = FISH[kind].filter(f => (!f.night || night) && (!f.rain || rain) && (!f.storm || storm) && (!f.blood || blood));
+    const wts = pool.map(f => f.wt * (RIDX[f.r] >= 1 && f.r !== "junk" ? 1 + 0.35 * save.rodLvl : 1));
+    let r = Math.random() * wts.reduce((a, b) => a + b, 0);
+    let f = pool[pool.length - 1];
+    for (let i = 0; i < pool.length; i++) { r -= wts[i]; if (r <= 0) { f = pool[i]; break; } }
+    const kg = f.w ? +(f.w[0] + Math.pow(Math.random(), 1.6) * (f.w[1] - f.w[0])).toFixed(2) : 0;
+    return { f, kg };
+}
+function startFishing(spot) {
+    fishing.on = true; fishing.phase = "cast"; fishing.t = 0.6; fishing.spot = spot; fishing.tx = spot.tx; fishing.tz = spot.tz;
+    fishing.sx = player.pos.x; fishing.sz = player.pos.z; fishing.fish = null;
+    axe.visible = false; rodGroup.visible = true; bobber.visible = true; fishLine.visible = true;
+    bobber.position.set(spot.tx, spot.kind === "pond" ? 0.08 : -0.38, spot.tz);
+    sfx(600, 0.18, "sawtooth", 0.04, 0.3);
+}
+function endFishing() {
+    if (!fishing.on) return;
+    fishing.on = false; fishing.phase = "";
+    axe.visible = true; rodGroup.visible = false; bobber.visible = false; fishLine.visible = false;
+    $("fishUI").classList.remove("show");
+}
+const waterY = () => (fishing.spot && fishing.spot.kind === "pond" ? 0.08 : -0.38);
+function splashAt(x, z, n = 8) { burst(V3(x, waterY() + 0.1, z), n, 3, [new THREE.MeshBasicMaterial({ color: 0xcfeaff }), new THREE.MeshBasicMaterial({ color: 0xffffff })]); if (fishing.spot && fishing.spot.kind === "pond") pondRipple(x, z); }
+function fishAction() {
+    if (!fishing.on) return;
+    if (fishing.phase === "wait") { toast("You reel in your line."); endFishing(); }
+    else if (fishing.phase === "bite") {
+        const roll = rollFish(fishing.spot.kind);
+        fishing.fish = roll;
+        const ri = RIDX[roll.f.r] + (roll.f.r === "junk" ? 0 : 0), rodW = save.rodLvl * 0.035;
+        fishing.speed = 0.9 + ri * 0.4; fishing.zw = clamp(0.24 - ri * 0.035 + rodW, 0.09, 0.34); fishing.zc = rand(0.25, 0.75); fishing.m = Math.random(); fishing.dir = 1;
+        fishing.phase = "reel";
+        $("fZone").style.left = ((fishing.zc - fishing.zw / 2) * 100) + "%"; $("fZone").style.width = (fishing.zw * 100) + "%";
+        $("fishUI").classList.add("show");
+        sfx(300, 0.1, "square", 0.05, 1.6);
+    } else if (fishing.phase === "reel") {
+        const hit = Math.abs(fishing.m - fishing.zc) <= fishing.zw / 2, perfect = Math.abs(fishing.m - fishing.zc) <= fishing.zw * 0.18;
+        $("fishUI").classList.remove("show");
+        if (hit) catchFish(perfect); else { toast("It got away...", "bad"); sfx(180, 0.25, "sawtooth", 0.05, 0.5); splashAt(fishing.tx, fishing.tz, 6); endFishing(); }
+    }
+}
+function catchFish(perfect) {
+    const { f, kg } = fishing.fish;
+    let v = f.v;
+    if (f.w) v = Math.round(f.v * (0.7 + 0.6 * (kg - f.w[0]) / Math.max(0.001, f.w[1] - f.w[0])));
+    v = Math.round(v * (1 + 0.1 * save.rodLvl) * (perfect ? 1.25 : 1));
+    splashAt(fishing.tx, fishing.tz, 12);
+    const first = !(save.fishDex || (save.fishDex = {}))[f.n];
+    const d = save.fishDex[f.n] || (save.fishDex[f.n] = { n: 0, best: 0, r: f.r });
+    d.n++; d.best = Math.max(d.best, kg);
+    if (save.fishBag.length >= BAG_MAX) { save.money += Math.round(v * 0.5); toast(`Fish bag full. Sold the ${f.n} on the spot for half price.`, "bad"); }
+    else save.fishBag.push({ n: f.n, k: kg, v });
+    $("catchPop").innerHTML = `<small>${perfect ? "PERFECT CATCH!" : "YOU CAUGHT"}${first ? " · NEW!" : ""}</small><b style="color:${RCOL[f.r]}">${f.n}</b><span>${kg ? kg + " kg · " : ""}worth ${money(v)}</span>`;
+    $("catchPop").classList.remove("show"); void $("catchPop").offsetWidth; $("catchPop").classList.add("show");
+    sfx(520, 0.15, "triangle", 0.08, 2); setTimeout(() => sfx(780, 0.2, "triangle", 0.08, 1.5), 130);
+    if (f.r === "rare" || f.r === "epic") { flash = 0.4; setTimeout(() => sfx(1040, 0.3, "triangle", 0.07, 1.3), 260); }
+    endFishing();
+    writeSave();
+}
+function sellFish(name) {
+    let total = 0, n = 0;
+    save.fishBag = save.fishBag.filter(f => { if (name && f.n !== name) return true; total += f.v; n++; return false; });
+    if (n) { save.money += total; save.fishSold = (save.fishSold || 0) + n; toast(`Sold ${n} fish for ${money(total)}`, "cash"); sfx(900, 0.12, "triangle", 0.08, 1.5); writeSave(); }
+}
+const fishPrompt = () => ({ cast: "Casting...", wait: "Waiting for a bite...  [F] reel in", bite: "A BITE!  Press F!", reel: "Hit F when the line is in the green!" }[fishing.phase] || "");
+const camLocal = new THREE.Vector3();
+function updateFishing(dt) {
+    if (!fishing.on) return;
+    if (Math.hypot(player.pos.x - fishing.sx, player.pos.z - fishing.sz) > 3.2) { toast("You walked away from your line.", ""); endFishing(); return; }
+    fishing.t -= dt;
+    const by = waterY();
+    if (fishing.phase === "cast" && fishing.t <= 0) {
+        fishing.phase = "wait";
+        fishing.t = rand(2.5, 7) * (1 - 0.15 * save.rodLvl) * (wx.rain > 0.3 ? 0.7 : 1) * (isBlood() ? 0.8 : 1);
+        splashAt(fishing.tx, fishing.tz, 5); sfx(260, 0.12, "sine", 0.05, 0.5);
+    } else if (fishing.phase === "wait" && fishing.t <= 0) {
+        fishing.phase = "bite"; fishing.t = 1.1 + save.rodLvl * 0.15;
+        splashAt(fishing.tx, fishing.tz, 6); sfx(420, 0.12, "sine", 0.07, 0.6); setTimeout(() => sfx(520, 0.1, "sine", 0.06, 0.6), 120);
+    } else if (fishing.phase === "bite" && fishing.t <= 0) { toast("It got away...", "bad"); endFishing(); return; }
+    else if (fishing.phase === "reel") {
+        fishing.m += fishing.dir * fishing.speed * dt;
+        if (fishing.m >= 1) { fishing.m = 1; fishing.dir = -1; } else if (fishing.m <= 0) { fishing.m = 0; fishing.dir = 1; }
+        $("fMark").style.left = (fishing.m * 100) + "%";
+    }
+    // the bobber bobs, dips on a bite and shakes while you reel
+    const dip = fishing.phase === "bite" ? -0.14 + Math.sin(time * 40) * 0.05 : fishing.phase === "reel" ? Math.sin(time * 26) * 0.04 : Math.sin(time * 2.2) * 0.025;
+    bobber.position.set(fishing.tx + (fishing.phase === "reel" ? Math.sin(time * 18) * 0.12 : 0), by + dip, fishing.tz);
+    camLocal.set(0.62, -0.28, -1.15);
+    const tip = camera.localToWorld(camLocal.clone()), arr = fishLine.geometry.attributes.position.array;
+    arr[0] = tip.x; arr[1] = tip.y; arr[2] = tip.z; arr[3] = bobber.position.x; arr[4] = bobber.position.y + 0.1; arr[5] = bobber.position.z;
+    fishLine.geometry.attributes.position.needsUpdate = true;
+    rodGroup.rotation.x = -1.15 + (fishing.phase === "reel" ? Math.sin(time * 22) * 0.04 : fishing.phase === "bite" ? 0.25 : 0);
+}
+function renderFishLog() {
+    const dex = save.fishDex || {};
+    const cards = ALL_FISH.map(f => {
+        const d = dex[f.n];
+        return d
+            ? `<div class="fcard" style="border-color:${RCOL[f.r]}"><div class="big">🐟</div><b style="color:${RCOL[f.r]}">${f.n}</b><small>${f.where} · ${f.r}</small><small>caught ${d.n}${d.best ? " · best " + d.best + " kg" : ""}</small></div>`
+            : `<div class="fcard unk"><div class="big">❔</div><b>???</b><small>${f.where}${f.night ? " · night" : f.rain ? " · rain" : f.storm ? " · storm" : f.blood ? " · blood moon" : ""}</small></div>`;
+    }).join("");
+    const found = ALL_FISH.filter(f => dex[f.n]).length;
+    $("fishGrid").innerHTML = cards;
+    $("fishCount").textContent = `${found} / ${ALL_FISH.length} species · ${save.fishBag.length} fish in your bag (sell at the Reaper)`;
+}
+
+
+function sellItems() {
+    const bag = save.fishBag, total = bag.reduce((a, f) => a + f.v, 0), out = [];
+    out.push({ name: `Sell all fish (${bag.length})`, desc: bag.length ? "Everything in your fish bag" : "Nothing to sell yet. Try the pond!", sell: true, value: total, buy() { sellFish(null); } });
+    const groups = {};
+    bag.forEach(f => { const g = groups[f.n] || (groups[f.n] = { n: f.n, c: 0, v: 0, k: 0 }); g.c++; g.v += f.v; g.k = Math.max(g.k, f.k); });
+    Object.values(groups).forEach(g => { const r = ALL_FISH.find(x => x.n === g.n); out.push({ name: `${g.n} x${g.c}`, col: RCOL[r ? r.r : "common"], desc: g.k ? `best ${g.k} kg` : "treasure", sell: true, value: g.v, buy() { sellFish(g.n); } }); });
+    return out;
+}
+syncGhosts();
+
 // ---------- HUD ----------
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
@@ -2280,6 +2947,7 @@ const PROMPTS = {
     shop: () => "[F] Talk to the Reaper", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman",
+    fish: n => (n.spot.blocked ? "Face the water to fish" : "[F] Cast your line"),
     chest: n => (n.c.special ? "[F] Open the cursed chest" : "[F] Open chest"), altar: () => (save.altarDay === save.day ? "The altar is quiet today" : "[F] Pray at the altar")
 };
 function hud(dt) {
@@ -2300,14 +2968,16 @@ function hud(dt) {
     el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
     el.zone.textContent = inSafe() ? "SAFE ZONE" : "THE WOODS";
     el.zone.className = inSafe() ? "safe" : "danger";
-    el.clock.textContent = (isNight() ? "🌙 " : "☀ ") + fmtClock() + " · DAY " + save.day;
+    el.clock.textContent = (isBlood() ? "🩸 BLOOD MOON " : isNight() ? "🌙 " : "☀ ") + fmtClock() + " · DAY " + save.day + "  " + WX_ICON[wx.type];
+    el.clock.classList.toggle("blood", isBlood());
     const k = save.contract;
     el.contract.innerHTML = k ? `<b>CONTRACT</b> <i>${money(k.reward)}</i><br>${k.text} — ${Math.min(k.prog, k.goal)}/${k.goal}` : "";
     el.contract.style.display = k ? "" : "none";
     const n = panel ? null : nearest();
-    const pr = n ? PROMPTS[n.k](n) : "";
+    const pr = fishing.on ? fishPrompt() : n ? PROMPTS[n.k](n) : "";
     el.prompt.textContent = pr;
     el.prompt.classList.toggle("show", !!pr);
+    el.prompt.classList.toggle("alert", fishing.on && fishing.phase === "bite");
     const hot = ownedList().map((i, slot) => {
         const a = AXES[i], sel = save.equipped === i;
         return `<div class="slot ${sel ? "sel" : ""}" style="--c:${a.rarity}"><span class="k">${slot + 1}</span><span class="ic">🪓</span><span class="nm">${a.name}</span><span class="ct">${axeDmgFor(i)} dmg</span>${sel ? '<span class="eqtag">EQUIPPED</span>' : ""}</div>`;
@@ -2341,7 +3011,7 @@ function frame(now) {
         camera.position.set(Math.cos(orbit) * 15, 4.5, Math.sin(orbit) * 15 - 4);
         camera.lookAt(0, 2.2, -3);
         camera.fov = 70; camera.updateProjectionMatrix();
-        updateWorldAnim(real);
+        updateWorldAnim(real); updateWeather(real); updateEcosystem(real);
         applySky();
     }
     camera.updateMatrixWorld();
@@ -2378,5 +3048,5 @@ if (DEBUG) window.__ts4 = {
     respawn,
     send() { return sendLogs(); },
     setState(s) { state = s; renderMenu(); },
-    interact, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
+    interact, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
 };

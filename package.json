@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -53,7 +53,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.0.0 (first release)\n\n- A living, spooky island: the trees are alive, they watch you, and they creep closer when you look away.\n- Chop with 8 axes, from the Rusty Axe to the Reaper's Axe. Trees get tougher (and pay better) the better your axe is.\n- Day and night. Rare trees come out at night: Elder, Ghost, Blood and Golden Trees, plus tougher species as your axe improves (Ironwood, Frostbark, Emberwood, Titan).\n- Safehouse with a bed (sleep at night to skip to dawn), the Reaper's shop, a log chute that pays you cash, and a daily contract.\n- Explore the island: graveyard, pond, standing stones, watchtower, camps, a well and more. Chests everywhere.\n- The ferry to Rebirth Island is here. Rebirths are coming soon.\n- Auto-updates: the game will tell you when a new version is out."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.0.1 (the living island update)\n\n- BLOOD MOON: every 3rd night the sky turns red. Trees come out in force and hit harder, but logs, chests and fishing all pay double. Survive until dawn for a bonus.\n- GHOST LUMBERJACKS are real now: they float out into the woods, chop trees, and pay you cash for every one they fell.\n- FISHING: press F at the pond, on any beach or on the ferry dock. Time the reel in the green zone, catch 20+ species (rarer at night, in the rain and on a blood moon), sell them to the Reaper, and fill your Fish Journal (J). New shop item: Better Fishing Rod.\n- WEATHER: clear skies, clouds, rain, thunderstorms with lightning, and thick fog roll across the island.\n- A LIVING ISLAND: deer, rabbits, crabs, seagulls, frogs, birds and butterflies. Fish jump in the pond, chimneys smoke, flowers and tall grass fill the meadows, clouds drift by, and the sea has shallows and a foamy shore.\n- New sounds: surf, rain, birdsong, crickets, frogs and footsteps."
     }
   }
 }

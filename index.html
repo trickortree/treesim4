@@ -114,6 +114,25 @@
   .ustatus { font: 13px Consolas; opacity: .8; min-height: 18px; margin-bottom: 10px; }
   .ubtns { display: flex; gap: 12px; justify-content: center; }
   .ubtns .btn { letter-spacing: 4px; padding: 12px 34px; font-size: 16px; }
+  #panelFish { width: min(1000px, 94vw); }
+  #panelFish .sub { font: 13px Consolas; opacity: .7; margin: -6px 0 12px; }
+  #fishGrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; max-height: 58vh; overflow: auto; padding-right: 4px; }
+  .fcard { background: rgba(255,255,255,.05); border: 2px solid rgba(255,255,255,.14); border-radius: 10px; padding: 10px 6px; text-align: center; display: flex; flex-direction: column; gap: 3px; min-height: 108px; justify-content: center; }
+  .fcard .big { font-size: 30px; } .fcard small { font: 11px Consolas; opacity: .65; }
+  .fcard.unk { opacity: .45; border-style: dashed; }
+  #fishUI { position: fixed; left: 50%; bottom: 190px; transform: translateX(-50%); width: min(460px, 80vw); display: none; z-index: 3; text-align: center; }
+  #fishUI.show { display: block; }
+  .fbar { position: relative; height: 28px; background: rgba(0,0,0,.65); border: 2px solid rgba(255,255,255,.5); border-radius: 8px; overflow: hidden; }
+  #fZone { position: absolute; top: 0; bottom: 0; background: linear-gradient(rgba(125,255,160,.9), rgba(60,200,100,.9)); }
+  #fMark { position: absolute; top: -2px; bottom: -2px; width: 6px; margin-left: -3px; background: #fff; box-shadow: 0 0 10px #fff; }
+  .fcap { font: 700 12px Consolas; letter-spacing: 1px; margin-top: 6px; text-shadow: 0 2px 0 #000; opacity: .85; }
+  #catchPop { position: fixed; left: 50%; top: 30%; transform: translate(-50%, 0); text-align: center; pointer-events: none; z-index: 4; opacity: 0; text-shadow: 0 3px 0 #000, 0 0 18px rgba(0,0,0,.8); }
+  #catchPop.show { animation: catchpop 2.6s ease-out forwards; }
+  #catchPop small { display: block; font: 800 14px Consolas; letter-spacing: 5px; color: var(--amber); } #catchPop b { display: block; font: 900 44px "Segoe UI Black", sans-serif; } #catchPop span { font: 700 18px Consolas; }
+  @keyframes catchpop { 0% { opacity: 0; transform: translate(-50%, 20px) scale(.7); } 12% { opacity: 1; transform: translate(-50%, 0) scale(1.08); } 20% { transform: translate(-50%, 0) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -30px) scale(1); } }
+  .float.cash { color: #6dffa0; font-size: 26px; }
+  #clock.blood { color: #ff5a5a; text-shadow: 0 0 12px rgba(255,40,40,.8); animation: pulse .9s infinite alternate; }
+  #prompt.alert { color: #ff5a5a; font-size: 26px; animation: pulse .25s infinite alternate; }
   #panelShop { width: min(620px, 92vw); }
   #shopCash { float: right; margin-right: 150px; color: var(--green); font: 700 20px Consolas; letter-spacing: 0; }
   .row { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 10px; margin-bottom: 8px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); }
@@ -213,7 +232,7 @@
   <button class="xbtn" data-close>✕ LEAVE <kbd>F</kbd></button>
   <h2>THE REAPER'S SHOP <span id="shopCash">$0</span></h2>
   <div id="shopSay"></div>
-  <div class="tabs"><button class="tab" data-tab="axes">AXES</button><button class="tab" data-tab="gear">GEAR</button></div>
+  <div class="tabs"><button class="tab" data-tab="axes">AXES</button><button class="tab" data-tab="gear">GEAR</button><button class="tab" data-tab="sell">SELL FISH</button></div>
   <div id="shopList"></div>
   <div class="foot">click a row to buy · number keys also work · Tab switches tab · F or Esc to leave</div>
 </div>
@@ -235,6 +254,16 @@
     <div class="ubtns"><button class="btn" id="uGo">UPDATE NOW</button><button class="btn ghost" id="uLater">LATER</button></div>
   </div>
 </div>
+
+<div id="panelFish" class="panel">
+  <button class="xbtn" data-close>✕ CLOSE <kbd>J</kbd></button>
+  <h2>FISH JOURNAL</h2>
+  <div id="fishCount" class="sub"></div>
+  <div id="fishGrid"></div>
+  <div class="foot">cast a line at the pond, off any beach or from the ferry dock with F · rain, night and the blood moon bring rarer fish</div>
+</div>
+<div id="fishUI"><div class="fbar"><div id="fZone"></div><div id="fMark"></div></div><div class="fcap">hit F or click when the marker is in the green</div></div>
+<div id="catchPop"></div>
 
 <div id="menu" data-mode="title">
   <div id="menuHead"></div>
