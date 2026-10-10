@@ -4880,7 +4880,13 @@ const CIRCLE3 = at3(0.78, 46);
 const ARR3DIR = V3(Math.cos(ARR3TH), 0, Math.sin(ARR3TH)), ARR3PERP = V3(-ARR3DIR.z, 0, ARR3DIR.x), ARR3LEN = 22;
 const ARR3B = V3(ARR3DIR.x * (shoreR3(ARR3TH) - 8), 0, ARR3DIR.z * (shoreR3(ARR3TH) - 8));
 const arr3Pt = (a, s = 0, y = 0) => V3(ARR3B.x + ARR3DIR.x * a + ARR3PERP.x * s, y, ARR3B.z + ARR3DIR.z * a + ARR3PERP.z * s);
-const FERRYMAN3 = { x: arr3Pt(ARR3LEN - 6, -1.25).x, z: arr3Pt(ARR3LEN - 6, -1.25).z };
+// the Rebirth 3 ferry docks on the far side of the island from Arrivals, just past the Hollow
+const D3TH = ARR3TH + Math.PI * 0.88;
+const D3DIR = V3(Math.cos(D3TH), 0, Math.sin(D3TH)), D3PERP = V3(-D3DIR.z, 0, D3DIR.x), D3LEN = 24;
+const D3B = V3(D3DIR.x * (shoreR3(D3TH) - 8), 0, D3DIR.z * (shoreR3(D3TH) - 8));
+const dock3Pt = (a, s = 0, y = 0) => V3(D3B.x + D3DIR.x * a + D3PERP.x * s, y, D3B.z + D3DIR.z * a + D3PERP.z * s);
+const FERRYMAN3 = { x: dock3Pt(D3LEN - 3.5, -0.9).x, z: dock3Pt(D3LEN - 3.5, -0.9).z };
+const DOCKS3 = [[ARR3B, ARR3DIR, ARR3PERP, ARR3LEN], [D3B, D3DIR, D3PERP, D3LEN]];
 const BED3 = { x: -9, z: 6 }, SMITH3 = { x: -11, z: -7 }, DEPOT3 = { x: 11, z: -7 }, WITCH3 = { x: 0, z: 14 };
 const SMITH3_AT = standPt(SMITH3), DEPOT3_AT = standPt(DEPOT3), WITCH3_AT = standPt(WITCH3, 2.6);
 const OBS_DOOR = { x: OBS.x + (0 - OBS.x) / Math.hypot(OBS.x, OBS.z) * 4.2, z: OBS.z + (0 - OBS.z) / Math.hypot(OBS.x, OBS.z) * 4.2 };
@@ -4908,16 +4914,17 @@ function terrain3(x, z) {
     return h * (1 - lk) - lk * 2.6;
 }
 function groundY3(x, z) {
-    const { along, side } = dockLocal(x, z, ARR3B, ARR3DIR, ARR3PERP);
-    if (along > 4 && along < ARR3LEN + 3 && Math.abs(side) < 3) return 0;
+    for (const [B, DIR, PERP, LEN] of DOCKS3) { const { along, side } = dockLocal(x, z, B, DIR, PERP); if (along > 4 && along < LEN + 3 && Math.abs(side) < 3) return 0; }
     return Math.max(-0.4, terrain3(x, z));
 }
 function clampIsle3(p) {
-    const { along, side } = dockLocal(p.x, p.z, ARR3B, ARR3DIR, ARR3PERP);
-    if (along > 4.5 && along < ARR3LEN + 3 && Math.abs(side) < 6) {
-        const a = Math.min(along, ARR3LEN - 0.7), s = clamp(side, -1.65, 1.65);
-        p.x = ARR3B.x + ARR3DIR.x * a + ARR3PERP.x * s; p.z = ARR3B.z + ARR3DIR.z * a + ARR3PERP.z * s;
-        return;
+    for (const [B, DIR, PERP, LEN] of DOCKS3) {
+        const { along, side } = dockLocal(p.x, p.z, B, DIR, PERP);
+        if (along > 4.5 && along < LEN + 3 && Math.abs(side) < 6) {
+            const a = Math.min(along, LEN - 0.7), s = clamp(side, -1.65, 1.65);
+            p.x = B.x + DIR.x * a + PERP.x * s; p.z = B.z + DIR.z * a + PERP.z * s;
+            return;
+        }
     }
     const lim = shoreAt3(p.x, p.z) - 3, d = Math.hypot(p.x, p.z);
     if (d > lim) { p.x *= lim / d; p.z *= lim / d; }
@@ -4926,7 +4933,7 @@ function clampIsle3(p) {
         if (dd > R) { p.x = HOLLOW.x + dx / dd * R; p.z = HOLLOW.z + dz / dd * R; }
     }
 }
-const treeOk3 = (x, z) => Math.hypot(x - HOLLOW.x, z - HOLLOW.z) > HOLLOW.r + 9 && Math.hypot(x - WELL.x, z - WELL.z) > WELL.r + 7 && Math.hypot(x - ARR3B.x, z - ARR3B.z) > 12;
+const treeOk3 = (x, z) => Math.hypot(x - HOLLOW.x, z - HOLLOW.z) > HOLLOW.r + 9 && Math.hypot(x - WELL.x, z - WELL.z) > WELL.r + 7 && Math.hypot(x - ARR3B.x, z - ARR3B.z) > 12 && Math.hypot(x - D3B.x, z - D3B.z) > 12;
 const inHollow = () => isle === 3 && Math.hypot(player.pos.x - HOLLOW.x, player.pos.z - HOLLOW.z) < HOLLOW.r;
 
 // ---- the sky: a second moon, the aurora, drifting spores ----
@@ -5176,6 +5183,7 @@ function buildIsle3() {
         };
         post(HOLLOW, "THE HOLLOW", "#ff5a8a");
         post(WELL, "MOONWELL", "#7affef");
+        post({ x: D3B.x, z: D3B.z }, "REBIRTH 3 FERRY", "#9fe8ff");
     }
 
     // ----- the arrivals dock, the violet ferry, the Ferryman -----
@@ -5193,19 +5201,37 @@ function buildIsle3() {
         const wb2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("ARRIVALS", "FROM THE HIGHLANDS", "#c8a0ff") })); wb2.position.copy(arr3Pt(3.5, 0, 3.3)); wb2.rotation.y = yaw + Math.PI; scene.add(wb2);
         const al = label("ARRIVALS", "#c8a0ff", 3.2, 0.7); al.position.copy(arr3Pt(3.5, 0, 4.6)); al.maxD = 70;
         isle3.boat = makeBoat3(0x2a2a4a, 0x6a5a9a, 0xc8a0ff); isle3.boat.position.copy(arr3Pt(ARR3LEN - 7, 4.4, -0.15)); isle3.boat.rotation.y = yaw; scene.add(isle3.boat);
-        ferryman3 = makeFerrymanFigure(0x22163a, 0x6a4a9a, 0xe8d8ff); ferryman3.position.set(FERRYMAN3.x, 0.3, FERRYMAN3.z); ferryman3.rotation.y = yaw + Math.PI; scene.add(ferryman3);
-        const fm = label("FERRYMAN", "#c8a0ff", 2.6, 0.6); fm.position.set(FERRYMAN3.x, 4.7, FERRYMAN3.z); fm.maxD = 60;
-        // lanterns light the way from the dock to camp
+        // lanterns light the way from each dock to camp
         const lp = batch(woodDark), lg = batch(glowM(0xffd890)), lc = batch(lamb(0x2a2a34));
-        const land = Math.hypot(ARR3B.x, ARR3B.z);
-        for (let s = 4, k = 0; s < land - 26; s += 8, k++) {
-            const sd = k % 2 ? 3.2 : -3.2, x = ARR3B.x - ARR3DIR.x * s + ARR3PERP.x * sd, z = ARR3B.z - ARR3DIR.z * s + ARR3PERP.z * sd, y = groundY3(x, z);
-            lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lp.add(BOX, x - ARR3PERP.x * sd * 0.12, y + 2.35, z - ARR3PERP.z * sd * 0.12, 0, Math.atan2(ARR3PERP.x, ARR3PERP.z), 0, 0.06, 0.06, 0.6);
-            lg.add(ICO, x - ARR3PERP.x * sd * 0.2, y + 2.05, z - ARR3PERP.z * sd * 0.2, 0, 0, 0, 0.17, 0.22, 0.17); lc.add(CONE6, x - ARR3PERP.x * sd * 0.2, y + 2.32, z - ARR3PERP.z * sd * 0.2, 0, 0, 0, 0.22, 0.14, 0.22);
+        for (const [B, DIR, PERP] of DOCKS3) {
+            const land = Math.hypot(B.x, B.z);
+            for (let s = 4, k = 0; s < land - 26; s += 8, k++) {
+                const sd = k % 2 ? 3.2 : -3.2, x = B.x - DIR.x * s + PERP.x * sd, z = B.z - DIR.z * s + PERP.z * sd, y = groundY3(x, z);
+                lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lp.add(BOX, x - PERP.x * sd * 0.12, y + 2.35, z - PERP.z * sd * 0.12, 0, Math.atan2(PERP.x, PERP.z), 0, 0.06, 0.06, 0.6);
+                lg.add(ICO, x - PERP.x * sd * 0.2, y + 2.05, z - PERP.z * sd * 0.2, 0, 0, 0, 0.17, 0.22, 0.17); lc.add(CONE6, x - PERP.x * sd * 0.2, y + 2.32, z - PERP.z * sd * 0.2, 0, 0, 0, 0.22, 0.14, 0.22);
+            }
         }
         lp.build(); isle3.lanterns = lg.build(); lc.build();
-        // a faint far beacon: whatever is next
-        const FI = arr3Pt(ARR3LEN + 240);
+    }
+    // ----- the Rebirth 3 dock on the far side: the Ferryman waits here, and the next light shines past it -----
+    {
+        const yaw = Math.atan2(D3DIR.x, D3DIR.z);
+        const planks = batch(new THREE.MeshLambertMaterial({ color: 0x5a6a7a, flatShading: true }));
+        for (let i = 0; i < D3LEN; i++) { const p = dock3Pt(i + 0.5); planks.add(BOX, p.x, 0.22, p.z, 0, yaw, 0, 3.6, 0.14, 0.92); }
+        planks.build();
+        const posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(glowM(0x9fe8ff));
+        for (let i = 0; i <= D3LEN; i += 3) for (const sd of [-1.9, 1.9]) { const p = dock3Pt(i, sd); posts.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) bulbs.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
+        for (let i = 0; i < D3LEN; i++) for (const sd of [-1.9, 1.9]) { const p = dock3Pt(i + 0.5, sd, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
+        posts.build(); rails.build(); bulbs.build();
+        for (const sd of [-2.0, 2.0]) { const p = dock3Pt(3.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
+        const db = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 3", "FERRY", "#9fe8ff") })); db.position.copy(dock3Pt(3.5, 0, 3.3)); db.rotation.y = yaw + Math.PI; scene.add(db);
+        const db2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("LANTERN CAMP", "THIS WAY ↑", "#c8a0ff") })); db2.position.copy(dock3Pt(3.5, 0, 3.3)); db2.rotation.y = yaw; scene.add(db2);
+        const dl = label("REBIRTH 3 FERRY", "#9fe8ff", 3.2, 0.7); dl.position.copy(dock3Pt(3.5, 0, 4.6)); dl.maxD = 80;
+        isle3.boat3 = makeBoat3(0x1a2a3a, 0x4a7a9a, 0x9fe8ff); isle3.boat3.position.copy(dock3Pt(D3LEN - 7, 4.4, -0.15)); isle3.boat3.rotation.y = yaw; scene.add(isle3.boat3);
+        ferryman3 = makeFerrymanFigure(0x22163a, 0x6a4a9a, 0xe8d8ff); ferryman3.position.set(FERRYMAN3.x, 0.3, FERRYMAN3.z); ferryman3.rotation.y = yaw + Math.PI; scene.add(ferryman3);
+        const fm = label("FERRYMAN", "#c8a0ff", 2.6, 0.6); fm.position.set(FERRYMAN3.x, 4.7, FERRYMAN3.z); fm.maxD = 60;
+        // the next light, out past the end of this dock
+        const FI = dock3Pt(D3LEN + 240);
         const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 220, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.12, fog: false, depthWrite: false, side: THREE.DoubleSide }));
         beam.position.set(FI.x, 110, FI.z); scene.add(beam); isle3.beam = beam;
         const bl = label("???", "#9fe8ff", 4.2, 1.0); bl.position.set(FI.x, 46, FI.z); bl.maxD = 420; bl.blurK = 0.25;
@@ -5295,7 +5321,7 @@ function buildIsle3() {
         if (d < SAFE_R + 1 || d > shoreAt3(x, z) - 9) return false;
         if (!treeOk3(x, z)) return false;
         for (let k = 1; k < LM3.length; k++) { const lm = LM3[k]; if (k !== 5 && Math.hypot(x - lm.x, z - lm.z) < lm.r + margin) return false; }
-        const { along, side } = dockLocal(x, z, ARR3B, ARR3DIR, ARR3PERP); if (along < 0 && along > -(Math.hypot(ARR3B.x, ARR3B.z) - 24) && Math.abs(side) < 5) return false; // keep the lantern path clear
+        for (const [B, DIR, PERP] of DOCKS3) { const { along, side } = dockLocal(x, z, B, DIR, PERP); if (along < 0 && along > -(Math.hypot(B.x, B.z) - 24) && Math.abs(side) < 5) return false; } // keep the lantern paths clear
         return true;
     };
     const scatter3 = (count, fn, margin = 0) => { let made = 0, guard = 0; while (made < count && guard++ < count * 40) { const a = srand() * 6.283, d = srange(SAFE_R + 1, shoreR3(a) - 9), x = Math.cos(a) * d, z = Math.sin(a) * d; if (!okSpot3(x, z, margin)) continue; fn(x, z, terrain3(x, z)); made++; } };
@@ -5908,7 +5934,7 @@ function finishRebirth2() {
         $("rebirthFx").classList.remove("show"); say("MOONCAP ISLE"); setTimeout(() => say(""), 3600);
         toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage.", "cash");
         toast("Follow the lanterns to camp. New trees, new materials: craft at the Moonforge, brew at the Apothecary.", "good");
-        toast("Talk to the Ferryman. He knows what sleeps in the Hollow.", "rare");
+        toast("The Ferryman waits at the Rebirth 3 dock on the far side of the island. He knows what sleeps in the Hollow.", "rare");
     }, 2200);
 }
 function enterIsle3() {
@@ -5943,11 +5969,11 @@ function updateIsle3(dt, animOnly) {
     if (isle3.wellWater) isle3.wellWater.material.emissive.setHex(save.wellDay === save.day ? 0x0a3a40 : 0x1a8a9a);
     if (isle3.crater) { isle3.crater.rotation.y += dt * 0.2; isle3.crater.scale.setScalar(1 + Math.sin(time * 2.2) * 0.05); }
     if (isle3.beam) isle3.beam.material.opacity = 0.08 + Math.sin(time * 1.2) * 0.04;
-    if (isle3.boat) { isle3.boat.position.y = -0.15 + Math.sin(time * 1.1) * 0.07; isle3.boat.rotation.z = Math.sin(time * 0.9) * 0.03; }
+    for (const [b, ph] of [[isle3.boat, 0], [isle3.boat3, 1.3]]) if (b) { b.position.y = -0.15 + Math.sin(time * 1.1 + ph) * 0.07; b.rotation.z = Math.sin(time * 0.9 + ph) * 0.03; }
     for (const b of isle3.bubbles) { const k = (time * 0.6 + b.ph) % 1; b.m.position.set(b.ox * (1 - k * 0.5), 0.85 + k * 0.6, b.oz * (1 - k * 0.5)); b.m.scale.setScalar((Math.sin(k * Math.PI) + 0.1) * 0.1); }
     if (ferryman3) {
         ferryman3.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
-        const base = Math.atan2(ARR3DIR.x, ARR3DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN3.x, player.pos.z - FERRYMAN3.z) < 14;
+        const base = Math.atan2(D3DIR.x, D3DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN3.x, player.pos.z - FERRYMAN3.z) < 14;
         const tg = near ? Math.atan2(player.pos.x - FERRYMAN3.x, player.pos.z - FERRYMAN3.z) : base;
         ferryman3.rotation.y += angDiff(tg, ferryman3.rotation.y) * Math.min(1, 3 * dt);
     }
@@ -6014,7 +6040,8 @@ function drawMap3() {
         g.font = "bold 10px Consolas"; g.fillStyle = dead ? "#b8a0b0" : "#ffb0c8"; g.strokeStyle = "#000"; g.lineWidth = 3;
         const t = dead ? "regrows at dawn" : "THE ELDER HEART"; g.strokeText(t, X(HOLLOW.x), Z(HOLLOW.z) + 24); g.fillText(t, X(HOLLOW.x), Z(HOLLOW.z) + 24);
     }
-    { const ae = arr3Pt(ARR3LEN); g.strokeStyle = "#c8a0ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(ARR3B.x), Z(ARR3B.z)); g.lineTo(X(ae.x), Z(ae.z)); g.stroke(); g.fillStyle = "#c8a0ff"; g.font = "bold 12px Consolas"; g.fillText("ARRIVALS · FERRYMAN", X(ae.x), Z(ae.z) + (ae.z < 0 ? -8 : 16)); }
+    { const ae = arr3Pt(ARR3LEN); g.strokeStyle = "#c8a0ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(ARR3B.x), Z(ARR3B.z)); g.lineTo(X(ae.x), Z(ae.z)); g.stroke(); g.fillStyle = "#c8a0ff"; g.font = "bold 12px Consolas"; g.fillText("ARRIVALS", X(ae.x), Z(ae.z) + (ae.z < 0 ? -8 : 16)); }
+    { const de = dock3Pt(D3LEN); g.strokeStyle = "#9fe8ff"; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D3B.x), Z(D3B.z)); g.lineTo(X(de.x), Z(de.z)); g.stroke(); g.fillStyle = "#9fe8ff"; g.font = "bold 12px Consolas"; g.fillText("REBIRTH 3 FERRY", X(de.x), Z(de.z) + (de.z < 0 ? -8 : 16)); }
     for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); g.strokeStyle = "#000"; g.lineWidth = 1; g.strokeRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
     for (const t of trees) {
         if (t.gone || t.dying || t.boss) continue;

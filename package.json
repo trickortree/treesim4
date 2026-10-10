@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.2.0\n\n- REBIRTH 2: MOONCAP ISLE. Find all 6 relic pieces, bring $2,500,000 to the Ferryman on the Highland Isle and sail to a brand new island: two moons, an aurora, glowing mushroom forests and drifting spores.\n- THE ELDER HEART: the oldest tree in the world sleeps in the Hollow. Step inside and it wakes. Dodge its roots and seed bombs, jump its shockwaves, and fell it for Heartwood. It regrows every dawn.\n- New living trees and new materials: Spores, Moonsilver, Amber, Moonstone, Voidglass, Star Shards and Heartwood.\n- The Moonforge: three new axes (Lunar Cleaver, Voidreaver, Elder's Bane) and the Moonbeam Lance, a beam gun that pierces every tree in a line.\n- Falling stars: at night, stars come down somewhere on the island. Get there first. The Observatory can call one down.\n- The Apothecary sells potions: speed, toughness, damage, extra materials, and Phoenix Tears that save you from death. Drink from the Moonwell once a day.\n- Rebirths are clearer: the Highland Isle is Rebirth 1, Mooncap Isle is Rebirth 2.\n- NEW: Settings (on the title and pause menus): mouse sensitivity, invert Y, field of view, volume, pixel size, head bob, FPS counter, and a Reset Progress button.\n- FIXED: the game no longer freezes if something goes wrong in a single frame."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.2.1\n\n- Mooncap Isle: the Ferryman and the light to the next island have moved to a new REBIRTH 3 FERRY dock on the far side of the island (south shore, past the Hollow). Arrivals is just where you land now.\n- A lantern path and a signpost at camp lead the way to the new dock, and it is on the map."
     }
   }
 }
