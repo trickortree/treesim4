@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.4.0\n\n- ENCHANTING TABLE in every camp: Sharpness, Swiftness, Fortune, Lifesteal and Bossbane for the axe you are holding. Enchanted axes shimmer purple.\n- SELL AXES: sell old axes back for half what they cost (Reaper, Forge, Moonforge and Crucible).\n- GHOST LUMBERJACKS now work on every island. Past Pine Island they haul back materials.\n- CHRISTMAS TREES on every island: Christmas Pine, Frosted Christmas Fir, Starlight Spruce and Yule Ember Tree. Fell one and a present falls out.\n- +50 MAX HEALTH for every rebirth.\n- WILDLIFE everywhere: mountain goats, marmots and hunting eagles on the Highland Isle; moon foxes, shroomlings, glowing snails and lantern moths on Mooncap; salamanders, ember beetles, ash crows and bats on Ashfall; squirrels on Pine Island. Fireflies at night.\n- DECORATIONS on every island: mushrooms, fallen logs, berry bushes, cairns, fairy rings, crystals, obsidian, lava cracks and more."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.5.0\n\n- TREE MUTATIONS: Golden, Frozen, Shocked, Giant, Molten, Bloodlit, Rainbow and Celestial trees, each with its own look and effects, and up to x6 drops. Collect all 8.\n- ENCHANTING TABLE window: pick any axe, see its runes, and enchant it. Enchanted axes now show on the hotbar, the inventory and in your hands.\n- THE CASINO: a tower on Ashfall Isle. Coming soon.\n- ANIMALS REBUILT: walking legs, heads that look around, tails, ears and blinking eyes. They graze, sit, sleep, stare and run away. None of them attack.\n- OLD MINE FIX: you can now walk into the deep room and the west tunnel, so relic piece 5 can be collected. The mine rails are one connected track now.\n- Trunks no longer poke out of the top of pine and Christmas trees.\n- Ghost Lumberjacks bought on later islands no longer vanish when you restart the game."
     }
   }
 }

@@ -1253,6 +1253,53 @@ for (const [k, T] of Object.entries(TYPES)) {
     if (T.ghost) { base.transparent = true; base.opacity = 0.72; base.depthWrite = false; }
     typeMats[k] = { trunk: new THREE.MeshLambertMaterial({ color: T.trunk, ...base }), leaves: T.leaf.map(c => new THREE.MeshLambertMaterial({ color: c, ...base })) };
 }
+// ---------- tree mutations: rare glowing variants with their own look, sparkles and a big drop multiplier ----------
+const MUTS = {
+    golden:    { name: "GOLDEN",    col: "#ffd040", mult: 3, hp: 1.4, w: 30, leaf: 0xffd040, em: 0x6a4a00, trunk: 0xb08a30, temb: 0x3a2a00, fx: 0xfff0a0, mode: "sparkle" },
+    frozen:    { name: "FROZEN",    col: "#9fe8ff", mult: 2, hp: 1.3, w: 30, leaf: 0xd8f6ff, em: 0x1a4a6a, trunk: 0x8aaac8, temb: 0x0a1a2a, fx: 0xffffff, mode: "snow" },
+    shocked:   { name: "SHOCKED",   col: "#fff36a", mult: 2.5, hp: 1.3, w: 16, leaf: 0xfff6b0, em: 0x6a6000, fx: 0xffff70, mode: "zap", pulse: 1 },
+    giant:     { name: "GIANT",     col: "#ffb08a", mult: 2.5, hp: 2, w: 16, giant: 1.65, fx: 0xffd8b0, mode: "dust" },
+    molten:    { name: "MOLTEN",    col: "#ff8a2a", mult: 3, hp: 1.5, w: 10, leaf: 0x4a1a0a, em: 0xc03a00, trunk: 0x2a1008, temb: 0x601800, fx: 0xff8a2a, mode: "ember", pulse: 1 },
+    bloodlit:  { name: "BLOODLIT",  col: "#ff3a4a", mult: 3, hp: 1.5, w: 0, leaf: 0xb0101a, em: 0x5a0008, fx: 0xff3040, mode: "drip", pulse: 1 },
+    rainbow:   { name: "RAINBOW",   col: "#ffffff", mult: 5, hp: 1.6, w: 5, rainbow: 1, leaf: 0xff0000, em: 0x200000, fx: 0xffffff, mode: "sparkle" },
+    celestial: { name: "CELESTIAL", col: "#d8e0ff", mult: 6, hp: 1.8, w: 0, leaf: 0x2a2a80, em: 0x30308a, trunk: 0x1a1a40, temb: 0x0a0a30, fx: 0xffffff, mode: "stars", pulse: 1 }
+};
+const MUT_KEYS = Object.keys(MUTS);
+function mutW(k) {
+    let w = MUTS[k].w, storm = 0;
+    try { storm = wx.storm; } catch (e) { /* weather isn't set up yet on the very first spawn */ }
+    if (k === "bloodlit") w = isBlood() ? 40 : 0;
+    if (k === "celestial") w = isNight() ? 6 : 0;
+    if (k === "shocked" && storm > 0.4) w *= 4;
+    if (k === "molten") w *= isle === 4 ? 3 : 0.5;
+    if (k === "frozen" && isle === 4) w *= 0.3;
+    return w;
+}
+function rollMut() {
+    if (Math.random() > 0.07 * (isBlood() ? 1.8 : 1) * (buffOn("lucky") ? 1.5 : 1)) return null;
+    let tot = 0; for (const k of MUT_KEYS) tot += mutW(k);
+    let r = Math.random() * tot;
+    for (const k of MUT_KEYS) { r -= mutW(k); if (r <= 0) return k; }
+    return null;
+}
+const mutMats = {};
+function mutMat(k) {
+    if (mutMats[k]) return mutMats[k];
+    const M = MUTS[k], o = {};
+    if (M.leaf !== undefined) o.leaf = new THREE.MeshLambertMaterial({ color: M.leaf, emissive: M.em || 0, flatShading: true });
+    if (M.trunk !== undefined) o.trunk = new THREE.MeshLambertMaterial({ color: M.trunk, emissive: M.temb || 0, flatShading: true });
+    o.fx = new THREE.MeshBasicMaterial({ color: M.fx, transparent: true, opacity: 0.95, depthWrite: false });
+    return (mutMats[k] = o);
+}
+const mutCol = k => (k === "rainbow" ? `hsl(${Math.floor((performance.now() / 8) % 360)},90%,65%)` : MUTS[k].col);
+function applyMut(t, k) {
+    const M = MUTS[k], mm = mutMat(k), base = typeMats[t.key];
+    t.mut = k;
+    t.hp = t.maxHp = Math.ceil(t.maxHp * M.hp);
+    t.body.traverse(o => { if (!o.isMesh) return; if (mm.leaf && base.leaves.includes(o.material)) o.material = mm.leaf; else if (mm.trunk && o.material === base.trunk) o.material = mm.trunk; });
+    t.fxT = Math.random() * 0.3;
+}
+let lastMutToast = -99;
 const armMat = new THREE.MeshLambertMaterial({ color: 0x2c1c16, flatShading: true });
 // how each species is shaped: conifer tiers, round broadleaf canopies, tall redwoods, dead spiky blood trees, crystal shards
 const TREE_STYLE = {
@@ -1327,14 +1374,14 @@ function treeShape(key, r, h) {
         const tiers = 5;
         st.orn.forEach(() => orns.push([]));
         for (let i = 0; i < tiers; i++) {
-            const k = i / tiers, rad = r * 3.3 * (1 - k * 0.8), ht = h * 0.34, y = h * 0.38 + i * (h * 0.6 / tiers);
+            const k = i / tiers, rad = r * 3.3 * (1 - k * 0.8), ht = h * 0.32, y = h * 0.5 + i * (h * 0.5 / tiers);
             const c = rot(new THREE.ConeGeometry(rad, ht, 9)); c.translate(0, y, 0); leaf.push(ni(c));
             if (st.snow) { const sc = rot(new THREE.ConeGeometry(rad * 0.6, ht * 0.4, 9)); sc.translate(0, y + ht * 0.32, 0); snow.push(ni(sc)); }
             const nb = 6 - i;
             for (let b = 0; b < nb; b++) { const a = (b / nb) * 6.283 + i * 0.7 + R() * 0.3, rr = rad * 0.86, o = new THREE.IcosahedronGeometry(r * 0.3, 0); o.translate(Math.cos(a) * rr, y - ht * 0.38, Math.sin(a) * rr); orns[(b + i) % orns.length].push(o); }
             for (let g = 0; g < 10; g++) { const a = (g / 10) * 6.283 + i, rr = rad * (0.62 + 0.3 * (g / 10)), d = new THREE.BoxGeometry(r * 0.12, r * 0.12, r * 0.12); d.translate(Math.cos(a) * rr, y - ht * 0.1 - (g / 10) * ht * 0.3, Math.sin(a) * rr); dots.push(d); }
         }
-        const top = h * 0.38 + (tiers - 1) * (h * 0.6 / tiers) + h * 0.2;
+        const top = h * 0.5 + (tiers - 1) * (h * 0.5 / tiers) + h * 0.19;
         for (const ry of [0, Math.PI / 2]) { const p = new THREE.OctahedronGeometry(r * 0.55, 0); p.scale(0.8, 1.35, 0.35); p.rotateY(ry); p.translate(0, top, 0); starG.push(p); }
     } else if (st.s === "birch") {
         // tall pale trunk with dark bark marks and small airy leaf clumps up high
@@ -1425,12 +1472,14 @@ function makeTree(x, z, h, key = "pine") {
     const body = new THREE.Group();
     g.add(body);
     // a slightly bent, knobbly trunk
-    const tg = new THREE.CylinderGeometry(r * 0.6, r * 1.05, h * 1.05, 8, 4);
+    // how far up the canopy the trunk goes: pointed trees stop it inside their top tier so it never pokes out
+    const th = h * ({ conifer: 0.86, spiky: 0.86, xmas: 0.82, tall: 0.97, birch: 0.95, dead: 0.98 }[(TREE_STYLE[key] || { s: "conifer" }).s] || 1.05);
+    const tg = new THREE.CylinderGeometry(r * 0.6, r * 1.05, th, 8, 4);
     { const p = tg.attributes.position, bend = (Math.random() - 0.5) * 0.1 * h, ph = Math.random() * 6;
-      for (let i = 0; i < p.count; i++) { const u = p.getY(i) / (h * 1.05) + 0.5, k = 1 + 0.07 * Math.sin(u * 11 + ph + p.getX(i) * 3); p.setX(i, p.getX(i) * k + bend * u * u * u); p.setZ(i, p.getZ(i) * k); }
+      for (let i = 0; i < p.count; i++) { const u = p.getY(i) / th + 0.5, k = 1 + 0.07 * Math.sin(u * 11 + ph + p.getX(i) * 3); p.setX(i, p.getX(i) * k + bend * u * u * u); p.setZ(i, p.getZ(i) * k); }
       tg.computeVertexNormals(); }
     const trunk = new THREE.Mesh(tg, M.trunk);
-    trunk.position.y = h * 0.525;
+    trunk.position.y = th / 2;
     body.add(trunk);
     const shp = treeShape(key, r, h);
     const foliage = new THREE.Mesh(shp.leaf, M.leaves[Math.floor(Math.random() * M.leaves.length)]);
@@ -1492,8 +1541,11 @@ function spawnTree(announce = true) {
         if (isle === 4 && !treeOk4(x, z)) continue;
         for (const o of trees) if (!o.gone && Math.hypot(x - o.x, z - o.z) < 6) { bad = true; break; }
         if (bad) continue;
-        const key = pickType(x, z), T = TYPES[key];
-        const t = makeTree(x, z, T.titan ? 10 + Math.random() * 2 : T.tall ? 8 + Math.random() * 5 : 3 + Math.random() * 7, key);
+        const key = pickType(x, z), T = TYPES[key], mk = T.rush ? null : rollMut();
+        let hh = T.titan ? 10 + Math.random() * 2 : T.tall ? 8 + Math.random() * 5 : 3 + Math.random() * 7;
+        if (mk === "giant") hh = Math.min(hh * MUTS.giant.giant, 16);
+        const t = makeTree(x, z, hh, key);
+        if (mk) { applyMut(t, mk); if (announce && time - lastMutToast > 20) { lastMutToast = time; toast(`✦ A ${MUTS[mk].name} ${T.name} appeared somewhere! (×${MUTS[mk].mult} drops)`, "rare"); } }
         if (announce && (T.night || T.titan || T.xmas) && time - lastRareToast > 25) { lastRareToast = time; toast(T.xmas ? `Jingle bells... a ${T.name} sprouted somewhere in the woods!` : T.titan ? `A ${T.name} towers somewhere in the woods...` : `A ${T.name} stirs somewhere in the woods...`, "rare"); }
         return t;
     }
@@ -1707,6 +1759,7 @@ function tryHit() {
     }
     if (!best) { sfx(160, 0.12, "sawtooth", 0.05, 0.6); return; }
     hitTree(best, Math.round(axeDmg() * (best.boss ? 1 + 0.25 * enchLv("bane") : 1)), true);
+    if (enchTotal(save.equipped)) burst(V3(best.x + (player.pos.x - best.x) * 0.2, best.gy + Math.min(best.h * 0.35, 2.2), best.z + (player.pos.z - best.z) * 0.2), 8, 5, [axeRunes.mat, ornMat(0xffffff)]); // enchanted hits throw violet sparks
     const vamp = enchLv("vamp"); // Lifesteal: every swing that lands heals you a little
     if (vamp && player.hp > 0 && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + Math.max(1, Math.round(player.maxHp * 0.012 * vamp)));
 }
@@ -1732,6 +1785,7 @@ function fellTree(t) {
     contractProgress("fell");
     if (t.type.rare) { save.rareFelled++; contractProgress("rare"); if (!t.type.xmas) toast(`You felled a ${t.type.name}!`, "rare"); }
     if (t.type.xmas) openGift(t);
+    if (t.mut) mutFelled(t);
     sfx(90, 0.4, "sawtooth", 0.15, 0.4);
 }
 
@@ -1848,7 +1902,7 @@ function equipAxe(i) {
     applyAxeLook();
     swing.t = 1;
     sfx(420, 0.12, "triangle", 0.1, 1.4);
-    toast(`Equipped ${AXES[i].name}`);
+    toast(`Equipped ${AXES[i].name}${enchTotal(i) ? "  ✦ " + enchShort(i) : ""}`, enchTotal(i) ? "rare" : "");
 }
 function openChest(c) {
     if (c.opened) return;
@@ -1893,7 +1947,7 @@ function sellAxeItems() {
         if (i === 0 || !save.owned[i]) return;
         const v = axeSellValue(i), armed = sellArm === i && time - sellArmT < 3, en = save.ench[i] && Object.keys(save.ench[i]).length;
         out.push({ name: armed ? "CLICK AGAIN TO SELL " + a.name.toUpperCase() : a.name, icon: "a" + i, col: armed ? "#ff6a5a" : a.rarity, sell: true, value: v,
-            desc: `Sell it back for half what it cost${en ? " · its enchantments are lost" : ""}${save.equipped === i ? " · you're holding it" : ""}`,
+            desc: `Sell it back for half what it cost${en ? " · ✦ " + enchShort(i) + " will be lost" : ""}${save.equipped === i ? " · you're holding it" : ""}`,
             buy() {
                 if (!(sellArm === i && time - sellArmT < 3)) { sellArm = i; sellArmT = time; sfx(300, 0.08, "square", 0.06, 1); return; }
                 sellArm = -1;
@@ -1913,7 +1967,7 @@ function reaperAxeItems() {
     const out = [];
     AXES.forEach((a, i) => {
         if (i === 0 || a.isle2 || a.isle3) return;
-        out.push({ name: a.name, icon: "a" + i, desc: `${a.dmg} damage per swing${a.night ? " (x1.5 at night)" : ""}`, cost: a.cost, owned: !!save.owned[i], axe: i, col: a.rarity, buy() { gainAxe(i); } });
+        out.push({ name: a.name, icon: "a" + i, desc: `${a.dmg} damage per swing${a.night ? " (x1.5 at night)" : ""}${save.owned[i] && enchTotal(i) ? " · ✦ " + enchShort(i) : ""}`, cost: a.cost, owned: !!save.owned[i], axe: i, col: a.rarity, buy() { gainAxe(i); } });
     });
     return out;
 }
@@ -2031,7 +2085,7 @@ function setHotSlot(k, id) {
 }
 function weaponStat(id) {
     const i = +id.slice(1);
-    if (id[0] === "a") return axeDmgFor(i) + " dmg" + (save.ench[i] && Object.keys(save.ench[i]).length ? " ✦" : "");
+    if (id[0] === "a") return axeDmgFor(i) + " dmg";
     const G = GUNS[i], am = gunAm(i);
     return `${gunDmg(i)}${G.pel > 1 ? "×" + G.pel : ""} dmg · ${am.mag}+${am.res}`;
 }
@@ -2043,7 +2097,8 @@ function renderInv() {
     if ($("invHot").dataset.h !== hot) { $("invHot").innerHTML = hot; $("invHot").dataset.h = hot; }
     const cards = allWeapons().map(id => {
         const eq = wEquipped(id), on = save.hotbar.includes(id);
-        return `<div class="card wcard ${eq ? "eq" : ""}" data-act="w" data-w="${id}" draggable="true" style="border-color:${wCol(id)}"><img class="big" src="${iconURL(id)}"><b style="color:${wCol(id)}">${wName(id)}</b><small>${weaponStat(id)}${eq ? " · EQUIPPED" : on ? " · on hotbar" : ""}</small></div>`;
+        const en = id[0] === "a" && enchTotal(+id.slice(1));
+        return `<div class="card wcard ${eq ? "eq" : ""}${en ? " ench" : ""}" data-act="w" data-w="${id}" draggable="true" style="border-color:${wCol(id)}"><img class="big" src="${iconURL(id)}"><b style="color:${wCol(id)}">${wName(id)}</b><small>${weaponStat(id)}${eq ? " · EQUIPPED" : on ? " · on hotbar" : ""}</small>${en ? `<em class="eline">✦ ${enchShort(+id.slice(1))}</em>` : ""}</div>`;
     });
     const wHtml = cards.join("");
     if ($("invSlots").dataset.h !== wHtml) { $("invSlots").innerHTML = wHtml; $("invSlots").dataset.h = wHtml; }
@@ -2068,6 +2123,7 @@ function renderInv() {
         ["Contract", c ? `${c.prog}/${c.goal}` : "none"],
         ["Trees felled", save.felled],
         ["Rare trees", save.rareFelled],
+        ["Mutations found", `${Object.keys(save.mutDex || {}).length} / ${MUT_KEYS.length}${Object.keys(save.mutDex || {}).length ? "  (" + Object.keys(save.mutDex).map(k => MUTS[k].name).join(", ") + ")" : ""}`],
         ["Chests opened", save.chestsOpened],
         [isle >= 2 ? "Materials sold" : "Logs sold", save.sold],
         ...(isle >= 3 || save.bossKills ? [["Elder Heart felled", save.bossKills || 0], ["Stars caught", save.starsCaught || 0]] : []),
@@ -2110,6 +2166,8 @@ function showPanels() {
     $("panelInv").classList.toggle("show", panel === "inv");
     $("panelMap").classList.toggle("show", panel === "map");
     $("panelShop").classList.toggle("show", panel === "shop");
+    $("panelEnch").classList.toggle("show", panel === "ench");
+    if (panel === "ench") renderEnch();
     $("panelFish").classList.toggle("show", panel === "fish");
     $("panelFerry").classList.toggle("show", panel === "ferry");
     $("panelRelic").classList.toggle("show", panel === "relic");
@@ -2183,8 +2241,8 @@ function showBar(t) {
         t.bar = document.createElement("div");
         t.bar.className = "tbar";
         t.bar.innerHTML = "<i></i><b></b><u></u>";
-        t.bar.querySelector("u").textContent = t.type.name;
-        t.bar.querySelector("u").style.color = t.type.col;
+        t.bar.querySelector("u").textContent = (t.mut ? "✦ " + MUTS[t.mut].name + " " : "") + t.type.name;
+        t.bar.querySelector("u").style.color = t.mut ? MUTS[t.mut].col : t.type.col;
         $("floaters").appendChild(t.bar);
     }
     t.barT = 2.4;
@@ -2211,7 +2269,7 @@ function updateBars(dt) {
 const plates = [];
 const plateV = new THREE.Vector3();
 const treeDmg = t => (t.type.flee ? 0 : Math.round((8 + t.h) * t.type.dmg * (1 + 0.05 * (save.day - 1)) * dmgScale() * (isBlood() ? 1.25 : 1) * isleDm()));
-const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw() * (buffOn("lucky") ? 1.5 : 1)));
+const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw() * (buffOn("lucky") ? 1.5 : 1) * (t.mut ? MUTS[t.mut].mult : 1)));
 function hidePlates() { for (const p of plates) p.style.display = "none"; }
 function updateNameplates() {
     const cands = [];
@@ -2234,8 +2292,9 @@ function updateNameplates() {
         if (t._occ || behindAxe(px, py)) { e.style.display = "none"; continue; }
         const T = t.type, dmg = treeDmg(t);
         const tm = T.mat || (isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
-        const html = '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle >= 2 ? ' · <em style="color:' + MATS[tm].col + '">' + treeLogs(t) + ' ' + MATS[tm].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
-        if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = T.col; }
+        const mutHtml = t.mut ? '<i class="mut' + (t.mut === "rainbow" ? ' rbtxt' : '') + '" style="color:' + MUTS[t.mut].col + '">✦ ' + MUTS[t.mut].name + ' ×' + MUTS[t.mut].mult + ' ✦</i>' : '';
+        const html = mutHtml + '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle >= 2 ? ' · <em style="color:' + MATS[tm].col + '">' + treeLogs(t) + ' ' + MATS[tm].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
+        if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = t.mut ? MUTS[t.mut].col : T.col; e.className = "np" + (t.mut ? " mutd" + (t.mut === "rainbow" ? " rbw" : "") : ""); e.style.setProperty("--mc", t.mut ? MUTS[t.mut].col : T.col); }
         e.style.display = "";
         e.style.left = px + "px";
         e.style.top = py + "px";
@@ -2285,8 +2344,8 @@ function drawMap() {
     for (const t of trees) {
         if (t.gone || t.dying) continue;
         const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14;
-        g.fillStyle = near ? "#ff4a3a" : t.type.rare ? t.type.col : "#3f8a62";
-        g.beginPath(); g.arc(X(t.x), Z(t.z), (t.type.rare ? 2.5 : 1.5) + t.h * 0.3, 0, 7); g.fill();
+        g.fillStyle = near ? "#ff4a3a" : t.mut ? mutCol(t.mut) : t.type.rare ? t.type.col : "#3f8a62";
+        g.beginPath(); g.arc(X(t.x), Z(t.z), (t.mut ? 3.5 : t.type.rare ? 2.5 : 1.5) + t.h * 0.3, 0, 7); g.fill();
     }
     g.font = "bold 12px Consolas"; g.fillStyle = "#ffd040"; g.textAlign = "center";
     g.fillText("SAFEHOUSE", X(0), Z(6.2)); g.fillText("SHOP", X(-11), Z(-18.4)); g.fillText("MILL", X(MILL.x), Z(MILL.z - 3.5)); g.fillText("CHUTE", X(HOPPER.x - 1), Z(HOPPER.z - 1.4));
@@ -2445,6 +2504,7 @@ addEventListener("mousemove", e => {
 
 function nearest() {
     if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
+    if (casino && casino.isle === isle && Math.hypot(player.pos.x - casino.door.x, player.pos.z - casino.door.z) < 3.4) return { k: "casino" };
     if (isle === 4) return nearest4();
     if (isle === 3) return nearest3();
     if (isle === 2) return nearest2();
@@ -2461,12 +2521,13 @@ function nearest() {
 }
 function interact() {
     if (panel === "talk") { advanceTalk(); return; }
-    if (panel === "shop") { closePanel(); return; }
+    if (panel === "shop" || panel === "ench") { closePanel(); return; }
     if (panel) return;
     const n = nearest();
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
-    if (n.k === "ench") { openShop("ench", pick(ENCH_SAY) + "  ·  Enchanting: " + AXES[save.equipped].name); return; }
+    if (n.k === "ench") { openEnch(pick(ENCH_SAY)); return; }
+    if (n.k === "casino") { toast("The doors are boarded shut. A sign on them says: COMING SOON.", "rare"); sfx(300, 0.08, "square", 0.06, 1.2); setTimeout(() => sfx(420, 0.08, "square", 0.06, 1.2), 90); setTimeout(() => sfx(520, 0.12, "square", 0.05, 1.2), 180); return; }
     if (n.k === "smith") {
         openShop("forge", pick(isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
     } else if (n.k === "depot") openShop("trade", isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
@@ -2575,7 +2636,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         let mx = 0, mz = 0, sp = 0;
         if (t.type.flee) {
             if (dist < 14) { mx = -t._nx; mz = -t._nz; sp = 3.6; }
-        } else if (movers.has(t)) { mx = t._nx; mz = t._nz; sp = 1.9 * t.type.speed; }
+        } else if (movers.has(t)) { mx = t._nx; mz = t._nz; sp = 1.9 * t.type.speed * (t.mut === "frozen" ? 0.55 : 1); }
         if (sp > 0) {
             t.x += mx * sp * dt; t.z += mz * sp * dt;
             const od = Math.hypot(t.x, t.z);
@@ -2900,55 +2961,122 @@ function addCritter(kind, g, x, z, y = 0, extra = {}) {
     const c = Object.assign({ kind, g, x, z, y0: y, ph: srand() * 6, state: "idle", t: srand() * 3, tx: x, tz: z, hx: x, hz: z, hide: 0 }, extra);
     critters.push(c); return c;
 }
-function makeDeer() {
-    const g = new THREE.Group(), body = lamb(0x8a5a30), pale = lamb(0xe8d8b8), dark = lamb(0x3a2412);
-    bx(g, body, 0, 1.0, 0, 0.55, 0.55, 1.2); bx(g, pale, 0, 0.78, 0, 0.5, 0.18, 1.0);
-    bx(g, body, 0, 1.45, 0.62, 0.22, 0.7, 0.22, 0.4); bx(g, body, 0, 1.85, 0.9, 0.26, 0.28, 0.42); bx(g, dark, 0, 1.8, 1.14, 0.1, 0.1, 0.1);
-    bx(g, pale, 0, 1.2, -0.66, 0.14, 0.16, 0.14);
-    for (const [x, z] of [[-0.18, 0.45], [0.18, 0.45], [-0.18, -0.45], [0.18, -0.45]]) bx(g, dark, x, 0.4, z, 0.1, 0.8, 0.1);
-    for (const s of [-1, 1]) { bx(g, dark, s * 0.1, 2.12, 0.85, 0.04, 0.4, 0.04, 0, 0, s * 0.35); bx(g, dark, s * 0.2, 2.2, 0.85, 0.04, 0.22, 0.04, 0, 0, s * 0.9); }
-    return g;
+// ---------- the animal kit: shared materials, shapes, pivots, eyes and legs ----------
+const AMC = {};
+const amat = (c, e = 0, side = false) => { const k = c + "_" + e + (side ? "d" : ""); return AMC[k] || (AMC[k] = new THREE.MeshLambertMaterial(Object.assign({ color: c, flatShading: true }, e ? { emissive: e } : {}, side ? { side: THREE.DoubleSide } : {}))); };
+const aglow = (c, op = 0) => { const k = "g" + c + "_" + op; return AMC[k] || (AMC[k] = new THREE.MeshBasicMaterial(op ? { color: c, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false } : { color: c, side: THREE.DoubleSide })); };
+const SPH = new THREE.IcosahedronGeometry(1, 1);
+const TAPR = new THREE.CylinderGeometry(1, 0.55, 1, 6); // wide at the top, narrow at the bottom: legs
+const CONE4 = new THREE.ConeGeometry(1, 1, 4);
+const CAPG = new THREE.SphereGeometry(1, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+const TOR = new THREE.TorusGeometry(1, 0.22, 4, 12, Math.PI * 1.75);
+// a pivot: animate it and everything attached moves with it (yaw first, then pitch, then roll)
+const pv = (parent, x, y, z, rx = 0, ry = 0, rz = 0) => { const g = new THREE.Group(); g.rotation.order = "YXZ"; g.position.set(x, y, z); g.rotation.set(rx, ry, rz); parent.add(g); return g; };
+// eyes with a little white glint; they blink by squashing on y
+function aEyes(head, x, y, z, s, mat = aglow(0x120c08), glint = true) {
+    return [-1, 1].map(sd => { const e = pv(head, sd * x, y, z); part(e, SPH, mat, 0, 0, 0, s, s, s * 0.7); if (glint) part(e, BOX, aglow(0xffffff), sd * s * 0.2, s * 0.35, s * 0.6, s * 0.4, s * 0.4, s * 0.2); return e; });
 }
-function makeRabbit() {
-    const g = new THREE.Group(), fur = lamb(0xb8a894), white = lamb(0xf4f0e8);
-    part(g, ICO, fur, 0, 0.28, 0, 0.26, 0.24, 0.34); part(g, ICO, fur, 0, 0.42, 0.28, 0.16, 0.15, 0.17); part(g, ICO, white, 0, 0.3, -0.34, 0.09, 0.09, 0.09);
-    for (const s of [-1, 1]) bx(g, fur, s * 0.06, 0.66, 0.26, 0.05, 0.3, 0.05, 0, 0, s * 0.15);
-    return g;
+// a leg hanging from a hip pivot, with a hoof or foot
+function aLeg(parent, x, y, z, len, w, mat, footMat, footLen = 0) {
+    const p = pv(parent, x, y, z);
+    part(p, TAPR, mat, 0, -len / 2, 0, w, len, w);
+    if (footMat) part(p, BOX, footMat, 0, -len + w * 0.5, footLen * 0.35, w * 1.5, w, w * 1.5 + footLen);
+    return p;
 }
+// Pine Island's beach and pond animals (they use the original wildlife code, so they keep its "wings" array)
 function makeCrab() {
-    const g = new THREE.Group(), red = lamb(0xe0502a);
-    part(g, ICO, red, 0, 0.14, 0, 0.26, 0.12, 0.2);
-    for (const s of [-1, 1]) { part(g, ICO, red, s * 0.34, 0.18, 0.16, 0.1, 0.08, 0.1); bx(g, red, s * 0.1, 0.3, 0.14, 0.03, 0.08, 0.03); }
+    const g = new THREE.Group(), red = amat(0xe0502a), dark = amat(0xa83a1a), pale = amat(0xf4a888);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, red, 0, 0.13, 0, 0.24, 0.085, 0.18);
+    part(body, SPH, pale, 0, 0.09, 0, 0.2, 0.05, 0.15);
+    for (const s of [-1, 1]) { part(body, SPH, dark, s * 0.08, 0.2, -0.02, 0.05, 0.02, 0.05); const st = pv(body, s * 0.06, 0.18, 0.13); part(st, BOX, red, 0, 0.04, 0, 0.016, 0.08, 0.016); part(st, SPH, aglow(0x101010), 0, 0.09, 0, 0.024, 0.024, 0.024); }
+    const claws = [-1, 1].map(s => { const arm = pv(body, s * 0.2, 0.13, 0.1, 0, -s * 0.6, 0); part(arm, BOX, red, 0, 0, 0.07, 0.045, 0.04, 0.14); const cl = pv(arm, 0, 0, 0.15); part(cl, SPH, red, 0, 0, 0.04, 0.065, 0.05, 0.085); const pin = pv(cl, 0, 0.025, 0.07); part(pin, BOX, dark, 0, 0, 0.04, 0.03, 0.02, 0.085); return pin; });
+    const legs = [];
+    for (let i = 0; i < 3; i++) for (const s of [-1, 1]) { const p = pv(body, s * 0.18, 0.1, 0.05 - i * 0.07); part(p, BOX, red, s * 0.07, 0.02, 0, 0.14, 0.022, 0.022, 0, 0, s * 0.35); part(p, BOX, dark, s * 0.15, -0.045, 0, 0.022, 0.11, 0.022, 0, 0, s * 0.2); legs.push({ p, s, ph: (i % 2 === 0) === (s > 0) ? 0 : Math.PI }); }
+    g.userData.crab = { claws, legs, body };
     return g;
 }
 function makeGull() {
-    const g = new THREE.Group(), white = lamb(0xf2f2f2), grey = lamb(0x9a9aa2), yel = lamb(0xffc030);
-    part(g, ICO, white, 0, 0.32, 0, 0.18, 0.18, 0.34); part(g, ICO, white, 0, 0.5, 0.26, 0.1, 0.1, 0.1); bx(g, yel, 0, 0.48, 0.38, 0.04, 0.04, 0.12);
-    const wl = bx(g, grey, -0.3, 0.4, 0, 0.5, 0.03, 0.22), wr = bx(g, grey, 0.3, 0.4, 0, 0.5, 0.03, 0.22);
-    g.userData.wings = [wl, wr];
+    const g = new THREE.Group(), white = amat(0xf6f6f6), grey = amat(0x9aa2ae), dk = amat(0x2a2a30), yel = amat(0xffc030), leg = amat(0xf0a040);
+    part(g, SPH, white, 0, 0.32, 0, 0.13, 0.13, 0.27);
+    part(g, BOX, white, 0, 0.34, -0.31, 0.11, 0.025, 0.16, -0.15);
+    const head = pv(g, 0, 0.46, 0.2);
+    part(head, SPH, white, 0, 0.02, 0.02, 0.085, 0.085, 0.095);
+    part(head, CONE6, yel, 0, 0.005, 0.14, 0.022, 0.12, 0.026, Math.PI / 2);
+    part(head, BOX, aglow(0xe03a2a), 0, -0.012, 0.15, 0.01, 0.014, 0.014);
+    aEyes(head, 0.06, 0.035, 0.05, 0.014, aglow(0x101010), false);
+    for (const s of [-1, 1]) { part(g, BOX, leg, s * 0.04, 0.1, 0, 0.018, 0.2, 0.018); part(g, BOX, leg, s * 0.04, 0.01, 0.03, 0.05, 0.012, 0.07); }
+    const wings = [-1, 1].map(s => { const p = pv(g, s * 0.1, 0.38, 0.02); part(p, BOX, grey, s * 0.25, 0, 0, 0.5, 0.025, 0.2); part(p, BOX, dk, s * 0.5, 0, -0.03, 0.14, 0.02, 0.15); part(p, BOX, aglow(0xffffff), s * 0.56, 0.012, -0.03, 0.03, 0.01, 0.03); return p; });
+    g.userData.wings = wings; g.userData.foldable = true; g.userData.head = head;
     return g;
 }
 function makeFrog() {
-    const g = new THREE.Group(), grn = lamb(0x58b04a);
-    part(g, ICO, grn, 0, 0.1, 0, 0.14, 0.09, 0.17); part(g, ICO, grn, -0.07, 0.2, 0.1, 0.04, 0.04, 0.04); part(g, ICO, grn, 0.07, 0.2, 0.1, 0.04, 0.04, 0.04);
+    const g = new THREE.Group(), grn = amat(0x58b04a), dk = amat(0x2e6a2a), pale = amat(0xe8f0b0), iris = aglow(0xffd040);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, grn, 0, 0.09, 0, 0.12, 0.075, 0.15);
+    part(body, SPH, dk, 0.04, 0.15, -0.03, 0.035, 0.012, 0.035); part(body, SPH, dk, -0.05, 0.145, 0.03, 0.028, 0.012, 0.028); part(body, SPH, dk, 0.01, 0.15, -0.09, 0.025, 0.01, 0.025);
+    const throat = part(body, SPH, pale, 0, 0.06, 0.1, 0.07, 0.04, 0.05);
+    for (const s of [-1, 1]) { const e = pv(body, s * 0.06, 0.155, 0.08); part(e, SPH, grn, 0, 0, 0, 0.042, 0.042, 0.042); part(e, SPH, iris, 0, 0.006, 0.026, 0.027, 0.027, 0.02); part(e, BOX, aglow(0x101010), 0, 0.006, 0.044, 0.03, 0.008, 0.006); }
+    const hind = [-1, 1].map(s => { const p = pv(body, s * 0.09, 0.07, -0.08); part(p, SPH, grn, s * 0.03, 0, 0.02, 0.045, 0.035, 0.085); part(p, BOX, grn, s * 0.06, -0.04, 0.06, 0.03, 0.02, 0.1); part(p, BOX, dk, s * 0.06, -0.06, 0.12, 0.055, 0.01, 0.055); return p; });
+    for (const s of [-1, 1]) part(body, BOX, grn, s * 0.08, 0.03, 0.1, 0.025, 0.07, 0.025, 0, 0, s * 0.2);
+    g.userData.frog = { throat, hind, body };
     return g;
 }
 const birdMat = lamb(0xeeeeee);
-function makeBird() {
+function makeBird() { // a swallow: forked tail, swept wings
     const g = new THREE.Group();
-    part(g, ICO, birdMat, 0, 0, 0, 0.14, 0.1, 0.3);
-    const wl = bx(g, birdMat, -0.3, 0, 0, 0.5, 0.02, 0.22), wr = bx(g, birdMat, 0.3, 0, 0, 0.5, 0.02, 0.22);
-    g.userData.wings = [wl, wr];
+    part(g, SPH, birdMat, 0, 0, 0, 0.09, 0.08, 0.24);
+    part(g, SPH, birdMat, 0, 0.03, 0.2, 0.065, 0.065, 0.075);
+    for (const s of [-1, 1]) part(g, BOX, birdMat, s * 0.05, 0, -0.3, 0.025, 0.01, 0.2, 0, s * 0.3, 0);
+    const wings = [-1, 1].map(s => { const p = pv(g, s * 0.06, 0.02, 0.03); part(p, BOX, birdMat, s * 0.24, 0, -0.03, 0.48, 0.014, 0.15, 0, s * 0.3, 0); return p; });
+    g.userData.wings = wings;
     return g;
 }
 function makeButterfly() {
-    const g = new THREE.Group(), c = [0xff7ad8, 0xffd040, 0x7fd8ff, 0xffffff][Math.floor(Math.random() * 4)], m = new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide });
-    const wl = part(g, BOX, m, -0.1, 0, 0, 0.18, 0.01, 0.16), wr = part(g, BOX, m, 0.1, 0, 0, 0.18, 0.01, 0.16);
-    g.userData.wings = [wl, wr];
+    const pals = [[0xff7ad8, 0x3a1a3a], [0xffd040, 0x3a2a0a], [0x7fd8ff, 0x0a2a4a], [0xffffff, 0x8a8a96], [0xff8a3a, 0x1a1008], [0xc8a0ff, 0x2a1a4a]], [c1, c2] = pals[Math.floor(Math.random() * pals.length)];
+    const g = new THREE.Group(), m1 = aglow(c1), m2 = aglow(c2), bodyM = aglow(0x1a1418);
+    part(g, SPH, bodyM, 0, 0, 0, 0.014, 0.014, 0.07);
+    for (const s of [-1, 1]) part(g, BOX, bodyM, s * 0.015, 0.02, 0.08, 0.004, 0.004, 0.06, -0.6, s * 0.35, 0);
+    const wings = [-1, 1].map(s => {
+        const p = pv(g, 0, 0, 0);
+        part(p, BOX, m1, s * 0.075, 0, 0.03, 0.14, 0.004, 0.11, 0, -s * 0.15, 0); part(p, BOX, m1, s * 0.055, 0, -0.06, 0.1, 0.004, 0.085, 0, s * 0.25, 0);
+        part(p, BOX, m2, s * 0.125, 0.003, 0.055, 0.04, 0.004, 0.05, 0, -s * 0.15, 0); part(p, BOX, m2, s * 0.07, 0.003, -0.085, 0.032, 0.004, 0.032);
+        return p;
+    });
+    g.userData.wings = wings;
     return g;
 }
-for (let i = 0; i < 6; i++) { const p = randLand(16); addCritter("deer", makeDeer(), p.x, p.z, 0, { hx: p.x, hz: p.z }); }
-for (let i = 0; i < 11; i++) { const p = randLand(14); addCritter("rabbit", makeRabbit(), p.x, p.z, 0, { hx: p.x, hz: p.z }); }
+// little extra life for the original critters: folding wings, scuttling legs, snapping claws, croaking frogs
+function critTick(c, dt) {
+    const U = c.g.userData;
+    const sp = c._lx === undefined ? 0 : Math.hypot(c.g.position.x - c._lx, c.g.position.z - c._lz) / Math.max(dt, 1e-3);
+    c._lx = c.g.position.x; c._lz = c.g.position.z;
+    if (U.foldable) {
+        const fold = c.state === "fly" ? 0 : 1;
+        U.wings.forEach((w, i) => { w.rotation.y = (i ? 1 : -1) * 1.45 * fold; });
+        if (fold && U.head) { c.look = (c.look || 0) - dt; if (c.look <= 0) { c.look = rand(0.5, 2.5); c.lookY = rand(-0.9, 0.9); } U.head.rotation.y += ((c.lookY || 0) - U.head.rotation.y) * Math.min(1, dt * 10); }
+    }
+    if (U.crab) {
+        const mv = sp > 0.2 ? 1 : 0;
+        c.gait = (c.gait || 0) + dt * Math.min(sp, 6) * 10;
+        U.crab.legs.forEach(L => { L.p.rotation.z = Math.sin(c.gait + L.ph) * 0.35 * mv; L.p.rotation.x = Math.cos(c.gait + L.ph) * 0.2 * mv; });
+        if (Math.random() < dt * 0.4) c.snap = 0.45;
+        c.snap = Math.max(0, (c.snap || 0) - dt);
+        U.crab.claws.forEach(p => (p.rotation.x = c.snap > 0 ? -Math.abs(Math.sin(c.snap * 22)) * 0.7 : 0));
+        U.crab.body.position.y = Math.abs(Math.sin(c.gait * 0.5)) * 0.015 * mv;
+    }
+    if (U.frog) {
+        const air = c.jump > 0;
+        U.frog.hind.forEach(h => (h.rotation.x += ((air ? 1.7 : 0) - h.rotation.x) * Math.min(1, dt * 20)));
+        U.frog.body.rotation.x = air ? -0.35 : 0;
+        c.croak = (c.croak === undefined ? rand(1, 6) : c.croak) - dt;
+        if (c.croak <= -0.7) c.croak = rand(3, 9);
+        const puff = c.croak < 0 ? Math.abs(Math.sin(-c.croak * 9)) : 0;
+        U.frog.throat.scale.set(0.07 * (1 + puff * 0.7), 0.04 * (1 + puff * 1.3), 0.05 * (1 + puff * 0.6));
+    }
+}
+
+// (deer and rabbits on Pine Island now live with the rest of the wildlife further down, along with the squirrels)
 for (let i = 0; i < 14; i++) { const p = randBeach(); addCritter("crab", makeCrab(), p.x, p.z, 0.02, { hx: p.x, hz: p.z, ang: p.a }); }
 for (let i = 0; i < 8; i++) { const p = randBeach(); addCritter("gull", makeGull(), p.x, p.z, 0, { hx: p.x, hz: p.z }); }
 for (let i = 0; i < 4; i++) { const p = dockPt(5 + i * 5.5, i % 2 ? 1.9 : -1.9, 1.15); addCritter("gull", makeGull(), p.x, p.z, 1.15, { hx: p.x, hz: p.z, perch: true }); }
@@ -3036,6 +3164,7 @@ function updateCritters(dt) {
                 break;
             }
         }
+        critTick(c, dt);
         if (c.kind !== "gull" && c.kind !== "bird" && c.kind !== "butterfly" && c.kind !== "crab") { c.g.position.x = c.x; c.g.position.z = c.z; }
     }
 }
@@ -3252,7 +3381,7 @@ const ROMAN = ["", "I", "II", "III", "IV", "V"];
 const ENCH_SAY = ["The runes are hungry. Feed them gold.", "Every blade remembers what you pour into it.", "The book turns its own pages. Don't read them out loud.", "Pick a rune. Any rune."];
 // placed beside each camp, clear of the buildings
 const ENCH_AT = { 1: { x: -8.5, z: 1.5 }, 2: { x: 0, z: -10.5 }, 3: { x: 0, z: -10.5 }, 4: { x: 0, z: -10.5 } };
-const enchCost = (k, lvl) => Math.round([0, 120, 1500, 15000, 150000][isle] * ENCH[k].k * Math.pow(2.1, lvl) * (1 + save.equipped * 0.12));
+const enchCost = (k, lvl, i = save.equipped) => Math.round([0, 120, 1500, 15000, 150000][isle] * ENCH[k].k * Math.pow(2.1, lvl) * (1 + i * 0.12));
 function enchItems() {
     const i = save.equipped, a = AXES[i];
     if (holdingGun()) return [{ name: "Put the gun away", desc: "Only axes take enchantments. Switch to an axe, then come back.", sell: true, value: 0, buy() {} }];
@@ -3293,6 +3422,7 @@ function enchFx() {
 }
 const enchCol = new THREE.Color(), enchBase = new THREE.Color(), ENCH_PURPLE = new THREE.Color(0x9a4aff);
 function updateEnchTable(dt) {
+    updateAxeRunes(); updateMutFx(dt); updateCasino();
     const T = enchTable;
     if (T.g.visible) {
         const d = Math.hypot(player.pos.x - T.x, player.pos.z - T.z), near = d < 6;
@@ -3872,7 +4002,7 @@ function axeCraftItems() {
     AXES.forEach((a, i) => {
         if (i === 0 || !axeRecipe(i)) return;
         const need = isle === 3 && i === 13 && !save.bossKills ? " · Heartwood only falls from the Elder Heart" : isle === 4 && i === 15 && !save.kingKills ? " · Molten Cores only come from the Cinder King" : "";
-        out.push({ name: a.name, icon: "a" + i, col: a.rarity, desc: `${Math.round(a.dmg * (1 + 0.1 * (save.rebirths || 0)))} damage per swing${a.night ? ` (x${a.night} at night)` : ""}${need}`, craft: axeRecipe(i), owned: !!save.owned[i], axe: i, buy() { gainAxe(i); } });
+        out.push({ name: a.name, icon: "a" + i, col: a.rarity, desc: `${Math.round(a.dmg * (1 + 0.1 * (save.rebirths || 0)))} damage per swing${a.night ? ` (x${a.night} at night)` : ""}${need}${save.owned[i] && enchTotal(i) ? " · ✦ " + enchShort(i) : ""}`, craft: axeRecipe(i), owned: !!save.owned[i], axe: i, buy() { gainAxe(i); } });
     });
     return out;
 }
@@ -4490,7 +4620,7 @@ function enterIsle2() {
     waterMesh.geometry = isle2.waterGeo; waterMesh.material.needsUpdate = true;
     smokeEmit.length = 0; isle2.emit.forEach(e => smokeEmit.push(e));
     RESPAWN.x = 3; RESPAWN.z = 4;
-    save.ghosts = 0; syncGhosts();
+    syncGhosts();
     resetIsleTrees(90);
     resetChests();
 }
@@ -4618,8 +4748,8 @@ function drawMap2() {
     for (const t of trees) {
         if (t.gone || t.dying) continue;
         const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14;
-        g.fillStyle = near ? "#ff4a3a" : t.type.rare ? t.type.col : "rgba(20,70,40,.95)";
-        g.beginPath(); g.arc(X(t.x), Z(t.z), (t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill();
+        g.fillStyle = near ? "#ff4a3a" : t.mut ? mutCol(t.mut) : t.type.rare ? t.type.col : "rgba(20,70,40,.95)";
+        g.beginPath(); g.arc(X(t.x), Z(t.z), (t.mut ? 3.5 : t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill();
     }
     g.font = "bold 12px Consolas"; g.fillStyle = "#ffd040"; g.textAlign = "center";
     g.strokeStyle = "#000"; g.lineWidth = 3;
@@ -4926,7 +5056,7 @@ const MINE_MOUTH = { x: -80.9, z: -28.6 };
 const MINE_OUT = { x: MINE_MOUTH.x + MINE_F.x * 4, z: MINE_MOUTH.z + MINE_F.z * 4 };
 function inMine() { return player.pos.x > 2500; }
 // the tunnels, as rectangles [x0, x1, z0, z1] relative to (MX, 0)
-const MINE_R = [[-1.8, 1.8, -5, 40], [-24, 24, 18, 21.6], [-24, -20.4, 21.6, 44], [20.4, 24, -4, 21.6], [-7.5, 7.5, 40, 54], [-24, -12, 44, 47.6], [12.4, 24, -4, -0.4]];
+const MINE_R = [[-1.8, 1.8, -5, 41.2], [-24, 24, 18, 21.6], [-24, -20.4, 20.4, 45.2], [20.4, 24, -4, 21.6], [-7.5, 7.5, 40, 54], [-24, -12, 44, 47.6], [12.4, 24, -4, -0.4]];
 const MINE_H = 3.4;
 const inRect = (x, z, r, m = 0) => x >= MX + r[0] + m && x <= MX + r[1] - m && z >= r[2] + m && z <= r[3] - m;
 function clampMine(p) {
@@ -4972,12 +5102,31 @@ function buildMine() {
             else { const x = MX + r[0] + s; tim.add(BOX, x, MINE_H / 2, r[2] + 0.15, 0, 0, 0, 0.22, MINE_H, 0.22); tim.add(BOX, x, MINE_H / 2, r[3] - 0.15, 0, 0, 0, 0.22, MINE_H, 0.22); tim.add(BOX, x, MINE_H - 0.15, cz, 0, 0, 0, 0.25, 0.22, d); }
         }
     }
-    // rails down the main shaft
-    for (const sx of [-0.45, 0.45]) rail.add(BOX, MX + sx, 0.06, 17.5, 0, 0, 0, 0.08, 0.08, 45);
-    for (let z = -4.5; z < 40; z += 0.9) tim.add(BOX, MX, 0.03, z, 0, 0, 0, 1.3, 0.06, 0.2);
+    // a connected rail network: down the main shaft into the deep room, and round the east branch, the cross tunnel and the west tunnel
+    const track = pts => { // a polyline with rounded corners -> evenly spaced sleepers and two rails
+        const P = [];
+        for (let k = 0; k < pts.length; k++) {
+            const [x, z] = pts[k];
+            if (k === 0 || k === pts.length - 1) { P.push([x, z]); continue; }
+            const [ax, az] = pts[k - 1], [bx2, bz] = pts[k + 1], R = 1.7;
+            const l1 = Math.hypot(x - ax, z - az), l2 = Math.hypot(bx2 - x, bz - z), d1 = [(x - ax) / l1, (z - az) / l1], d2 = [(bx2 - x) / l2, (bz - z) / l2];
+            for (let s = 0; s <= 8; s++) { const u = s / 8, p0 = [x - d1[0] * R, z - d1[1] * R], p2 = [x + d2[0] * R, z + d2[1] * R]; P.push([(1 - u) * (1 - u) * p0[0] + 2 * u * (1 - u) * x + u * u * p2[0], (1 - u) * (1 - u) * p0[1] + 2 * u * (1 - u) * z + u * u * p2[1]]); }
+        }
+        const S = []; // resample every 0.3 m
+        for (let k = 0; k < P.length - 1; k++) { const [x0, z0] = P[k], [x1, z1] = P[k + 1], L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(L / 0.3)); for (let s = 0; s < n; s++) S.push([x0 + (x1 - x0) * s / n, z0 + (z1 - z0) * s / n]); }
+        S.push(P[P.length - 1]);
+        let acc = 0;
+        for (let k = 0; k < S.length - 1; k++) {
+            const [x0, z0] = S[k], [x1, z1] = S[k + 1], L = Math.hypot(x1 - x0, z1 - z0), yaw = Math.atan2(x1 - x0, z1 - z0), nx = Math.cos(yaw), nz = -Math.sin(yaw);
+            for (const sd of [-0.45, 0.45]) rail.add(BOX, MX + (x0 + x1) / 2 + nx * sd, 0.1, (z0 + z1) / 2 + nz * sd, 0, yaw, 0, 0.08, 0.08, L + 0.04);
+            acc += L; if (acc >= 0.85) { acc = 0; tim.add(BOX, MX + x0, 0.03, z0, 0, yaw, 0, 1.3, 0.06, 0.2); }
+        }
+    };
+    track([[0, -4.8], [0, 45], [4.2, 51.6]]);
+    track([[22.2, -3.6], [22.2, 19.8], [-22.2, 19.8], [-22.2, 43.6]]);
     rock.build(); floorB.build(); ceil.build(); tim.build(); rail.build();
     // carts, crates, and lanterns hanging from the beams
-    for (const [x, z, ry] of [[MX, 30, 0], [MX - 22, 34, 0], [MX + 4, 52, 0.6]]) { const c = new THREE.Group(); c.position.set(x, 0, z); c.rotation.y = ry; part(c, BOX, lamb(0x5a3a22), 0, 0.55, 0, 1.1, 0.7, 1.6); part(c, BOX, lamb(0x7a6a5a), 0, 0.95, 0, 0.9, 0.2, 1.4); for (const [wx, wz] of [[-0.6, -0.5], [0.6, -0.5], [-0.6, 0.5], [0.6, 0.5]]) part(c, CYL8, lamb(0x2a2a30), wx, 0.18, wz, 0.18, 0.08, 0.18, 0, 0, Math.PI / 2); scene.add(c); }
+    for (const [x, z, ry] of [[MX, 30, 0], [MX - 22.2, 34, 0], [MX + 3.5, 50.5, 0.57]]) { const c = new THREE.Group(); c.position.set(x, 0, z); c.rotation.y = ry; part(c, BOX, lamb(0x5a3a22), 0, 0.55, 0, 1.1, 0.7, 1.6); part(c, BOX, lamb(0x7a6a5a), 0, 0.95, 0, 0.9, 0.2, 1.4); for (const [wx, wz] of [[-0.6, -0.5], [0.6, -0.5], [-0.6, 0.5], [0.6, 0.5]]) part(c, CYL8, lamb(0x2a2a30), wx * 0.75, 0.32, wz, 0.18, 0.08, 0.18, 0, 0, Math.PI / 2); c.position.y = 0.04; scene.add(c); }
     for (const [x, z] of [[0, 4], [0, 20], [-14, 19.8], [14, 19.8], [-22, 32], [22, 8], [0, 47], [-18, 46]]) {
         const lx = MX + x;
         const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.3, 0.22), new THREE.MeshBasicMaterial({ color: 0xffc060 })); lamp.position.set(lx, MINE_H - 0.55, z); scene.add(lamp);
@@ -5005,14 +5154,16 @@ function buildMineMouth() {
     part(g, ICO, lamb(0x5a5660), -3.4, 1.0, -1.2, 1.6, 1.8, 1.6); part(g, ICO, lamb(0x5a5660), 3.4, 1.2, -1.2, 1.6, 2.0, 1.6);
     part(g, BOX, tb, -1.35, 1.5, 0.35, 0.28, 3.0, 0.28); part(g, BOX, tb, 1.35, 1.5, 0.35, 0.28, 3.0, 0.28); part(g, BOX, tb, 0, 3.05, 0.35, 3.0, 0.28, 0.3);
     part(g, BOX, new THREE.MeshBasicMaterial({ color: 0x010204 }), 0, 1.45, -0.9, 2.5, 2.9, 2.6);
-    for (let i = 0; i < 7; i++) part(g, BOX, tb, 0, 0.06, 1.2 + i * 1.1, 1.4, 0.08, 0.2);
-    for (const sx of [-0.45, 0.45]) part(g, BOX, lamb(0x6a6a74), sx, 0.12, 4.5, 0.08, 0.08, 7.5);
-    part(g, BOX, lamb(0x5a3a22), 2.6, 0.55, 3.2, 1.2, 0.8, 1.7); part(g, BOX, lamb(0x8a8a96), 2.6, 1.0, 3.2, 1.0, 0.3, 1.4);
+    const swl = (lx, lz) => ({ x: MINE_MOUTH.x + Math.cos(yaw) * lx + Math.sin(yaw) * lz, z: MINE_MOUTH.z - Math.sin(yaw) * lx + Math.cos(yaw) * lz });
+    const hAt = lz => { const p = swl(0, lz); return terrain2(p.x, p.z) - gy; }, railM = lamb(0x6a6a74);
+    for (let i = 0; i < 9; i++) { const lz = -0.6 + i * 1.0; part(g, BOX, tb, 0, Math.max(hAt(lz), 0) + 0.03, lz, 1.4, 0.07, 0.2, 0, 0, 0); }
+    for (let i = 0; i < 8; i++) { const z0 = -0.6 + i, z1 = z0 + 1, y0 = Math.max(hAt(z0), 0) + 0.1, y1 = Math.max(hAt(z1), 0) + 0.1, L = Math.hypot(1, y1 - y0), pitch = -Math.atan2(y1 - y0, 1); for (const sx of [-0.45, 0.45]) part(g, BOX, railM, sx, (y0 + y1) / 2, (z0 + z1) / 2, 0.08, 0.08, L + 0.03, pitch); }
+    { const cy = Math.max(hAt(3.2), 0); part(g, BOX, lamb(0x5a3a22), 0, cy + 0.6, 3.2, 1.1, 0.7, 1.6); part(g, BOX, lamb(0x8a8a96), 0, cy + 1.0, 3.2, 0.9, 0.25, 1.4); for (const [wx2, wz2] of [[-0.45, 2.7], [0.45, 2.7], [-0.45, 3.7], [0.45, 3.7]]) part(g, CYL8, lamb(0x2a2a30), wx2, cy + 0.3, wz2, 0.18, 0.08, 0.18, 0, 0, Math.PI / 2); }
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.3, 0.22), new THREE.MeshBasicMaterial({ color: 0xffc060 })); lamp.position.set(0, 2.7, 0.55); g.add(lamp);
     const L = new THREE.PointLight(0xffb050, 8, 12, 1.6); L.position.set(0, 2.6, 1.2); g.add(L);
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.95), new THREE.MeshBasicMaterial({ map: signTex("OLD MINE", "ORE INSIDE", "#c0a080") })); sign.position.set(0, 4.95, 0.62); g.add(sign);
     const sw = (lx, lz) => ({ x: MINE_MOUTH.x + Math.cos(yaw) * lx + Math.sin(yaw) * lz, z: MINE_MOUTH.z - Math.sin(yaw) * lx + Math.cos(yaw) * lz });
-    for (const [lx, lz, r] of [[-2.2, -0.6, 1.3], [2.2, -0.6, 1.3], [2.6, 3.2, 1.0], [-3.4, -1.2, 1.5], [3.4, -1.2, 1.5]]) { const p = sw(lx, lz); circles.push({ x: p.x, z: p.z, r }); }
+    for (const [lx, lz, r] of [[-2.2, -0.6, 1.3], [2.2, -0.6, 1.3], [0, 3.2, 0.9], [-3.4, -1.2, 1.5], [3.4, -1.2, 1.5]]) { const p = sw(lx, lz); circles.push({ x: p.x, z: p.z, r }); }
     const l = label("OLD MINE", "#c0a080", 3.2, 0.8); l.position.set(MINE_MOUTH.x, gy + 6.4, MINE_MOUTH.z);
 }
 let mineCd = 0;
@@ -6183,7 +6334,7 @@ function enterIsle3() {
     waterMesh.geometry = isle3.waterGeo; waterMesh.material.needsUpdate = true;
     smokeEmit.length = 0; isle3.emit.forEach(e => smokeEmit.push(e));
     RESPAWN.x = 2; RESPAWN.z = 4;
-    save.ghosts = 0; syncGhosts();
+    syncGhosts();
     resetIsleTrees(95);
     resetChests();
     syncBoss();
@@ -6283,8 +6434,8 @@ function drawMap3() {
     for (const t of trees) {
         if (t.gone || t.dying || t.boss) continue;
         const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14;
-        g.fillStyle = near ? "#ff4a3a" : t.type.rare ? t.type.col : "rgba(40,30,80,.95)";
-        g.beginPath(); g.arc(X(t.x), Z(t.z), (t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill();
+        g.fillStyle = near ? "#ff4a3a" : t.mut ? mutCol(t.mut) : t.type.rare ? t.type.col : "rgba(40,30,80,.95)";
+        g.beginPath(); g.arc(X(t.x), Z(t.z), (t.mut ? 3.5 : t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill();
     }
     g.font = "bold 20px Segoe UI Symbol, sans-serif";
     for (const s of stars3) { g.fillStyle = "#fff4a0"; g.strokeStyle = "#000"; g.lineWidth = 3; g.strokeText("★", X(s.x), Z(s.z) + 7); g.fillText("★", X(s.x), Z(s.z) + 7); }
@@ -6642,14 +6793,14 @@ function finishRebirth3() {
 }
 function enterIsle4() {
     leaveWorld();
-    if (!isle4Built) { buildIsle4(); snapWorld(4); } else loadWorld(4);
+    if (!isle4Built) { buildIsle4(); buildCasino(4); snapWorld(4); } else loadWorld(4);
     isle = 4; save.isle = 4;
     showWorld(4);
     groundFn = groundY4;
     waterMesh.geometry = isle4.waterGeo; waterMesh.material.needsUpdate = true;
     smokeEmit.length = 0; isle4.emit.forEach(e => smokeEmit.push(e));
     RESPAWN.x = 2; RESPAWN.z = 4;
-    save.ghosts = 0; syncGhosts();
+    syncGhosts();
     resetIsleTrees(100);
     resetChests();
     syncKing();
@@ -6741,7 +6892,7 @@ function drawMap4() {
     for (const [B, DIR, , LEN, txt, colr] of [[ARR4B, ARR4DIR, 0, ARR4LEN, "ARRIVALS", "#ffa050"], [D4B, D4DIR, 0, D4LEN, "REBIRTH 4 FERRY", "#9fe8ff"]]) { const e = V3(B.x + DIR.x * LEN, 0, B.z + DIR.z * LEN); g.strokeStyle = colr; g.lineWidth = 4; g.beginPath(); g.moveTo(X(B.x), Z(B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); g.fillStyle = colr; g.font = "bold 12px Consolas"; g.fillText(txt, X(e.x), Z(e.z) + (e.z < 0 ? -8 : 16)); }
     { const dead = save.kingDay === save.day && save.kingKills > 0; g.font = "bold 22px Segoe UI Emoji, sans-serif"; g.fillStyle = "#ff7a3a"; g.fillText(dead ? "🪨" : "👑", X(VOLC.x), Z(VOLC.z) + 8); g.font = "bold 10px Consolas"; g.strokeStyle = "#000"; g.lineWidth = 3; const tx = dead ? "regrows at dawn" : "THE CINDER KING"; g.strokeText(tx, X(VOLC.x), Z(VOLC.z) + 24); g.fillStyle = "#ffc090"; g.fillText(tx, X(VOLC.x), Z(VOLC.z) + 24); }
     for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); g.strokeStyle = "#000"; g.lineWidth = 1; g.strokeRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
-    for (const t of trees) { if (t.gone || t.dying || t.boss) continue; const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14; g.fillStyle = near ? "#ff4a3a" : t.type.rare ? t.type.col : "rgba(30,20,16,.95)"; g.beginPath(); g.arc(X(t.x), Z(t.z), (t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill(); }
+    for (const t of trees) { if (t.gone || t.dying || t.boss) continue; const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14; g.fillStyle = near ? "#ff4a3a" : t.mut ? mutCol(t.mut) : t.type.rare ? t.type.col : "rgba(30,20,16,.95)"; g.beginPath(); g.arc(X(t.x), Z(t.z), (t.mut ? 3.5 : t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill(); }
     g.font = "bold 12px Consolas"; g.fillStyle = "#ffc890"; g.strokeStyle = "#000"; g.lineWidth = 3;
     for (const [t, x, z] of [["CAMP", 0, 9], ["CRUCIBLE", SMITH4.x - 8, SMITH4.z - 1], ["TRADING", DEPOT4.x + 9, DEPOT4.z - 1], ["ALCHEMIST", WITCH4.x + 6, WITCH4.z + 4]]) { g.strokeText(t, X(x), Z(z)); g.fillText(t, X(x), Z(z)); }
     g.fillStyle = "#fff"; g.fillText("N", c, 22);
@@ -7116,117 +7267,601 @@ function decorate(n) {
     for (const k in B) B[k].build();
 }
 
-// ---------- the animals ----------
+// ---------- the animals: proper rigs (legs that walk, heads that look around, tails, ears, blinking eyes) ----------
+// none of them ever attack: they graze, wander, play, and run away if you come too close
+function makeDeer() {
+    const g = new THREE.Group(), buck = Math.random() < 0.45, fur = amat(0x9a6434), pale = amat(0xf2e6cc), dark = amat(0x3a2414), hoof = amat(0x1a120c), ant = amat(0xd8c49a);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, fur, 0, 1.0, 0, 0.27, 0.3, 0.56);
+    part(body, SPH, fur, 0, 1.04, 0.34, 0.26, 0.31, 0.28);
+    part(body, SPH, fur, 0, 1.04, -0.38, 0.25, 0.29, 0.28);
+    part(body, SPH, pale, 0, 0.86, 0.06, 0.2, 0.13, 0.46);
+    part(body, SPH, pale, 0, 1.06, -0.6, 0.15, 0.17, 0.07);
+    if (!buck) for (let i = 0; i < 6; i++) part(body, SPH, pale, (i % 2 ? 0.12 : -0.12), 1.2 - (i % 3) * 0.04, -0.3 + i * 0.12, 0.03, 0.02, 0.03); // a doe's faint spots
+    const neck = pv(body, 0, 1.16, 0.48, 0.5);
+    part(neck, SPH, fur, 0, 0.24, 0, 0.11, 0.3, 0.12);
+    part(neck, SPH, pale, 0, 0.16, 0.07, 0.07, 0.16, 0.05);
+    const head = pv(neck, 0, 0.5, 0.02, -0.5);
+    part(head, SPH, fur, 0, 0, 0.02, 0.12, 0.12, 0.15);
+    part(head, SPH, fur, 0, -0.045, 0.16, 0.075, 0.07, 0.12);
+    part(head, SPH, pale, 0, -0.085, 0.15, 0.055, 0.03, 0.09);
+    part(head, BOX, dark, 0, -0.03, 0.275, 0.065, 0.05, 0.04);
+    const eyes = aEyes(head, 0.095, 0.03, 0.08, 0.03);
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.08, 0.08, -0.04, -0.2, 0, -s * 0.95); e.userData.rz0 = -s * 0.95; part(e, SPH, fur, 0, 0.1, 0, 0.045, 0.11, 0.022); part(e, SPH, pale, 0, 0.1, 0.012, 0.03, 0.08, 0.012); return e; });
+    if (buck) for (const s of [-1, 1]) {
+        const a = pv(head, s * 0.06, 0.11, -0.03, -0.35, 0, -s * 0.45);
+        part(a, BOX, ant, 0, 0.12, 0, 0.028, 0.24, 0.028);
+        part(a, BOX, ant, 0, 0.16, 0.05, 0.02, 0.12, 0.02, 0.9);
+        const b2 = pv(a, 0, 0.24, 0, 0.35, 0, s * 0.35);
+        part(b2, BOX, ant, 0, 0.1, 0, 0.024, 0.2, 0.024);
+        part(b2, BOX, ant, 0, 0.1, 0.04, 0.018, 0.1, 0.018, 0.8);
+        part(b2, BOX, ant, 0, 0.18, 0, 0.018, 0.1, 0.018, -0.2, 0, -s * 0.4);
+    }
+    const tail = pv(body, 0, 1.13, -0.64, 0.5);
+    part(tail, SPH, fur, 0, -0.06, -0.02, 0.055, 0.1, 0.04);
+    part(tail, SPH, pale, 0, -0.07, -0.045, 0.04, 0.08, 0.02);
+    const legs = [[-0.13, 0.36, 0], [0.13, 0.36, Math.PI], [-0.14, -0.4, Math.PI], [0.14, -0.4, 0]].map(([x, z, ph]) => { const p = aLeg(g, x, 0.95, z, 0.92, 0.05, fur, hoof); part(p, SPH, fur, 0, -0.12, 0, 0.085, 0.2, z < 0 ? 0.13 : 0.1); return { p, ph }; });
+    g.userData.rig = { body, neck, nx0: 0.5, ngraze: 1.75, nrun: 0.25, head, hx0: -0.5, legs, tail: [tail], tailFlick: 0.5, ears, eyes, stride: 3.6, swing: 0.55, bob: 0.05 };
+    return g;
+}
+function makeRabbit() {
+    const g = new THREE.Group(), fur = amat([0xb09a80, 0x8a7a68, 0xd8ccbc][Math.floor(Math.random() * 3)]), pale = amat(0xf4eee4), pink = amat(0xf0a0a8);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, fur, 0, 0.2, -0.04, 0.15, 0.15, 0.21);
+    part(body, SPH, fur, 0, 0.19, -0.14, 0.15, 0.15, 0.13);
+    for (const s of [-1, 1]) { part(body, SPH, fur, s * 0.1, 0.13, -0.12, 0.06, 0.1, 0.12); part(body, BOX, fur, s * 0.09, 0.025, -0.06, 0.055, 0.04, 0.17); }
+    part(body, SPH, pale, 0, 0.15, 0.07, 0.1, 0.1, 0.1);
+    const tail = pv(body, 0, 0.24, -0.27); part(tail, SPH, pale, 0, 0, 0, 0.055, 0.055, 0.05);
+    const legs = [-1, 1].map(s => ({ p: aLeg(body, s * 0.06, 0.12, 0.12, 0.11, 0.022, fur, pale), ph: s > 0 ? Math.PI : 0 }));
+    const head = pv(body, 0, 0.3, 0.14);
+    part(head, SPH, fur, 0, 0, 0.03, 0.1, 0.09, 0.11);
+    for (const s of [-1, 1]) part(head, SPH, pale, s * 0.035, -0.03, 0.1, 0.035, 0.035, 0.035);
+    part(head, SPH, pink, 0, 0, 0.135, 0.018, 0.014, 0.012);
+    const eyes = aEyes(head, 0.065, 0.025, 0.075, 0.024);
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.035, 0.06, -0.01, -0.25, 0, -s * 0.12); e.userData.rz0 = -s * 0.12; e.userData.rx0 = -0.25; part(e, SPH, fur, 0, 0.11, 0, 0.032, 0.12, 0.016); part(e, SPH, pink, 0, 0.11, 0.008, 0.02, 0.09, 0.01); return e; });
+    g.userData.rig = { body, head, legs, ears, eyes, tail: [tail], wagA: 0.15, wag: 6 };
+    return g;
+}
+function makeSquirrel() {
+    const g = new THREE.Group(), fur = amat(0xa65a2a), pale = amat(0xf0dcc0), tip = amat(0xc87a44);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, fur, 0, 0.14, -0.02, 0.09, 0.1, 0.14);
+    part(body, SPH, pale, 0, 0.12, 0.06, 0.06, 0.07, 0.06);
+    for (const s of [-1, 1]) { part(body, SPH, fur, s * 0.06, 0.09, -0.07, 0.045, 0.07, 0.08); part(body, BOX, fur, s * 0.055, 0.02, -0.03, 0.035, 0.03, 0.1); }
+    const arms = [-1, 1].map(s => { const a = pv(body, s * 0.04, 0.12, 0.1, 0.3); part(a, BOX, fur, 0, -0.04, 0, 0.022, 0.08, 0.022); return a; });
+    const head = pv(body, 0, 0.22, 0.11);
+    part(head, SPH, fur, 0, 0, 0.02, 0.065, 0.06, 0.075);
+    part(head, SPH, pale, 0, -0.02, 0.06, 0.04, 0.03, 0.04);
+    part(head, BOX, aglow(0x1a0c08), 0, 0, 0.1, 0.02, 0.015, 0.01);
+    const eyes = aEyes(head, 0.045, 0.02, 0.05, 0.016);
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.035, 0.05, -0.01, 0, 0, -s * 0.2); e.userData.rz0 = -s * 0.2; part(e, CONE4, fur, 0, 0.03, 0, 0.022, 0.05, 0.012); return e; });
+    // a big bushy tail rising up behind and curling forward over the back
+    const t0 = pv(body, 0, 0.13, -0.14, -0.9); part(t0, SPH, fur, 0, 0.08, 0, 0.06, 0.1, 0.06);
+    const t1 = pv(t0, 0, 0.16, 0, 0.6); part(t1, SPH, fur, 0, 0.08, 0, 0.08, 0.11, 0.07);
+    const t2 = pv(t1, 0, 0.15, 0, 0.9); part(t2, SPH, tip, 0, 0.06, 0, 0.07, 0.09, 0.06);
+    g.userData.rig = { body, head, ears, eyes, arms, tailChain: [t0, t1, t2], tail0: [-0.9, 0.6, 0.9] };
+    return g;
+}
 function makeGoat() {
-    const g = new THREE.Group(), w = lamb(0xeeeae0), dk = lamb(0x3a3430), horn = lamb(0x8a8070);
-    bx(g, w, 0, 0.75, 0, 0.5, 0.5, 0.95); bx(g, w, 0, 1.05, 0.5, 0.3, 0.32, 0.36); bx(g, dk, 0, 0.98, 0.72, 0.16, 0.14, 0.12);
-    bx(g, w, 0, 0.86, 0.66, 0.08, 0.2, 0.06); // beard
-    for (const s of [-1, 1]) bx(g, horn, s * 0.1, 1.32, 0.42, 0.06, 0.3, 0.06, -0.7, 0, s * 0.2);
-    for (const [x, z] of [[-0.15, 0.32], [0.15, 0.32], [-0.15, -0.32], [0.15, -0.32]]) bx(g, dk, x, 0.27, z, 0.09, 0.55, 0.09);
+    const g = new THREE.Group(), w = amat(0xeee8dc), shag = amat(0xd6ccbc), horn = amat(0x8a7a64), dk = amat(0x3a3028), hoof = amat(0x2a221c);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, w, 0, 0.8, 0, 0.27, 0.29, 0.46);
+    part(body, SPH, w, 0, 0.84, 0.28, 0.25, 0.29, 0.25);
+    part(body, SPH, w, 0, 0.83, -0.3, 0.24, 0.27, 0.24);
+    for (let i = 0; i < 6; i++) part(body, BOX, shag, (i % 2 ? 1 : -1) * 0.12, 0.57, -0.25 + i * 0.1, 0.07, 0.16, 0.08); // shaggy belly fringe
+    const neck = pv(body, 0, 0.92, 0.4, 0.55);
+    part(neck, SPH, w, 0, 0.16, 0, 0.11, 0.22, 0.12);
+    const head = pv(neck, 0, 0.34, 0.02, -0.55);
+    part(head, SPH, w, 0, 0, 0.02, 0.11, 0.12, 0.13);
+    part(head, SPH, w, 0, -0.07, 0.15, 0.07, 0.07, 0.12);
+    part(head, BOX, dk, 0, -0.06, 0.265, 0.06, 0.04, 0.03);
+    part(head, BOX, shag, 0, -0.19, 0.13, 0.05, 0.14, 0.05, 0.2);
+    const eyes = [-1, 1].map(s => { const e = pv(head, s * 0.085, 0.03, 0.07); part(e, SPH, aglow(0xd8b040), 0, 0, 0, 0.026, 0.026, 0.02); part(e, BOX, aglow(0x100c08), 0, 0, 0.018, 0.034, 0.009, 0.006); return e; });
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.1, 0.03, -0.03, 0, 0, -s * 1.45); e.userData.rz0 = -s * 1.45; part(e, SPH, w, 0, 0.08, 0, 0.032, 0.08, 0.018); return e; });
+    for (const s of [-1, 1]) { // ridged horns sweeping back
+        let p = pv(head, s * 0.05, 0.1, -0.02, -0.55, 0, -s * 0.15);
+        for (let i = 0; i < 4; i++) { part(p, BOX, horn, 0, 0.045, 0, 0.042 - i * 0.006, 0.1, 0.046 - i * 0.006); p = pv(p, 0, 0.09, 0, -0.42, 0, -s * 0.08); }
+    }
+    const tail = pv(body, 0, 0.94, -0.52, -0.5); part(tail, SPH, w, 0, 0.05, 0, 0.045, 0.08, 0.03);
+    const legs = [[-0.13, 0.3, 0], [0.13, 0.3, Math.PI], [-0.13, -0.32, Math.PI], [0.13, -0.32, 0]].map(([x, z, ph]) => { const p = aLeg(g, x, 0.64, z, 0.6, 0.055, w, hoof); part(p, SPH, w, 0, -0.1, 0, 0.08, 0.16, 0.1); return { p, ph }; });
+    g.userData.rig = { body, neck, nx0: 0.55, ngraze: 1.8, nrun: 0.2, head, hx0: -0.55, legs, tail: [tail], wag: 7, wagA: 0.35, ears, eyes, stride: 4.4, swing: 0.6, bob: 0.04 };
     return g;
 }
 function makeMarmot() {
-    const g = new THREE.Group(), fur = lamb(0x8a6a44), pale = lamb(0xd8c4a0);
-    const body = new THREE.Group(); g.add(body);
-    part(body, ICO, fur, 0, 0.28, 0, 0.26, 0.3, 0.26); part(body, ICO, pale, 0, 0.26, 0.12, 0.17, 0.22, 0.14); part(body, ICO, fur, 0, 0.6, 0.04, 0.16, 0.15, 0.16);
-    bx(body, lamb(0x1a1410), 0, 0.62, 0.19, 0.05, 0.04, 0.03);
-    g.userData.body = body;
+    const g = new THREE.Group(), fur = amat(0x8a6a44), dk = amat(0x5a4028), pale = amat(0xd8c4a0);
+    const body = pv(g, 0, 0, -0.05); // pivots at its haunches: tip it forward to drop onto all fours
+    part(body, SPH, fur, 0, 0.26, 0, 0.2, 0.26, 0.18);
+    part(body, SPH, pale, 0, 0.26, 0.08, 0.14, 0.2, 0.12);
+    const head = pv(body, 0, 0.54, 0.04);
+    part(head, SPH, fur, 0, 0.02, 0, 0.12, 0.11, 0.12);
+    part(head, SPH, pale, 0, -0.02, 0.09, 0.065, 0.05, 0.06);
+    part(head, BOX, aglow(0x1a1410), 0, 0.005, 0.15, 0.03, 0.02, 0.015);
+    part(head, BOX, aglow(0xfff8e8), 0, -0.06, 0.13, 0.025, 0.03, 0.01);
+    for (const s of [-1, 1]) part(head, SPH, dk, s * 0.085, 0.09, -0.02, 0.03, 0.03, 0.02);
+    const eyes = aEyes(head, 0.07, 0.04, 0.08, 0.02);
+    const arms = [-1, 1].map(s => { const a = pv(body, s * 0.09, 0.38, 0.12, 0.5); part(a, BOX, fur, 0, -0.05, 0, 0.04, 0.11, 0.04); part(a, BOX, dk, 0, -0.11, 0.01, 0.045, 0.025, 0.05); return a; });
+    for (const s of [-1, 1]) part(g, BOX, dk, s * 0.1, 0.025, 0.04, 0.07, 0.05, 0.12);
+    const tail = pv(body, 0, 0.1, -0.16); part(tail, SPH, dk, 0, 0, -0.08, 0.055, 0.04, 0.12);
+    g.userData.rig = { body, head, eyes, arms, tail: [tail], wagA: 0.2 };
     return g;
 }
 function makeEagle() {
-    const g = new THREE.Group(), br = lamb(0x4a3020), wh = lamb(0xf4f0e8), ye = lamb(0xffc030);
-    part(g, ICO, br, 0, 0, 0, 0.3, 0.26, 0.7); part(g, ICO, wh, 0, 0.08, 0.6, 0.2, 0.2, 0.22); bx(g, ye, 0, 0.04, 0.82, 0.07, 0.07, 0.14); bx(g, wh, 0, 0, -0.7, 0.36, 0.05, 0.3);
-    const wl = bx(g, br, -0.9, 0.05, 0, 1.5, 0.05, 0.5), wr = bx(g, br, 0.9, 0.05, 0, 1.5, 0.05, 0.5);
-    g.userData.wings = [wl, wr];
+    const g = new THREE.Group(), br = amat(0x5a3a22), dk = amat(0x3a2414), mid = amat(0x7a5232), wh = amat(0xf6f2ea), ye = amat(0xf0b020);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, br, 0, 0, 0, 0.18, 0.17, 0.5);
+    part(body, SPH, mid, 0, -0.03, 0.18, 0.15, 0.14, 0.24);
+    const head = pv(body, 0, 0.06, 0.46);
+    part(head, SPH, wh, 0, 0, 0.02, 0.12, 0.12, 0.15);
+    part(head, CONE6, ye, 0, -0.01, 0.2, 0.045, 0.12, 0.05, Math.PI / 2 + 0.35);
+    aEyes(head, 0.07, 0.03, 0.08, 0.018);
+    for (let i = -2; i <= 2; i++) part(body, BOX, wh, i * 0.05, 0, -0.62 - Math.abs(i) * 0.015, 0.075, 0.018, 0.3, 0, i * 0.18);
+    for (const s of [-1, 1]) part(body, BOX, ye, s * 0.06, -0.15, -0.28, 0.035, 0.03, 0.12);
+    const wings = [-1, 1].map(s => {
+        const sh = pv(body, s * 0.14, 0.05, 0.04);
+        part(sh, BOX, br, s * 0.38, 0, 0, 0.76, 0.045, 0.46);
+        part(sh, BOX, mid, s * 0.36, 0.02, 0.12, 0.66, 0.03, 0.18);
+        const el = pv(sh, s * 0.74, 0, 0);
+        part(el, BOX, dk, s * 0.3, 0, -0.04, 0.6, 0.035, 0.36);
+        for (let f = 0; f < 5; f++) part(el, BOX, dk, s * (0.62 + f * 0.025), 0, 0.1 - f * 0.065, 0.32, 0.02, 0.06, 0, s * (0.25 - f * 0.12), 0);
+        return { sh, el, s };
+    });
+    g.userData.rig = { body, head, wings2: wings };
     return g;
 }
 function makeFox() {
-    const g = new THREE.Group(), fur = lamb(0x9ab0d8), pale = lamb(0xeef4ff), dk = lamb(0x2a2a3a), tip = glowB(0x9fffff);
-    bx(g, fur, 0, 0.5, 0, 0.36, 0.34, 0.85); bx(g, pale, 0, 0.38, 0.1, 0.3, 0.12, 0.6);
-    bx(g, fur, 0, 0.72, 0.5, 0.32, 0.3, 0.32); bx(g, pale, 0, 0.66, 0.72, 0.16, 0.14, 0.2); bx(g, dk, 0, 0.7, 0.82, 0.06, 0.06, 0.05);
-    for (const s of [-1, 1]) bx(g, fur, s * 0.1, 0.94, 0.48, 0.08, 0.18, 0.05);
-    bx(g, fur, 0, 0.62, -0.62, 0.2, 0.2, 0.5, 0.5); part(g, ICO, tip, 0, 0.82, -0.84, 0.13, 0.13, 0.16);
-    for (const [x, z] of [[-0.11, 0.3], [0.11, 0.3], [-0.11, -0.3], [0.11, -0.3]]) bx(g, dk, x, 0.17, z, 0.07, 0.34, 0.07);
+    const g = new THREE.Group(), fur = amat(0x9ab4dc, 0x0a1428), pale = amat(0xeef4ff, 0x10141c), dk = amat(0x2a3050), tipM = aglow(0xa8fff8);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, fur, 0, 0.5, -0.02, 0.17, 0.18, 0.38);
+    part(body, SPH, fur, 0, 0.52, 0.22, 0.16, 0.18, 0.18);
+    part(body, SPH, pale, 0, 0.42, 0.12, 0.12, 0.1, 0.24);
+    const neck = pv(body, 0, 0.6, 0.32, 0.7);
+    part(neck, SPH, fur, 0, 0.08, 0, 0.1, 0.14, 0.1); part(neck, SPH, pale, 0, 0.06, 0.05, 0.07, 0.11, 0.05);
+    const head = pv(neck, 0, 0.18, 0.02, -0.7);
+    part(head, SPH, fur, 0, 0, 0, 0.12, 0.1, 0.11);
+    part(head, CONE6, fur, 0, -0.025, 0.15, 0.06, 0.18, 0.05, Math.PI / 2);
+    part(head, SPH, pale, 0, -0.05, 0.09, 0.07, 0.04, 0.08);
+    part(head, BOX, aglow(0x101018), 0, -0.02, 0.245, 0.03, 0.025, 0.02);
+    const eyes = aEyes(head, 0.065, 0.025, 0.08, 0.022, aglow(0x7affff));
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.065, 0.07, -0.02, -0.1, 0, -s * 0.3); e.userData.rz0 = -s * 0.3; part(e, CONE4, fur, 0, 0.07, 0, 0.055, 0.15, 0.025); part(e, CONE4, dk, 0, 0.065, 0.01, 0.035, 0.11, 0.012); return e; });
+    const t0 = pv(body, 0, 0.56, -0.36, -2.2); part(t0, SPH, fur, 0, 0.13, 0, 0.08, 0.16, 0.08);
+    const t1 = pv(t0, 0, 0.26, 0, 0.35); part(t1, SPH, fur, 0, 0.1, 0, 0.1, 0.15, 0.1); part(t1, SPH, tipM, 0, 0.24, 0, 0.07, 0.09, 0.07);
+    const legs = [[-0.09, 0.22, 0], [0.09, 0.22, Math.PI], [-0.09, -0.24, Math.PI], [0.09, -0.24, 0]].map(([x, z, ph]) => { const p = aLeg(g, x, 0.46, z, 0.44, 0.035, fur, dk); part(p, TAPR, dk, 0, -0.33, 0, 0.032, 0.2, 0.032); return { p, ph }; });
+    g.userData.rig = { body, neck, nx0: 0.7, ngraze: 1.6, nrun: 0.3, head, hx0: -0.7, legs, tail: [t0, t1], wagA: 0.25, ears, eyes, stride: 5.5, swing: 0.65, bob: 0.03, sitTilt: true, sitDrop: 0.1, sleepDrop: 0.3 };
     return g;
 }
 function makeShroomling() {
-    const g = new THREE.Group(), cap = glowL([0xc06ad8, 0x6a8aff, 0xff7ad8][Math.floor(Math.random() * 3)], 0x200a30), stem = lamb(0xf0e6d4), eye = glowB(0x1a0a20);
-    const body = new THREE.Group(); g.add(body);
-    part(body, CYL6, stem, 0, 0.18, 0, 0.12, 0.34, 0.12); part(body, ICO, cap, 0, 0.4, 0, 0.3, 0.17, 0.3);
-    for (const s of [-1, 1]) bx(body, eye, s * 0.05, 0.24, 0.115, 0.03, 0.05, 0.02);
-    for (let i = 0; i < 3; i++) part(body, ICO, glowB(0xffffff), Math.cos(i * 2.1) * 0.16, 0.5, Math.sin(i * 2.1) * 0.16, 0.04, 0.04, 0.04);
-    g.userData.body = body;
+    const cols = [[0xc06ad8, 0x2a0a3a], [0x6a8aff, 0x0a1a4a], [0xff7ad8, 0x3a0a2a], [0x7affd0, 0x0a3a2a]], [cc, ce] = cols[Math.floor(Math.random() * cols.length)];
+    const g = new THREE.Group(), cap = amat(cc, ce), stem = amat(0xf2e8d8, 0x1a1418), gill = amat(0xe0d0c8), spot = aglow(0xffffff);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, stem, 0, 0.17, 0, 0.11, 0.15, 0.1);
+    const capP = pv(body, 0, 0.29, 0);
+    part(capP, CAPG, cap, 0, 0, 0, 0.25, 0.18, 0.25);
+    part(capP, CYL8, gill, 0, 0, 0, 0.24, 0.015, 0.24);
+    for (let i = 0; i < 6; i++) { const a = i * 1.05 + 0.3, e = i === 5 ? 1.45 : 0.75; part(capP, SPH, spot, Math.cos(a) * Math.cos(e) * 0.25, Math.sin(e) * 0.18, Math.sin(a) * Math.cos(e) * 0.25, 0.035, 0.02, 0.035); }
+    const eyes = aEyes(body, 0.045, 0.2, 0.09, 0.024);
+    part(body, BOX, aglow(0x3a1a2a), 0, 0.14, 0.1, 0.03, 0.012, 0.01);
+    for (const s of [-1, 1]) part(body, BOX, aglow(0xff9ab8), s * 0.07, 0.165, 0.085, 0.025, 0.012, 0.01);
+    const legs = [-1, 1].map(s => { const p = pv(g, s * 0.05, 0.07, 0); part(p, SPH, stem, 0, -0.04, 0.01, 0.04, 0.035, 0.055); return { p, ph: s > 0 ? Math.PI : 0 }; });
+    const arms = [-1, 1].map(s => { const a = pv(body, s * 0.1, 0.19, 0, 0, 0, s * 0.6); part(a, SPH, stem, 0, -0.04, 0, 0.025, 0.05, 0.025); return a; });
+    g.userData.rig = { body, capP, eyes, legs, arms, stride: 9, swing: 0.7, capCol: cc };
     return g;
 }
 function makeSnail() {
-    const g = new THREE.Group(), skin = lamb(0xc8b8a0), shell = glowL(0x7a4ad8, 0x2a0a6a);
-    bx(g, skin, 0, 0.06, 0.05, 0.12, 0.08, 0.42); part(g, ICO, shell, 0, 0.2, -0.04, 0.17, 0.18, 0.14);
-    for (const s of [-1, 1]) { bx(g, skin, s * 0.04, 0.16, 0.24, 0.02, 0.14, 0.02, 0.3); part(g, ICO, glowB(0x9fffff), s * 0.04, 0.24, 0.27, 0.025, 0.025, 0.025); }
+    const g = new THREE.Group(), skin = amat(0xcfc0a8, 0x14100c), shell = amat(0x7a4ad8, 0x2a0a6a), band = aglow(0xc8a0ff), tip = aglow(0x9fffff);
+    const foot = pv(g, 0, 0, 0);
+    const segs = [[0.14, 0.065], [0, 0.075], [-0.14, 0.06]].map(([z, w]) => part(foot, SPH, skin, 0, 0.045, z, w, 0.045, 0.1));
+    const head = pv(foot, 0, 0.07, 0.24);
+    part(head, SPH, skin, 0, 0, 0, 0.055, 0.05, 0.065);
+    const stalks = [-1, 1].map(s => { const p = pv(head, s * 0.025, 0.03, 0.02, -0.35, 0, -s * 0.25); part(p, BOX, skin, 0, 0.06, 0, 0.012, 0.12, 0.012); part(p, SPH, tip, 0, 0.125, 0, 0.018, 0.018, 0.018); return p; });
+    for (const s of [-1, 1]) part(head, BOX, skin, s * 0.02, -0.02, 0.06, 0.008, 0.008, 0.05, 0.3);
+    const sh = pv(foot, 0, 0.17, -0.04);
+    part(sh, SPH, shell, 0, 0, 0, 0.14, 0.15, 0.14);
+    part(sh, SPH, shell, 0, 0.07, -0.08, 0.08, 0.08, 0.07);
+    for (const s of [-1, 1]) { part(sh, TOR, band, s * 0.1, 0, 0, 0.09, 0.09, 0.09, 0, Math.PI / 2, 0); part(sh, TOR, band, s * 0.12, 0.01, 0.01, 0.045, 0.045, 0.045, 0, Math.PI / 2, 0); }
+    g.userData.rig = { foot, segs, head, stalks, sh };
     return g;
 }
 function makeMoth() {
-    const g = new THREE.Group(), m = new THREE.MeshBasicMaterial({ color: [0xcff4ff, 0xe8d0ff, 0xb8fff0][Math.floor(Math.random() * 3)], side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
-    part(g, ICO, glowB(0x6a5a8a), 0, 0, 0, 0.04, 0.04, 0.12);
-    const wl = part(g, BOX, m, -0.13, 0, 0, 0.24, 0.01, 0.2), wr = part(g, BOX, m, 0.13, 0, 0, 0.24, 0.01, 0.2);
-    g.userData.wings = [wl, wr]; g.scale.setScalar(1.5);
+    const pal = [[0xcff4ff, 0x6ad8ff], [0xe8d0ff, 0xa06aff], [0xb8fff0, 0x3affc8], [0xfff0c0, 0xffb060]][Math.floor(Math.random() * 4)];
+    const g = new THREE.Group(), wm = aglow(pal[0], 0.92), wa = aglow(pal[1], 0.95), bodyM = amat(0x8a7aa0, 0x2a1a3a);
+    part(g, SPH, bodyM, 0, 0, -0.02, 0.03, 0.03, 0.09);
+    part(g, SPH, bodyM, 0, 0.005, 0.07, 0.028, 0.028, 0.03);
+    for (const s of [-1, 1]) part(g, BOX, bodyM, s * 0.03, 0.03, 0.12, 0.006, 0.006, 0.09, -0.5, s * 0.5, 0);
+    const mk = (s, fore) => { const p = pv(g, s * 0.015, 0.01, fore ? 0.02 : -0.02), w = fore ? [0.19, 0.13] : [0.14, 0.1], ry = s * (fore ? -0.25 : 0.35); part(p, BOX, wm, s * w[0] / 2, 0, fore ? 0.01 : -0.03, w[0], 0.006, w[1], 0, ry, 0); part(p, BOX, wa, s * w[0] * 0.62, 0.004, fore ? 0 : -0.04, w[0] * 0.3, 0.006, w[1] * 0.35, 0, ry, 0); return p; };
+    g.scale.setScalar(1.6);
+    g.userData.rig = { fw: [mk(-1, true), mk(1, true)], hw: [mk(-1, false), mk(1, false)] };
     return g;
 }
 function makeSalamander() {
-    const g = new THREE.Group(), sk = lamb(0x1a1412), sp = glowB(0xff7a1a);
-    bx(g, sk, 0, 0.08, 0, 0.16, 0.1, 0.5); bx(g, sk, 0, 0.09, 0.32, 0.13, 0.08, 0.16); bx(g, sk, 0, 0.06, -0.42, 0.07, 0.05, 0.4, 0, 0.15);
-    for (let i = 0; i < 4; i++) bx(g, sp, (i % 2 ? 0.05 : -0.05), 0.14, 0.2 - i * 0.14, 0.05, 0.02, 0.05);
-    for (const [x, z] of [[-0.11, 0.14], [0.11, 0.14], [-0.11, -0.14], [0.11, -0.14]]) bx(g, sk, x, 0.04, z, 0.1, 0.04, 0.04);
+    const g = new THREE.Group(), sk = amat(0x1e1612), belly = amat(0x4a2414), spot = aglow(0xff7a1a), eyeM = aglow(0xffd040);
+    const root = pv(g, 0, 0.06, 0);
+    const s0 = pv(root, 0, 0, 0.08); part(s0, SPH, sk, 0, 0, 0, 0.075, 0.05, 0.11); part(s0, SPH, belly, 0, -0.02, 0, 0.06, 0.03, 0.09);
+    for (const s of [-1, 1]) part(s0, SPH, spot, s * 0.03, 0.04, 0.02, 0.02, 0.015, 0.02);
+    const head = pv(s0, 0, 0.01, 0.12); part(head, SPH, sk, 0, 0, 0.04, 0.065, 0.04, 0.075); aEyes(head, 0.045, 0.025, 0.05, 0.016, eyeM, false);
+    const chain = [s0], dims = [[0.08, 0.05, 0.11], [0.06, 0.042, 0.1], [0.045, 0.034, 0.1], [0.03, 0.025, 0.1], [0.018, 0.016, 0.09]];
+    let prev = s0;
+    dims.forEach((d, i) => { const p = pv(prev, 0, 0, i === 0 ? -0.14 : -0.15 + i * 0.01); part(p, SPH, sk, 0, 0, 0, d[0], d[1], d[2]); if (i < 3) for (const s of [-1, 1]) part(p, SPH, spot, s * d[0] * 0.45, d[1] * 0.75, s * 0.03, d[0] * 0.3, d[0] * 0.2, d[0] * 0.3); chain.push(p); prev = p; });
+    const legs = [];
+    for (const [seg, z] of [[s0, 0.03], [chain[1], -0.01]]) for (const s of [-1, 1]) { const p = pv(seg, s * 0.06, -0.01, z); part(p, BOX, sk, s * 0.045, 0, 0, 0.09, 0.022, 0.025); part(p, BOX, sk, s * 0.085, -0.03, 0.01, 0.02, 0.05, 0.02); part(p, BOX, sk, s * 0.09, -0.055, 0.02, 0.04, 0.008, 0.04); legs.push({ p, s, ph: (seg === s0) === (s > 0) ? 0 : Math.PI }); }
+    g.scale.setScalar(1.25);
+    g.userData.rig = { chain, head, legs };
     return g;
 }
 function makeBeetle() {
-    const g = new THREE.Group(), sh = glowL(0xff5a1a, 0x5a1a00), dk = lamb(0x140c0a);
-    part(g, ICO, sh, 0, 0.1, -0.02, 0.15, 0.09, 0.2); part(g, ICO, dk, 0, 0.08, 0.18, 0.08, 0.06, 0.07);
-    for (const z of [-0.08, 0.02, 0.12]) for (const s of [-1, 1]) bx(g, dk, s * 0.15, 0.04, z, 0.12, 0.02, 0.02, 0, 0, s * 0.4);
+    const g = new THREE.Group(), shell = amat(0xff5a1a, 0x6a1a00), dk = amat(0x140c0a), seam = aglow(0xffc050), wingM = aglow(0xffd0a0, 0.45);
+    const body = pv(g, 0, 0.07, 0);
+    part(body, SPH, dk, 0, -0.01, -0.03, 0.1, 0.05, 0.14);
+    part(body, SPH, dk, 0, 0, 0.11, 0.075, 0.05, 0.06);
+    const head = pv(body, 0, 0, 0.17); part(head, SPH, dk, 0, 0, 0.02, 0.05, 0.035, 0.045);
+    for (const s of [-1, 1]) { part(head, BOX, dk, s * 0.025, -0.01, 0.07, 0.012, 0.012, 0.05, 0, -s * 0.5, 0); part(head, BOX, dk, s * 0.03, 0.03, 0.08, 0.006, 0.006, 0.09, -0.6, s * 0.4, 0); }
+    aEyes(head, 0.04, 0.01, 0.03, 0.012, aglow(0xffd040), false);
+    const elytra = [-1, 1].map(s => { const p = pv(body, s * 0.004, 0.03, 0.08); part(p, SPH, shell, s * 0.055, 0.005, -0.1, 0.06, 0.045, 0.14); part(p, BOX, seam, s * 0.003, 0.045, -0.1, 0.006, 0.006, 0.24); return p; });
+    const uw = [-1, 1].map(s => { const p = pv(body, s * 0.02, 0.03, 0.04); part(p, BOX, wingM, s * 0.1, 0, -0.05, 0.2, 0.004, 0.1, 0, s * 0.3, 0); p.visible = false; return p; });
+    const legs = [];
+    for (const z of [0.1, 0.02, -0.07]) for (const s of [-1, 1]) { const p = pv(body, s * 0.06, -0.02, z); part(p, BOX, dk, s * 0.05, 0, 0, 0.1, 0.014, 0.014, 0, 0, -s * 0.5); part(p, BOX, dk, s * 0.11, -0.045, 0, 0.014, 0.07, 0.014, 0, 0, -s * 0.2); legs.push({ p, s, ph: ((z > 0.05 || z < -0.05) === (s > 0)) ? 0 : Math.PI }); }
+    g.scale.setScalar(1.4);
+    g.userData.rig = { body, head, elytra, uw, legs };
     return g;
 }
 const crowMat = lamb(0x14121a);
 function makeCrow() {
-    const g = new THREE.Group();
-    part(g, ICO, crowMat, 0, 0.25, 0, 0.14, 0.15, 0.28); part(g, ICO, crowMat, 0, 0.42, 0.2, 0.1, 0.1, 0.1); bx(g, lamb(0x3a3438), 0, 0.4, 0.32, 0.04, 0.04, 0.1);
-    bx(g, glowB(0xff9a3a), 0.06, 0.45, 0.25, 0.02, 0.02, 0.02); bx(g, glowB(0xff9a3a), -0.06, 0.45, 0.25, 0.02, 0.02, 0.02);
-    const wl = bx(g, crowMat, -0.28, 0.3, 0, 0.45, 0.03, 0.2), wr = bx(g, crowMat, 0.28, 0.3, 0, 0.45, 0.03, 0.2);
-    for (const w of [wl, wr]) w.visible = false;
-    g.userData.wings = [wl, wr];
+    const g = new THREE.Group(), beak = amat(0x2a262c), eyeM = aglow(0xff9a3a), leg = amat(0x2a2228);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, crowMat, 0, 0.24, -0.02, 0.12, 0.12, 0.22);
+    part(body, BOX, crowMat, 0, 0.23, -0.3, 0.13, 0.02, 0.2, -0.25);
+    const head = pv(body, 0, 0.34, 0.16);
+    part(head, SPH, crowMat, 0, 0.02, 0.02, 0.085, 0.08, 0.095);
+    part(head, CONE6, beak, 0, 0.005, 0.15, 0.028, 0.12, 0.03, Math.PI / 2);
+    aEyes(head, 0.055, 0.035, 0.06, 0.016, eyeM, false);
+    const legs = [-1, 1].map(s => ({ p: aLeg(g, s * 0.04, 0.14, 0, 0.13, 0.012, leg, leg, 0.04), ph: s > 0 ? Math.PI : 0 }));
+    const wings = [-1, 1].map(s => {
+        const sh = pv(body, s * 0.1, 0.29, 0.04);
+        part(sh, BOX, crowMat, s * 0.15, 0, 0, 0.3, 0.025, 0.22);
+        const el = pv(sh, s * 0.29, 0, 0);
+        part(el, BOX, crowMat, s * 0.12, 0, -0.03, 0.24, 0.02, 0.17);
+        for (let f = 0; f < 4; f++) part(el, BOX, crowMat, s * (0.24 + f * 0.015), 0, 0.03 - f * 0.05, 0.13, 0.012, 0.04, 0, s * (0.2 - f * 0.13), 0);
+        return { sh, el, s };
+    });
+    g.userData.rig = { body, head, legs, wings2: wings, stride: 8, swing: 0.6 };
     return g;
 }
-function makeSquirrel() {
-    const g = new THREE.Group(), fur = lamb(0xa0582a), pale = lamb(0xe8d0b0);
-    part(g, ICO, fur, 0, 0.2, 0, 0.13, 0.15, 0.2); part(g, ICO, pale, 0, 0.18, 0.08, 0.09, 0.1, 0.1); part(g, ICO, fur, 0, 0.34, 0.14, 0.1, 0.1, 0.1);
-    for (const s of [-1, 1]) bx(g, fur, s * 0.05, 0.45, 0.13, 0.03, 0.07, 0.02);
-    part(g, ICO, fur, 0, 0.42, -0.2, 0.12, 0.26, 0.1, -0.4);
+const batWingGeo = (() => { const sh = new THREE.Shape(); sh.moveTo(0, 0.04); sh.lineTo(0.18, 0.09); sh.lineTo(0.34, 0.05); sh.lineTo(0.4, -0.04); sh.lineTo(0.3, -0.02); sh.lineTo(0.24, -0.1); sh.lineTo(0.15, -0.05); sh.lineTo(0.07, -0.11); sh.lineTo(0, -0.06); sh.closePath(); const geo = new THREE.ShapeGeometry(sh); geo.rotateX(Math.PI / 2); return geo; })();
+function makeBat(eyeCol = 0xff6a3a) {
+    const g = new THREE.Group(), fur = amat(0x2a1a24), mem = amat(0x3a2230, 0, true);
+    part(g, SPH, fur, 0, 0, 0, 0.05, 0.05, 0.08);
+    const head = pv(g, 0, 0.02, 0.07); part(head, SPH, fur, 0, 0, 0.01, 0.04, 0.04, 0.04);
+    for (const s of [-1, 1]) part(head, CONE4, fur, s * 0.025, 0.045, 0, 0.018, 0.045, 0.01, 0, 0, -s * 0.3);
+    aEyes(head, 0.02, 0.01, 0.035, 0.009, aglow(eyeCol), false);
+    const wings = [-1, 1].map(s => { const p = pv(g, s * 0.03, 0.01, 0.02); const m = new THREE.Mesh(batWingGeo, mem); m.scale.set(s, 1, 1); p.add(m); return { sh: p, el: null, s }; });
+    g.scale.setScalar(2.4);
+    g.userData.rig = { wings2: wings };
     return g;
+}
+// two-part wings: the shoulder beats and the wingtip follows a moment later. fold = 1 tucks them along the body
+function flap2(R, ph, amp, dih = 0.1, fold = 0) {
+    for (const w of R.wings2) {
+        w.sh.rotation.y = w.s * 1.45 * fold;
+        w.sh.rotation.z = w.s * ((Math.sin(ph) * amp + dih) * (1 - fold) - 0.1 * fold);
+        if (w.el) { w.el.rotation.z = w.s * Math.sin(ph - 0.9) * amp * 0.7 * (1 - fold); w.el.rotation.y = w.s * 0.2 * fold; }
+    }
+}
+// shared body language: walking legs, breathing, looking around, grazing, sitting, sleeping, tails, twitching ears, blinking
+function animRig(c, sp, dt) {
+    const R = c.g.userData.rig; if (!R) return;
+    const k3 = Math.min(1, dt * 3);
+    c.mv = (c.mv || 0) + ((sp > 0.1 ? 1 : 0) - (c.mv || 0)) * Math.min(1, dt * 8);
+    c.gait = (c.gait || 0) + dt * sp * (R.stride || 4);
+    c.sitK = (c.sitK || 0) + ((c.sit ? 1 : 0) - (c.sitK || 0)) * k3;
+    c.slpK = (c.slpK || 0) + ((c.sleep ? 1 : 0) - (c.slpK || 0)) * k3;
+    const amp = (R.swing || 0.55) * Math.min(1.5, 0.75 + sp * 0.08) * c.mv;
+    if (R.legs) for (const L of R.legs) { const back = L.p.position.z < 0; L.p.rotation.x = Math.sin(c.gait + L.ph) * amp + (R.sitTilt ? (back ? -1.3 : 0) * c.sitK * (1 - c.slpK) + (back ? -1.4 : 1.4) * c.slpK : 0); }
+    if (R.body) {
+        R.body.position.y = Math.abs(Math.cos(c.gait)) * (R.bob || 0.03) * c.mv + Math.sin(c.ph * 1.7) * 0.006;
+        if (R.sitTilt) R.body.rotation.x = -0.3 * c.sitK * (1 - c.slpK);
+    }
+    if (R.sitDrop) c.yOff -= R.sitDrop * c.sitK * (1 - c.slpK) + R.sleepDrop * c.slpK;
+    if (R.neck) { const want = c.slpK > 0.5 || c.graze ? R.ngraze : R.nx0 + (c.mv > 0.5 ? (R.nrun || 0) * Math.min(1, sp / 5) : 0) - (c.alert ? 0.25 : 0); R.neck.rotation.x += (want - R.neck.rotation.x) * k3; }
+    if (R.head) {
+        c.lookT = (c.lookT || 0) - dt;
+        if (c.lookT <= 0) { c.lookT = rand(0.8, 3.5); c.lookY = Math.random() < 0.35 ? 0 : rand(-0.8, 0.8); c.lookP = rand(-0.2, 0.2); }
+        const wy = c.alert ? c.alertY : c.mv > 0.5 || c.graze ? 0 : c.lookY, wp = (R.hx0 || 0) + (c.graze ? 0.35 + Math.sin(c.ph * 6) * 0.06 : c.alert ? -0.15 : c.mv > 0.5 ? 0 : c.lookP);
+        R.head.rotation.y += (wy - R.head.rotation.y) * Math.min(1, dt * 5);
+        R.head.rotation.x += (wp - R.head.rotation.x) * Math.min(1, dt * 4);
+    }
+    if (R.tail) R.tail.forEach((t, i) => { t.rotation.y = Math.sin(c.ph * (R.wag || 3) - i * 0.7) * (R.wagA || 0.2) * (1 + c.mv) + c.slpK * 1.2; if (R.tailFlick) t.rotation.x = R.tailFlick - (c.alert || c.st === "flee" ? 1.1 : 0); });
+    if (R.ears) {
+        if (Math.random() < dt * 0.4) { c.twitch = 0.3; c.twI = Math.random() < 0.5 ? 0 : 1; }
+        c.twitch = Math.max(0, (c.twitch || 0) - dt);
+        R.ears.forEach((e, i) => { const s = i ? 1 : -1; e.rotation.z = e.userData.rz0 + (c.twitch > 0 && i === c.twI ? Math.sin(c.twitch * 45) * 0.3 : 0) + (c.alert ? s * 0.35 : 0) - c.slpK * s * 0.4; });
+    }
+    if (R.eyes) { c.blink = (c.blink === undefined ? rand(1, 4) : c.blink) - dt; if (c.blink <= -0.13) c.blink = rand(2, 6); const shut = c.blink < 0 || c.slpK > 0.6 || c.shut; R.eyes.forEach(e => (e.scale.y = shut ? 0.12 : 1)); }
+}
+// deer, goats and moon foxes: wander, graze, sit, stop and stare when you come near, bolt if you get too close
+function grazerAI(c, dt, dp, px, pz, live, panic, night, P) {
+    let sp = 0;
+    if (!c.st) { c.st = "calm"; c.act = "stand"; }
+    if (live && (dp < P.flee || panic) && c.st !== "flee") { c.st = "flee"; c.fleeT = rand(2.5, 4); c.dodge = 0; if (dp < 25) sfx(P.snort || 170, 0.18, "sawtooth", 0.03, 0.6); }
+    else if (c.st === "calm" && live && dp < P.alert) { c.st = "alert"; c.alertT = rand(1.5, 3); if (P.bleat && dp < 20) sfx(520, 0.35, "sawtooth", 0.025, 0.8); }
+    if (c.st === "flee") {
+        c.fleeT -= dt;
+        if (c.blocked) { c.dodge += (Math.random() < 0.5 ? 1 : -1) * 1.3; c.blocked = false; }
+        c.dodge *= Math.max(0, 1 - dt * 0.6);
+        const a = Math.atan2(c.x - px, c.z - pz) + c.dodge;
+        c.runK = Math.min(1, (c.runK || 0) + dt * 2.5);
+        sp = P.run * (panic ? 1.15 : 1) * (0.45 + 0.55 * c.runK);
+        wStep(c, c.x + Math.sin(a) * 5, c.z + Math.cos(a) * 5, sp, dt);
+        if (c.fleeT <= 0 && dp > P.flee * 1.8 && !panic) { c.st = "calm"; c.act = "stand"; c.t = rand(1, 3); c.hx = c.x; c.hz = c.z; c.runK = 0; }
+    } else if (c.st === "alert") {
+        c.alertT -= dt;
+        const want = angDiff(Math.atan2(px - c.x, pz - c.z), c.g.rotation.y);
+        if (Math.abs(want) > 1.1) c.g.rotation.y += Math.sign(want) * Math.min(Math.abs(want) - 1.1, dt * 1.5);
+        c.alertY = clamp(want, -1.1, 1.1);
+        if (c.alertT <= 0 || dp > P.alert * 1.25) { c.st = "calm"; c.act = "stand"; c.t = rand(0.5, 2); }
+    } else {
+        if (c.t <= 0) {
+            const r = Math.random();
+            if (r < 0.42) {
+                c.act = "walk"; c.t = rand(4, 9);
+                let by = -1e9;
+                for (let k = 0; k < (P.climb ? 4 : 1); k++) { const a = Math.random() * 6.283, rr = rand(3, P.roam || 14), tx = c.hx + Math.cos(a) * rr, tz = c.hz + Math.sin(a) * rr, y = P.climb ? groundY(tx, tz) : 0; if (y > by) { by = y; c.tx = tx; c.tz = tz; } } // goats pick the highest ground they can see
+            } else if (r < 0.75) { c.act = "graze"; c.t = rand(3, 8); }
+            else if (P.sit && r < 0.9) { c.act = night ? "sleep" : "sit"; c.t = rand(6, 14); }
+            else { c.act = "stand"; c.t = rand(1.5, 4); }
+        }
+        if (c.act === "walk") { sp = P.walk; if (wStep(c, c.tx, c.tz, sp, dt) < 0.4 || c.blocked) { c.act = "stand"; c.blocked = false; c.t = rand(1, 3); } }
+    }
+    c.alert = c.st === "alert";
+    c.graze = c.st === "calm" && c.act === "graze";
+    c.sit = c.st === "calm" && (c.act === "sit" || c.act === "sleep");
+    c.sleep = c.st === "calm" && c.act === "sleep";
+    animRig(c, sp, dt);
+}
+// rabbits and squirrels: little hops, sitting up, nibbling, darting away in zig-zags when scared
+function hopperAI(c, dt, dp, px, pz, live, panic, P) {
+    const R = c.g.userData.rig, scared = live && (dp < P.flee || panic);
+    if (c.hop > 0) {
+        c.hop -= dt;
+        const k = clamp(1 - c.hop / c.hopLen, 0, 1);
+        wStep(c, c.tx, c.tz, c.hopSp, dt);
+        c.yOff = Math.sin(k * Math.PI) * c.hopH;
+        R.body.rotation.x = -Math.cos(k * Math.PI) * 0.28; // nose up taking off, nose down landing
+        c.sitUp = false;
+    } else {
+        R.body.rotation.x += ((c.sitUp ? -0.6 : 0) - R.body.rotation.x) * Math.min(1, dt * 8);
+        if (scared && c.t > 0.12) c.t = 0.05 + Math.random() * 0.08;
+        if (c.t <= 0) {
+            let go = true; c.sitUp = false;
+            if (scared) { const a = Math.atan2(c.x - px, c.z - pz) + rand(-0.8, 0.8); c.tx = c.x + Math.sin(a) * 3; c.tz = c.z + Math.cos(a) * 3; c.hopLen = 0.26; c.hopSp = P.run; c.hopH = 0.3; c.t = 0.04; }
+            else if (Math.random() < 0.6) {
+                const home = Math.hypot(c.x - c.hx, c.z - c.hz) > 10, a = home ? Math.atan2(c.hx - c.x, c.hz - c.z) + rand(-0.5, 0.5) : Math.random() * 6.283;
+                c.tx = c.x + Math.sin(a) * 0.9; c.tz = c.z + Math.cos(a) * 0.9; c.hopLen = 0.3; c.hopSp = 3; c.hopH = 0.14; c.t = Math.random() < 0.5 ? 0.05 : rand(0.6, 2.5);
+            } else { go = false; c.sitUp = Math.random() < (P.nibble ? 0.7 : 0.45); c.t = rand(1.5, 4.5); }
+            if (go) c.hop = c.hopLen;
+        }
+    }
+    if (R.arms) R.arms.forEach(a => (a.rotation.x = c.sitUp ? -1.2 + Math.sin(c.ph * 14) * 0.15 : 0.3));
+    if (R.tailChain) R.tailChain.forEach((t, i) => { t.rotation.x = R.tail0[i] + Math.sin(c.ph * 2.2 - i * 0.8) * 0.12 + (c.hop > 0 ? 0.25 : 0); t.rotation.z = Math.sin(c.ph * 1.3 - i) * 0.12; });
+    if (R.ears) R.ears.forEach(e => (e.rotation.x = (e.userData.rx0 || 0) - (c.hop > 0 ? 0.5 : 0)));
+    c.alert = scared && c.hop <= 0 && !c.sitUp; if (c.alert) c.alertY = clamp(angDiff(Math.atan2(px - c.x, pz - c.z), c.g.rotation.y), -1, 1);
+    if (c.sitUp && R.head) R.head.rotation.x = Math.sin(c.ph * 16) * 0.05; // nibbling
+    animRig(c, 0, dt);
+}
+function marmotAI(c, dt, dp, px, pz, live) {
+    const R = c.g.userData.rig;
+    if (!c.st) c.st = "watch";
+    if (c.hide > 0) { c.hide -= dt; c.sink = Math.min(1, (c.sink || 0) + dt * 5); if (c.hide <= 0) c.st = "watch"; }
+    else {
+        c.sink = Math.max(0, (c.sink || 0) - dt * 1.2);
+        if (live && dp < 9 && c.sink < 0.2) { c.hide = rand(5, 9); if (dp < 22) { sfx(1900, 0.12, "sine", 0.04, 1.4); setTimeout(() => sfx(1700, 0.16, "sine", 0.03, 1.2), 140); } }
+        else if (c.t <= 0) { c.st = Math.random() < 0.55 ? "forage" : "watch"; c.t = rand(2, 6); }
+    }
+    const watching = c.hide <= 0 && c.st === "watch", fwd = c.hide > 0 ? 0.2 : c.st === "forage" ? 1.05 : -0.05;
+    R.body.rotation.x += (fwd - R.body.rotation.x) * Math.min(1, dt * 6);
+    R.arms.forEach((a, i) => (a.rotation.x = c.st === "forage" && c.hide <= 0 ? 0.4 + Math.sin(c.ph * 9 + i * 3) * 0.35 : 0.7));
+    c.alert = watching && live && dp < 20; if (c.alert) c.alertY = clamp(angDiff(Math.atan2(px - c.x, pz - c.z), c.g.rotation.y), -1.3, 1.3);
+    if (c.st === "forage" && c.hide <= 0) { R.head.rotation.x = 0.4 + Math.sin(c.ph * 7) * 0.12; R.head.rotation.y = 0; }
+    animRig(c, 0, dt);
+    if (c.st === "forage" && c.hide <= 0) R.head.rotation.x = 0.4 + Math.sin(c.ph * 7) * 0.12;
+    c.yOff = -c.sink * 0.8;
+}
+// eagles soar in wide circles, flap now and then, and sometimes glide low over the meadows. They never dive at anything
+function eagleAI(c, dt, px, pz) {
+    const R = c.g.userData.rig;
+    if (!c.mode) { c.mode = "soar"; c.ang = c.ph; c.flapT = rand(2, 6); c.y = c.alt; }
+    if (c.t <= 0) { c.t = rand(15, 35); c.mode = c.mode === "soar" && Math.random() < 0.5 ? "glide" : "soar"; }
+    c.ang += c.spd * dt * (c.mode === "glide" ? 1.5 : 1);
+    const x = c.cx + Math.cos(c.ang) * c.rad, z = c.cz + Math.sin(c.ang) * c.rad, want = c.mode === "glide" ? Math.max(groundY(x, z) + 14, 18) : c.alt;
+    c.y += (want - c.y) * Math.min(1, dt * 0.3);
+    const climbing = want - c.y > 2;
+    c.g.position.set(x, c.y + Math.sin(c.ph * 0.5) * 1.2, z);
+    c.g.rotation.set(climbing ? -0.12 : 0.04, -c.ang + (c.spd > 0 ? 0 : Math.PI), (c.spd > 0 ? -1 : 1) * 0.28);
+    c.flapT -= dt;
+    if (c.flapT <= 0) { c.flapT = climbing ? rand(0.6, 1.5) : rand(5, 11); c.flapping = rand(1.2, 2.4); }
+    c.flapping = Math.max(0, (c.flapping || 0) - dt);
+    if (c.flapping > 0) { c.fph = (c.fph || 0) + dt * 6.5; flap2(R, c.fph, 0.5, 0.05); } else flap2(R, 0, 0, 0.12 + Math.sin(c.ph * 0.7) * 0.03);
+    const d = Math.hypot(x - px, z - pz);
+    c.g.visible = d < 160;
+    if (d < 60 && Math.random() < dt * 0.015) sfx(1500, 0.6, "sawtooth", 0.02, 0.6);
+}
+// shroomlings waddle about, hop with a puff of spores, and freeze (pretending to be mushrooms) when you come close
+function shroomAI(c, dt, dp, live) {
+    const R = c.g.userData.rig;
+    let sp = 0;
+    if (live && dp < 6.5) c.freeze = Math.max(c.freeze || 0, 1.5);
+    if (c.freeze > 0) {
+        c.freeze -= dt; c.crouch = Math.min(1, (c.crouch || 0) + dt * 6);
+        if (c.freeze <= 0) c.peek = 1;
+    } else {
+        c.crouch = Math.max(0, (c.crouch || 0) - dt * 3);
+        if (c.peek > 0) { c.peek -= dt; R.body.rotation.z = Math.sin(c.peek * 26) * 0.14 * c.peek; } // shakes itself off
+        else if (c.t <= 0) {
+            const r = Math.random();
+            if (r < 0.5) { c.act = "walk"; const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 2.5; c.tz = c.z + Math.cos(a) * 2.5; c.t = rand(2, 4); }
+            else if (r < 0.75) { c.act = "hop"; c.hopT = 0.38; c.t = rand(1, 2); }
+            else { c.act = "idle"; c.t = rand(1.5, 4); }
+        }
+        if (c.act === "walk" && !(c.peek > 0)) { sp = 0.9; if (wStep(c, c.tx, c.tz, sp, dt) < 0.2) c.act = "idle"; R.body.rotation.z = Math.sin(c.gait || 0) * 0.14; }
+        else if (!(c.peek > 0)) R.body.rotation.z *= 0.9;
+        if (c.act === "hop" && c.hopT > 0) {
+            c.hopT -= dt; const k = 1 - c.hopT / 0.38;
+            c.yOff = Math.sin(k * Math.PI) * 0.28;
+            R.body.scale.set(1 - Math.sin(k * Math.PI) * 0.1, 1 + Math.sin(k * Math.PI) * 0.18, 1 - Math.sin(k * Math.PI) * 0.1);
+            if (c.hopT <= 0) { c.act = "idle"; burst(V3(c.x, groundY(c.x, c.z) + 0.1, c.z), 5, 1.2, [aglow(R.capCol), aglow(0xffffff)]); }
+        }
+    }
+    const cr = c.crouch;
+    if (!(c.act === "hop" && c.hopT > 0)) R.body.scale.set(1 + cr * 0.14, 1 - cr * 0.32, 1 + cr * 0.14);
+    R.capP.rotation.x = Math.sin(c.ph * 2) * 0.05;
+    R.arms.forEach((a, i) => (a.rotation.z = (i ? 1 : -1) * (0.6 - cr * 0.55) + Math.sin(c.ph * 3 + i) * 0.12));
+    c.shut = cr > 0.5;
+    animRig(c, sp, dt);
+}
+function snailAI(c, dt, dp) {
+    const R = c.g.userData.rig;
+    if (c.t <= 0) { c.t = rand(4, 10); const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 2; c.tz = c.z + Math.cos(a) * 2; c.go = Math.random() < 0.75; }
+    const shy = dp < 2.2; // pull the eye stalks in when you lean over it
+    if (c.go && !shy && wStep(c, c.tx, c.tz, 0.22, dt) < 0.1) c.go = false;
+    R.segs.forEach((s, i) => (s.scale.z = 0.1 * (1 + (c.go && !shy ? Math.sin(c.ph * 5 - i * 1.4) * 0.16 : 0))));
+    R.stalks.forEach((s, i) => { s.rotation.x = -0.35 + Math.sin(c.ph * 1.3 + i * 2) * 0.2; s.rotation.z = (i ? -1 : 1) * 0.25 + Math.sin(c.ph * 0.9 + i) * 0.15; s.scale.y += ((shy ? 0.25 : 1) - s.scale.y) * Math.min(1, dt * 6); });
+    R.head.rotation.y = Math.sin(c.ph * 0.5) * 0.3;
+}
+// ember beetles skitter on six legs, and now and then pop their shells and buzz off a few metres
+function beetleAI(c, dt, dp, live, panic) {
+    const R = c.g.userData.rig;
+    let sp = 0;
+    if (c.fly > 0) {
+        c.fly -= dt;
+        const k = 1 - c.fly / c.flyLen;
+        wStep(c, c.tx, c.tz, 2.4, dt);
+        c.yOff = Math.sin(k * Math.PI) * 0.9;
+    } else {
+        if ((live && dp < 2.8) || (panic && Math.random() < dt) || (c.t <= 0 && Math.random() < 0.12)) {
+            c.flyLen = c.fly = rand(1.2, 2); const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 4; c.tz = c.z + Math.cos(a) * 4; c.t = rand(2, 5);
+            if (dp < 14) sfx(160, 0.5, "sawtooth", 0.02, 1.1);
+        } else if (c.t <= 0) { c.t = rand(2, 6); const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 1.5; c.tz = c.z + Math.cos(a) * 1.5; c.go = Math.random() < 0.7; }
+        if (c.go) { sp = 0.55; if (wStep(c, c.tx, c.tz, sp, dt) < 0.1) c.go = false; }
+    }
+    c.open = (c.open || 0) + ((c.fly > 0 ? 1 : 0) - (c.open || 0)) * Math.min(1, dt * 10);
+    R.elytra.forEach((e, i) => { const s = i ? 1 : -1; e.rotation.z = s * 0.9 * c.open; e.rotation.x = -0.4 * c.open; });
+    R.uw.forEach((w, i) => { w.visible = c.open > 0.3; w.rotation.z = (i ? 1 : -1) * Math.sin(c.ph * 60) * 0.5; });
+    c.mv = (c.mv || 0) + ((sp > 0.05 ? 1 : 0) - (c.mv || 0)) * Math.min(1, dt * 8);
+    c.gait = (c.gait || 0) + dt * sp * 30;
+    R.legs.forEach(L => { L.p.rotation.y = Math.sin(c.gait + L.ph) * 0.45 * c.mv; L.p.rotation.z = L.s * 0.6 * c.open; });
+    R.head.rotation.y = Math.sin(c.ph * 1.7) * 0.15;
+}
+// salamanders dart in quick bursts, body and tail swinging side to side, and freeze between dashes
+function salamanderAI(c, dt, dp, px, pz, live, panic) {
+    const R = c.g.userData.rig, fleeing = (live && dp < 6) || panic;
+    if (c.t <= 0) {
+        if (fleeing) { const a = Math.atan2(c.x - px, c.z - pz) + rand(-0.7, 0.7); c.tx = c.x + Math.sin(a) * 3; c.tz = c.z + Math.cos(a) * 3; c.dash = rand(0.35, 0.5); c.dsp = 7; c.t = c.dash; }
+        else if (Math.random() < 0.55) { const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 2; c.tz = c.z + Math.cos(a) * 2; c.dash = rand(0.3, 0.8); c.dsp = 2.6; c.t = c.dash + rand(0.8, 2.5); }
+        else { c.dash = 0; c.t = rand(1, 3.5); }
+    }
+    let sp = 0;
+    if (c.dash > 0) { c.dash -= dt; sp = c.dsp; wStep(c, c.tx, c.tz, sp, dt); }
+    c.mv = (c.mv || 0) + ((sp > 0 ? 1 : 0) - (c.mv || 0)) * Math.min(1, dt * 10);
+    c.gait = (c.gait || 0) + dt * sp * 9;
+    R.chain.forEach((s, i) => (s.rotation.y = Math.sin(c.gait - i * 0.9) * 0.35 * c.mv + Math.sin(c.ph * 1.1 - i * 0.7) * 0.06));
+    R.legs.forEach(L => { L.p.rotation.y = Math.sin(c.gait + L.ph) * 0.7 * c.mv; L.p.rotation.z = L.s * Math.max(0, Math.cos(c.gait + L.ph)) * 0.35 * c.mv; });
+    R.head.rotation.y = c.mv < 0.2 ? Math.sin(c.ph * 0.8) * 0.35 : 0;
+}
+function mothAI(c, dt, dp, px, pz, night) {
+    const R = c.g.userData.rig, lamp = night && player.lantern && dp < 14;
+    const cx = lamp ? px : c.hx, cz = lamp ? pz : c.hz, cy = lamp ? player.pos.y + 0.2 : groundY(c.hx, c.hz) + 1.4;
+    const t = c.ph * (lamp ? 1.1 : 0.5), r = lamp ? 1.6 + Math.sin(c.ph) * 0.5 : 2.4;
+    const tx = cx + Math.cos(t + c.hx) * r, tz = cz + Math.sin(t * 1.3 + c.hz) * r, ty = cy + Math.sin(t * 2.3) * 0.5, P = c.g.position, ox = P.x, oz = P.z;
+    P.x += (tx - P.x) * Math.min(1, 2 * dt); P.z += (tz - P.z) * Math.min(1, 2 * dt); P.y += (ty - P.y) * Math.min(1, 2 * dt);
+    if (Math.hypot(P.x - ox, P.z - oz) > 1e-4) c.g.rotation.y += angDiff(Math.atan2(P.x - ox, P.z - oz), c.g.rotation.y) * Math.min(1, dt * 6);
+    c.x = P.x; c.z = P.z;
+    R.fw.forEach((w, i) => (w.rotation.z = (i ? 1 : -1) * (Math.sin(c.ph * 22) * 0.8 + 0.25)));
+    R.hw.forEach((w, i) => (w.rotation.z = (i ? 1 : -1) * (Math.sin(c.ph * 22 - 0.5) * 0.7 + 0.25)));
+}
+function butterflyAI(c, dt) {
+    const P = c.g.position;
+    c.g.visible = dayAmt() > 0.45 && wx.rain < 0.3;
+    if (!c.v) { c.v = new THREE.Vector3(); P.y = groundY(c.x, c.z) + 1; c.t = 0; }
+    if (c.t <= 0) { c.t = rand(1.5, 4); c.land = Math.random() < 0.3; const gx = c.hx + rand(-3, 3), gz = c.hz + rand(-3, 3); c.goal = V3(gx, groundY(gx, gz) + (c.land ? 0.5 : rand(0.6, 1.9)), gz); }
+    const d = c.goal.clone().sub(P), dl = d.length(), landed = c.land && dl < 0.15;
+    if (landed) { c.v.set(0, 0, 0); c.g.userData.wings.forEach((w, i) => (w.rotation.z = (i ? -1 : 1) * (0.9 + Math.sin(c.ph * 2) * 0.5))); return; }
+    c.v.addScaledVector(d, dt * 3 / Math.max(0.5, dl)).multiplyScalar(Math.max(0, 1 - dt * 1.8));
+    c.v.y += Math.sin(c.ph * 9) * dt * 2;
+    P.addScaledVector(c.v, dt);
+    if (c.v.lengthSq() > 0.01) c.g.rotation.y = Math.atan2(c.v.x, c.v.z);
+    c.x = P.x; c.z = P.z;
+    c.g.userData.wings.forEach((w, i) => (w.rotation.z = Math.sin(c.ph * 18) * 0.95 * (i ? -1 : 1)));
+}
+// ash crows: hop, peck and look about; burst into the air when you come close, circle, then glide back down somewhere else
+function crowAI(c, dt, dp, px, pz, live, panic) {
+    const R = c.g.userData.rig;
+    if (c.state === "fly" || c.state === "land") {
+        if (c.state === "fly") {
+            c.fly -= dt; c.ang += dt * 0.7 * c.dir;
+            const x = c.cx + Math.cos(c.ang) * 11, z = c.cz + Math.sin(c.ang) * 11;
+            c.y += (groundY(x, z) + 9 - c.y) * Math.min(1, dt * 1.5);
+            c.g.position.set(x, c.y, z); c.g.rotation.set(0, -c.ang + (c.dir > 0 ? 0 : Math.PI), -c.dir * 0.3);
+            c.fph = (c.fph || 0) + dt * 10; flap2(R, c.fph, 0.6, 0.05);
+            if (c.fly <= 0 && !panic) { const p = wildSpot(); if (p) { c.lx = p.x; c.lz = p.z; c.state = "land"; } else c.fly = 3; }
+        } else {
+            const P = c.g.position, gy = groundY(c.lx, c.lz), dx = c.lx - P.x, dz = c.lz - P.z, dh = Math.hypot(dx, dz);
+            const m = Math.min(dh, 8 * dt); if (dh > 0.01) { P.x += dx / dh * m; P.z += dz / dh * m; c.g.rotation.set(0.15, Math.atan2(dx, dz), 0); }
+            c.y += (gy + Math.min(9, dh * 0.5) - c.y) * Math.min(1, dt * 2.5); P.y = c.y;
+            c.fph = (c.fph || 0) + dt * (dh < 2 ? 14 : 3); flap2(R, c.fph, dh < 2 ? 0.7 : 0.15, 0.2);
+            if (dh < 0.2) { c.state = "idle"; c.x = c.lx; c.z = c.lz; c.g.rotation.set(0, c.g.rotation.y, 0); }
+        }
+        c.x = c.g.position.x; c.z = c.g.position.z;
+        return true;
+    }
+    if ((live && dp < 8) || panic) { c.state = "fly"; c.fly = rand(6, 11); c.dir = Math.random() < 0.5 ? 1 : -1; c.ang = Math.random() * 6.283; c.cx = c.x - Math.cos(c.ang) * 11; c.cz = c.z - Math.sin(c.ang) * 11; c.y = groundY(c.x, c.z); if (dp < 22) sfx(420, 0.2, "sawtooth", 0.04, 0.6); return true; }
+    flap2(R, 0, 0, 0, 1);
+    if (c.t <= 0) { const r = Math.random(); c.act = r < 0.35 ? "hop" : r < 0.7 ? "peck" : r < 0.85 ? "caw" : "look"; c.t = c.act === "hop" ? 0.3 : rand(0.8, 2.2); if (c.act === "hop") { const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 0.6; c.tz = c.z + Math.cos(a) * 0.6; } if (c.act === "caw" && dp < 25) sfx(380, 0.18, "sawtooth", 0.03, 0.55); }
+    if (c.act === "hop") { wStep(c, c.tx, c.tz, 2, dt); c.yOff = Math.sin(clamp(1 - c.t / 0.3, 0, 1) * Math.PI) * 0.12; }
+    R.head.rotation.x = c.act === "peck" ? (Math.sin(c.ph * 12) > 0.3 ? 0.9 : 0.1) : c.act === "caw" ? -0.6 : 0;
+    if (c.act === "look" && Math.random() < dt * 3) R.head.rotation.y = rand(-1, 1); // jerky little head turns
+    return false;
+}
+// circling flyers: bats by night, crows by day
+function skyAI(c, dt, px, pz, night) {
+    const R = c.g.userData.rig, show = c.night ? night : !night;
+    c.g.visible = show && Math.hypot(c.g.position.x - px, c.g.position.z - pz) < 140;
+    if (!show) return;
+    const bat = c.kind === "bat";
+    c.ang = (c.ang ?? c.ph) + c.spd * dt * (bat ? 2.2 : 1);
+    const wob = bat ? Math.sin(c.ph * 2.3) * 4 : 0, x = c.cx + Math.cos(c.ang) * (c.rad + wob), z = c.cz + Math.sin(c.ang) * (c.rad + wob);
+    c.g.position.set(x, c.alt + Math.sin(c.ph * (bat ? 3.1 : 0.7)) * (bat ? 1.5 : 2), z);
+    c.g.rotation.set(0, -c.ang + (c.spd > 0 ? 0 : Math.PI), (c.spd > 0 ? -1 : 1) * 0.25);
+    if (bat) flap2(R, c.ph * 20, 0.9, 0); else flap2(R, c.ph * 9, Math.sin(c.ph * 0.5) > 0 ? 0.55 : 0.06, 0.1);
 }
 function addWild(n, kind, g, x, z, extra = {}) {
+    g.rotation.order = "YXZ"; g.rotation.y = Math.random() * 6.283;
     g.position.set(x, groundY(x, z), z); scene.add(g);
-    const c = Object.assign({ kind, g, x, z, hx: x, hz: z, ph: Math.random() * 6, t: Math.random() * 3, state: "idle", tx: x, tz: z, hide: 0 }, extra);
+    const c = Object.assign({ kind, g, x, z, hx: x, hz: z, ph: Math.random() * 6, t: Math.random() * 3, state: "idle", tx: x, tz: z, hide: 0, yOff: 0 }, extra);
     wildBy[n].push(c); return c;
 }
 function populate(n) {
     const P = (count, fn) => { for (let i = 0; i < count; i++) { const p = wildSpot(); if (p) fn(p.x, p.z); } };
-    const sky = (k, mk, count, alt) => { for (let i = 0; i < count; i++) addWild(n, k, mk(), 0, 0, { cx: rand(-60, 60), cz: rand(-60, 60), rad: rand(25, 70), spd: rand(0.05, 0.11) * (Math.random() < 0.5 ? 1 : -1), alt: rand(alt[0], alt[1]) }); };
+    const sky = (k, mk, count, alt, extra = {}) => { for (let i = 0; i < count; i++) addWild(n, k, mk(), rand(-60, 60), rand(-60, 60), Object.assign({ cx: rand(-60, 60), cz: rand(-60, 60), rad: rand(25, 70), spd: rand(0.05, 0.11) * (Math.random() < 0.5 ? 1 : -1), alt: rand(alt[0], alt[1]) }, extra)); };
     if (n === 1) {
-        P(10, (x, z) => addWild(n, "hopper", makeSquirrel(), x, z, { sp: 6, flee: 6 }));
+        P(6, (x, z) => addWild(n, "deer", makeDeer(), x, z, { tilt: 0.5 }));
+        P(11, (x, z) => addWild(n, "rabbit", makeRabbit(), x, z));
+        P(10, (x, z) => addWild(n, "squirrel", makeSquirrel(), x, z));
     } else if (n === 2) {
-        P(9, (x, z) => addWild(n, "grazer", makeGoat(), x, z, { flee: 9, run: 6.5, roam: 14, bleat: true }));
-        P(12, (x, z) => { const c = addWild(n, "marmot", makeMarmot(), x, z); const mound = new THREE.Mesh(ICO, lamb(0x6a5236)); mound.scale.set(0.55, 0.18, 0.55); mound.position.set(x, groundY(x, z), z); scene.add(mound); return c; });
-        P(10, (x, z) => addWild(n, "butterfly", makeButterfly(), x, z));
-        P(8, (x, z) => addWild(n, "hopper", makeRabbit(), x, z, { sp: 8, flee: 7 }));
+        P(9, (x, z) => addWild(n, "goat", makeGoat(), x, z, { tilt: 0.4 }));
+        P(12, (x, z) => { addWild(n, "marmot", makeMarmot(), x, z); const mound = new THREE.Mesh(SPH, amat(0x6a5236)); mound.scale.set(0.5, 0.14, 0.5); mound.position.set(x, groundY(x, z) - 0.02, z); scene.add(mound); const hole = new THREE.Mesh(CYL8, aglow(0x140c06)); hole.scale.set(0.22, 0.02, 0.22); hole.position.set(x, groundY(x, z) + 0.12, z); scene.add(hole); });
+        P(12, (x, z) => addWild(n, "butterfly", makeButterfly(), x, z));
+        P(8, (x, z) => addWild(n, "rabbit", makeRabbit(), x, z));
         sky("eagle", makeEagle, 4, [34, 46]);
     } else if (n === 3) {
-        P(7, (x, z) => addWild(n, "grazer", makeFox(), x, z, { flee: 11, run: 8, roam: 18 }));
+        P(7, (x, z) => addWild(n, "fox", makeFox(), x, z, { tilt: 0.3 }));
         P(14, (x, z) => addWild(n, "shroom", makeShroomling(), x, z));
-        P(16, (x, z) => addWild(n, "crawler", makeSnail(), x, z, { sp: 0.25 }));
+        P(16, (x, z) => addWild(n, "snail", makeSnail(), x, z));
         P(22, (x, z) => addWild(n, "moth", makeMoth(), x, z));
+        sky("bat", () => makeBat(0xc87aff), 6, [10, 20], { night: true });
     } else if (n === 4) {
-        P(14, (x, z) => addWild(n, "scurry", makeSalamander(), x, z));
-        P(18, (x, z) => addWild(n, "crawler", makeBeetle(), x, z, { sp: 0.5 }));
+        P(14, (x, z) => addWild(n, "salamander", makeSalamander(), x, z));
+        P(18, (x, z) => addWild(n, "beetle", makeBeetle(), x, z));
         P(10, (x, z) => addWild(n, "crow", makeCrow(), x, z));
-        sky("bat", () => { const g = makeCrow(); g.userData.wings.forEach(v => (v.visible = true)); return g; }, 8, [18, 30]);
+        sky("bat", () => makeBat(0xff6a3a), 8, [14, 26], { night: true });
+        sky("skycrow", makeCrow, 5, [20, 32], { day: true });
     }
 }
 function buildWild(n) {
@@ -7242,119 +7877,39 @@ function wStep(c, tx, tz, sp, dt) {
     c.g.rotation.y += angDiff(Math.atan2(dx, dz), c.g.rotation.y) * Math.min(1, 8 * dt);
     return d;
 }
-const flap = (c, k, amp) => c.g.userData.wings.forEach((w, i) => { w.rotation.z = Math.sin(c.ph * k) * amp * (i ? -1 : 1); });
+const SMALL_WILD = { rabbit: 1, squirrel: 1, marmot: 1, shroom: 1, snail: 1, beetle: 1, salamander: 1, moth: 1, butterfly: 1, crow: 1 };
 function updateWild(dt) {
     if (!wildDone[isle]) buildWild(isle);
     const list = wildBy[isle], px = player.pos.x, pz = player.pos.z, night = dayAmt() < 0.25, live = state === "playing", panic = isle === 4 && eruptLeft > 0;
     crowMat.color.setHex(night ? 0x2a1a2a : 0x14121a);
     for (const c of list) {
-        const dp = Math.hypot(px - c.x, pz - c.z), far = dp > 90;
-        if (c.kind !== "eagle" && c.kind !== "bat") { c.g.visible = !far && !c.hidden; if (far) continue; }
-        c.t -= dt; c.ph += dt;
-        let yOff = 0;
+        const dp = Math.hypot(px - c.x, pz - c.z);
+        if (c.kind === "eagle") { c.t -= dt; c.ph += dt; eagleAI(c, dt, px, pz); continue; }
+        if (c.kind === "bat" || c.kind === "skycrow") { c.ph += dt; skyAI(c, dt, px, pz, night); continue; }
+        const far = dp > (SMALL_WILD[c.kind] ? 55 : 95);
+        c.g.visible = !far; if (far) continue;
+        c.t -= dt; c.ph += dt; c.yOff = 0;
         switch (c.kind) {
-            case "grazer": { // goats and moon foxes: wander, graze, bolt when you get close
-                const scared = (dp < c.flee || panic) && live;
-                if (scared) { const ax = c.x - px, az = c.z - pz, al = Math.hypot(ax, az) || 1; wStep(c, c.x + ax / al * 8, c.z + az / al * 8, c.run * (panic ? 1.3 : 1), dt); yOff = Math.abs(Math.sin(c.ph * 9)) * 0.15; if (c.bleat && !c.said && dp < 14) { c.said = true; sfx(520, 0.35, "sawtooth", 0.03, 0.8); } }
-                else {
-                    c.said = false;
-                    if (c.t <= 0) { c.t = rand(2, 6); c.walking = Math.random() < 0.6; const a = Math.random() * 6.283, r = rand(3, c.roam); c.tx = c.hx + Math.cos(a) * r; c.tz = c.hz + Math.sin(a) * r; }
-                    if (c.walking) { if (wStep(c, c.tx, c.tz, 1.4, dt) < 0.5) c.walking = false; yOff = Math.sin(c.ph * 4) * 0.03; }
-                }
-                break;
-            }
-            case "hopper": { // rabbits and squirrels
-                const fleeing = dp < c.flee && live;
-                if (c.t <= 0) { c.t = fleeing ? 0.25 : rand(1, 3.5); const a = fleeing ? Math.atan2(c.x - px, c.z - pz) + rand(-0.6, 0.6) : Math.random() * 6.283, r = fleeing ? 4 : rand(1, 3); c.tx = c.x + Math.sin(a) * r; c.tz = c.z + Math.cos(a) * r; c.hop = 0.35; }
-                if (c.hop > 0) { c.hop -= dt; wStep(c, c.tx, c.tz, fleeing ? c.sp : 3, dt); yOff = Math.sin((1 - Math.max(0, c.hop) / 0.35) * Math.PI) * 0.4; }
-                break;
-            }
-            case "marmot": { // pops up, stands watch, whistles and dives into its burrow when you (or an eagle) come near
-                const eagleNear = list.some(e => e.kind === "eagle" && e.state === "dive" && Math.hypot(e.g.position.x - c.x, e.g.position.z - c.z) < 18);
-                if (c.hide > 0) { c.hide -= dt; c.sink = Math.min(1, (c.sink || 0) + dt * 4); }
-                else { c.sink = Math.max(0, (c.sink || 0) - dt * 1.5); if ((dp < 10 && live) || eagleNear) { c.hide = rand(5, 9); if (dp < 20) sfx(1900, 0.18, "sine", 0.04, 1.3); } }
-                const body = c.g.userData.body;
-                body.rotation.x = c.hide > 0 ? 0 : (Math.sin(c.ph * 0.4) > 0.3 ? -0.05 : 0.5); // stands up to look around, then hunches to nibble
-                yOff = -c.sink * 0.75; c.g.rotation.y += dt * (Math.sin(c.ph * 0.3) > 0.8 ? 1.5 : 0);
-                break;
-            }
-            case "eagle": { // circles high, and every so often dives at a marmot (it always hides in time)
-                if (!c.state || c.state === "idle") c.state = "circle";
-                if (c.state === "circle") {
-                    c.ang = (c.ang || c.ph) + c.spd * dt;
-                    c.g.position.set(c.cx + Math.cos(c.ang) * c.rad, c.alt + Math.sin(c.ph * 0.5) * 2, c.cz + Math.sin(c.ang) * c.rad);
-                    c.g.rotation.set(0, -c.ang + (c.spd > 0 ? 0 : Math.PI), c.spd > 0 ? 0.3 : -0.3);
-                    flap(c, 2.5, 0.15);
-                    if (c.t <= 0) { c.t = rand(25, 50); const prey = list.filter(m => m.kind === "marmot" && !(m.hide > 0)); if (prey.length) { c.prey = prey[Math.floor(Math.random() * prey.length)]; c.state = "dive"; if (Math.hypot(c.g.position.x - px, c.g.position.z - pz) < 60) sfx(1500, 0.5, "sawtooth", 0.03, 0.6); } }
-                } else {
-                    const tgt = c.state === "dive" ? V3(c.prey.x, groundY(c.prey.x, c.prey.z) + 0.8, c.prey.z) : V3(c.cx + Math.cos(c.ang) * c.rad, c.alt, c.cz + Math.sin(c.ang) * c.rad);
-                    const d = tgt.clone().sub(c.g.position), l = d.length();
-                    c.g.position.addScaledVector(d, Math.min(1, (c.state === "dive" ? 24 : 12) * dt / (l || 1)));
-                    c.g.rotation.set(c.state === "dive" ? 0.6 : -0.3, Math.atan2(d.x, d.z), 0);
-                    flap(c, c.state === "dive" ? 0 : 8, 0.5);
-                    if (c.state === "dive" && l < 1.6) { c.state = "climb"; burst(c.g.position.clone(), 6, 3, [lamb(0x4a3020)]); }
-                    else if (c.state === "climb" && l < 2) c.state = "circle";
-                }
-                c.g.visible = Math.hypot(c.g.position.x - px, c.g.position.z - pz) < 140;
-                continue;
-            }
-            case "butterfly": {
-                c.g.visible = !far && dayAmt() > 0.5 && wx.rain < 0.3;
-                const t = c.ph * 0.6;
-                c.g.position.set(c.hx + Math.sin(t * 1.3) * 2.6, groundY(c.hx, c.hz) + 1 + Math.sin(t * 2.1) * 0.35, c.hz + Math.sin(t * 0.9 + 1) * 2.6);
-                c.g.rotation.y = t; flap(c, 16, 0.9);
-                continue;
-            }
-            case "shroom": { // shroomlings hop about, and freeze (pretending to be mushrooms) when you look their way
-                const body = c.g.userData.body;
-                if (dp < 7 && live) { c.freeze = 2.5; }
-                if (c.freeze > 0) { c.freeze -= dt; body.scale.set(1.15, 0.8, 1.15); c.hop = 0; break; }
-                body.scale.set(1, 1, 1);
-                if (c.t <= 0) { c.t = rand(0.8, 2.5); const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 1.5; c.tz = c.z + Math.cos(a) * 1.5; c.hop = 0.3; }
-                if (c.hop > 0) { c.hop -= dt; wStep(c, c.tx, c.tz, 3, dt); yOff = Math.sin((1 - Math.max(0, c.hop) / 0.3) * Math.PI) * 0.35; body.scale.set(0.9, 1.15, 0.9); }
-                break;
-            }
-            case "crawler": { // snails and ember beetles
-                if (c.t <= 0) { c.t = rand(3, 8); const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 3; c.tz = c.z + Math.cos(a) * 3; c.go = Math.random() < 0.7; }
-                if (c.go && wStep(c, c.tx, c.tz, c.sp, dt) < 0.2) c.go = false;
-                break;
-            }
-            case "scurry": { // salamanders dart in bursts and flee into the rocks
-                const fleeing = (dp < 6 && live) || panic;
-                if (c.t <= 0) { c.t = fleeing ? rand(0.2, 0.4) : rand(1, 3); const a = fleeing ? Math.atan2(c.x - px, c.z - pz) + rand(-0.7, 0.7) : Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 3; c.tz = c.z + Math.cos(a) * 3; c.dash = fleeing ? 0.4 : rand(0.2, 0.5); }
-                if (c.dash > 0) { c.dash -= dt; wStep(c, c.tx, c.tz, fleeing ? 8 : 4, dt); c.g.rotation.z = Math.sin(c.ph * 30) * 0.1; }
-                break;
-            }
-            case "moth": { // glowing moths flutter over the ground, and at night they gather round your lantern
-                const lamp = night && player.lantern && dp < 14;
-                const cx = lamp ? px : c.hx, cz = lamp ? pz : c.hz, cy = lamp ? player.pos.y + 0.2 : groundY(c.hx, c.hz) + 1.4;
-                const t = c.ph * (lamp ? 1.1 : 0.5), r = lamp ? 1.6 + Math.sin(c.ph) * 0.5 : 2.4;
-                const tx = cx + Math.cos(t + c.hx) * r, tz = cz + Math.sin(t * 1.3 + c.hz) * r, ty = cy + Math.sin(t * 2.3) * 0.5;
-                c.g.position.x += (tx - c.g.position.x) * Math.min(1, 2 * dt); c.g.position.z += (tz - c.g.position.z) * Math.min(1, 2 * dt); c.g.position.y += (ty - c.g.position.y) * Math.min(1, 2 * dt);
-                c.x = c.g.position.x; c.z = c.g.position.z; c.g.rotation.y = t; flap(c, 20, 0.9);
-                continue;
-            }
-            case "crow": { // ash crows peck at the ground, and burst into the air when you come close
-                if (c.state === "fly") {
-                    c.fly -= dt; c.ang += dt * 0.6;
-                    c.g.position.set(c.cx + Math.cos(c.ang) * 12, groundY(c.cx, c.cz) + 9 + Math.sin(c.ph) * 1.2, c.cz + Math.sin(c.ang) * 12);
-                    c.g.rotation.set(0, -c.ang + Math.PI, 0); flap(c, 9, 0.6);
-                    if (c.fly <= 0) { c.state = "idle"; const p = wildSpot(); if (p) { c.x = p.x; c.z = p.z; } c.g.userData.wings.forEach(w => { w.visible = false; w.rotation.z = 0; }); }
-                    continue;
-                }
-                if ((dp < 8 && live) || panic) { c.state = "fly"; c.fly = rand(6, 11); c.ang = Math.random() * 6.283; c.cx = c.x - Math.cos(c.ang) * 12; c.cz = c.z - Math.sin(c.ang) * 12; c.g.userData.wings.forEach(w => (w.visible = true)); if (dp < 20) sfx(420, 0.2, "sawtooth", 0.04, 0.6); continue; }
-                c.g.rotation.x = Math.sin(c.ph * 3) > 0.7 ? 0.5 : 0; // pecking
-                break;
-            }
-            case "bat": { // circling crows by day, bats by night
-                c.g.visible = true;
-                c.ang = (c.ang || c.ph) + c.spd * dt * (night ? 2 : 1);
-                c.g.position.set(c.cx + Math.cos(c.ang) * c.rad, c.alt + Math.sin(c.ph * 0.7) * 2, c.cz + Math.sin(c.ang) * c.rad);
-                c.g.rotation.y = -c.ang + (c.spd > 0 ? 0 : Math.PI); flap(c, night ? 18 : 9, 0.7);
-                continue;
-            }
+            case "deer": grazerAI(c, dt, dp, px, pz, live, panic, night, { alert: 22, flee: 12, walk: 1.3, run: 8, roam: 16 }); break;
+            case "goat": grazerAI(c, dt, dp, px, pz, live, panic, night, { alert: 16, flee: 8.5, walk: 1.1, run: 6.2, roam: 14, climb: true, bleat: true, snort: 300 }); break;
+            case "fox": grazerAI(c, dt, dp, px, pz, live, panic, night, { alert: 18, flee: 9.5, walk: 1.6, run: 8.5, roam: 18, sit: true, snort: 600 }); break;
+            case "rabbit": hopperAI(c, dt, dp, px, pz, live, panic, { flee: 7, run: 8 }); break;
+            case "squirrel": hopperAI(c, dt, dp, px, pz, live, panic, { flee: 6, run: 6.5, nibble: true }); break;
+            case "marmot": marmotAI(c, dt, dp, px, pz, live); break;
+            case "shroom": shroomAI(c, dt, dp, live); break;
+            case "snail": snailAI(c, dt, dp); break;
+            case "beetle": beetleAI(c, dt, dp, live, panic); break;
+            case "salamander": salamanderAI(c, dt, dp, px, pz, live, panic); break;
+            case "moth": mothAI(c, dt, dp, px, pz, night); continue;
+            case "butterfly": butterflyAI(c, dt); continue;
+            case "crow": if (crowAI(c, dt, dp, px, pz, live, panic)) continue; break;
         }
-        if (!c.hidden) c.g.position.set(c.x, groundY(c.x, c.z) + yOff, c.z);
+        c.g.position.set(c.x, groundY(c.x, c.z) + c.yOff, c.z);
+        if (c.tilt) { // lean with the slope
+            const h = c.g.rotation.y, sx = Math.sin(h) * c.tilt, sz = Math.cos(h) * c.tilt;
+            const pitch = -Math.atan2(groundY(c.x + sx, c.z + sz) - groundY(c.x - sx, c.z - sz), 2 * c.tilt);
+            c.g.rotation.x += (clamp(pitch, -0.5, 0.5) - c.g.rotation.x) * Math.min(1, dt * 6);
+        }
     }
     updateFireflies(dt, night);
 }
@@ -7378,6 +7933,201 @@ function updateFireflies(dt, night) {
     }
 }
 
+// ---------- mutation effects: sparkles, snow, embers, sparks, stars, and the odd crackle of lightning ----------
+const mutParts = [], mutBolts = [];
+{
+    const m0 = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    for (let i = 0; i < 110; i++) { const m = new THREE.Mesh(BOX, m0); m.visible = false; scene.add(m); mutParts.push({ m, life: 0 }); }
+    const bm = new THREE.MeshBasicMaterial({ color: 0xffffa0, transparent: true, opacity: 0.95, depthWrite: false });
+    for (let i = 0; i < 6; i++) { const m = new THREE.Mesh(BOX, bm); m.visible = false; scene.add(m); mutBolts.push({ m, life: 0 }); }
+}
+function mutEmit(t, M) {
+    const p = mutParts.find(q => q.life <= 0); if (!p) return;
+    const mode = M.mode, a = Math.random() * 6.283, rr = t.r * rand(1, 3.2);
+    p.m.material = mutMat(t.mut).fx; p.mode = mode; p.life = p.max = rand(1.2, 2.4);
+    const y = mode === "snow" || mode === "drip" ? t.gy + t.h * rand(0.75, 1.2) : mode === "ember" || mode === "dust" ? t.gy + rand(0.2, t.h * 0.7) : t.gy + t.h * rand(0.5, 1.2);
+    p.m.position.set(t.x + Math.cos(a) * rr, y, t.z + Math.sin(a) * rr);
+    p.vy = { snow: -0.6, drip: -2.2, ember: 1.5, dust: 0.25, stars: 0.08, zap: 0.5, sparkle: 0.35 }[mode];
+    p.s = mode === "stars" ? 0.16 : mode === "drip" ? 0.07 : mode === "dust" ? 0.12 : 0.09;
+    p.m.visible = true; p.m.scale.setScalar(p.s);
+}
+function mutZap(t, d) {
+    const b = mutBolts.find(q => q.life <= 0); if (!b) return;
+    const a1 = Math.random() * 6.283, a2 = a1 + rand(1.5, 3), r = t.r * 2.4;
+    const p1 = V3(t.x + Math.cos(a1) * r, t.gy + t.h * rand(0.5, 1.1), t.z + Math.sin(a1) * r), p2 = V3(t.x + Math.cos(a2) * r, t.gy + t.h * rand(0.5, 1.1), t.z + Math.sin(a2) * r);
+    b.m.position.copy(p1).add(p2).multiplyScalar(0.5); b.m.lookAt(p2); b.m.scale.set(0.05, 0.05, p1.distanceTo(p2)); b.m.visible = true; b.life = 0.09;
+    if (d < 22) sfx(1800 + Math.random() * 800, 0.05, "square", 0.02, 0.3);
+}
+function updateMutFx(dt) {
+    if (mutMats.rainbow) { const h = (time * 0.15) % 1; mutMats.rainbow.leaf.color.setHSL(h, 0.85, 0.6); mutMats.rainbow.leaf.emissive.setHSL(h, 0.8, 0.12); }
+    for (const k of MUT_KEYS) if (MUTS[k].pulse && mutMats[k] && mutMats[k].leaf) mutMats[k].leaf.emissiveIntensity = k === "shocked" ? (Math.random() < 0.08 ? 2.2 : 0.8) : 0.75 + 0.45 * Math.sin(time * 3 + MUT_KEYS.indexOf(k));
+    for (const t of trees) {
+        if (!t.mut || t.gone || t.dying || t.burn) continue;
+        const d = Math.hypot(t.x - player.pos.x, t.z - player.pos.z); if (d > 55) continue;
+        const M = MUTS[t.mut];
+        t.fxT -= dt;
+        if (t.fxT <= 0) { t.fxT = M.mode === "stars" ? 0.1 : M.mode === "dust" ? 0.3 : 0.18; mutEmit(t, M); }
+        if (M.mode === "zap" && Math.random() < dt * 0.9) mutZap(t, d);
+    }
+    for (const p of mutParts) if (p.life > 0) {
+        p.life -= dt; p.m.position.y += p.vy * dt;
+        if (p.mode === "snow") p.m.position.x += Math.sin(time * 2 + p.life * 3) * 0.3 * dt;
+        const k = p.life / p.max;
+        p.m.scale.setScalar(p.s * (p.mode === "stars" ? Math.abs(Math.sin(p.life * 9)) : Math.min(1, k * 3)));
+        p.m.rotation.y += dt * 3; p.m.rotation.x += dt * 2;
+        if (p.life <= 0) p.m.visible = false;
+    }
+    for (const b of mutBolts) if (b.life > 0) { b.life -= dt; if (b.life <= 0) b.m.visible = false; }
+}
+function mutFelled(t) {
+    const M = MUTS[t.mut];
+    save.mutDex = save.mutDex || {};
+    const first = !save.mutDex[t.mut];
+    save.mutDex[t.mut] = (save.mutDex[t.mut] || 0) + 1;
+    const p = V3(t.x, t.gy + Math.min(t.h * 0.6, 4), t.z);
+    burst(p, 34, 7, [mutMat(t.mut).fx, ornMat(0xffffff)]);
+    floatWorld(V3(t.x, t.gy + Math.min(t.h * 0.9, 6), t.z), "×" + M.mult + " " + M.name, "cash");
+    sfx(880, 0.15, "triangle", 0.1, 1.5); setTimeout(() => sfx(1320, 0.25, "triangle", 0.09, 1.3), 120); setTimeout(() => sfx(1760, 0.35, "sine", 0.07, 1.2), 240);
+    if (first) titleCard(`NEW MUTATION: ${M.name}`, `×${M.mult} drops · ${Object.keys(save.mutDex).length} / ${MUT_KEYS.length} discovered`);
+    else toast(`✦ ${M.name} ${t.type.name} felled: ×${M.mult} drops!`, "rare");
+}
+
+// ---------- the enchanting table's own window ----------
+const ENCH_ICON = { sharp: "⚔", swift: "➶", fortune: "✤", vamp: "♥", bane: "☠" };
+const ENCH_COL = { sharp: "#ff8a6a", swift: "#7fe8ff", fortune: "#ffd040", vamp: "#ff6a9a", bane: "#c8a0ff" };
+let enchSel = 0;
+const enchList = i => Object.entries(save.ench[i] || {}).filter(([, l]) => l > 0);
+const enchTotal = i => enchList(i).reduce((a, [, l]) => a + l, 0);
+const enchShort = i => enchList(i).map(([k, l]) => ENCH[k].name + " " + ROMAN[l]).join(" · ");
+function openEnch(say) {
+    enchSel = save.owned[save.equipped] ? save.equipped : 0;
+    $("enchSay").textContent = say ? "“" + say + "”" : "";
+    openPanel("ench");
+}
+function renderEnch() {
+    $("enchCash").textContent = money(save.money);
+    if (!save.owned[enchSel]) enchSel = save.equipped;
+    const i = enchSel, a = AXES[i], list = enchList(i);
+    const axesHtml = AXES.map((x, j) => save.owned[j] ? `<button class="eaxe ${j === i ? "on" : ""}" data-eaxe="${j}" style="--c:${x.rarity}"><img src="${iconURL("a" + j)}"><span>${x.name}</span>${enchTotal(j) ? `<em>✦${enchTotal(j)}</em>` : ""}</button>` : "").join("");
+    const showHtml = `<div class="eshow ${list.length ? "glint" : ""}" style="--c:${a.rarity}"><div class="eframe"><img src="${iconURL("a" + i)}"></div><b style="color:${a.rarity}">${a.name}</b><div class="edmg">${axeDmgFor(i)} <small>dmg per swing</small></div>${list.length ? `<div class="elist">${list.map(([k, l]) => `<div style="color:${ENCH_COL[k]}"><span>${ENCH_ICON[k]}</span> ${ENCH[k].name} ${ROMAN[l]}<small>${ENCH[k].desc(l)}</small></div>`).join("")}</div>` : `<div class="enone">No enchantments yet.<br>Pick a rune →</div>`}</div>`;
+    const runes = Object.entries(ENCH).map(([k, E]) => {
+        const lv = enchLv(k, i), max = lv >= E.max, cost = max ? 0 : enchCost(k, lv, i), can = !max && save.money >= cost;
+        const pips = Array.from({ length: E.max }, (_, n) => `<i class="${n < lv ? "on" : ""}"></i>`).join("");
+        return `<div class="rune ${max ? "max" : can ? "ok" : "no"}" data-ench="${k}" style="--c:${ENCH_COL[k]}"><div class="rg">${ENCH_ICON[k]}</div><div class="ri"><b>${E.name} ${ROMAN[max ? lv : lv + 1]}</b><span class="pips">${pips}</span><small>${max ? E.desc(lv) + " · MAXED" : (lv ? "now " + E.desc(lv) + " → " : "") + E.desc(lv + 1)}</small></div><div class="rc">${max ? "MAX" : money(cost)}</div></div>`;
+    }).join("");
+    for (const [id, h] of [["enchAxes", axesHtml], ["enchShow", showHtml], ["enchRunes", runes]]) if ($(id).dataset.h !== h) { $(id).innerHTML = h; $(id).dataset.h = h; }
+}
+function buyEnch(k) {
+    const i = enchSel, E = ENCH[k], lv = enchLv(k, i);
+    if (lv >= E.max) { toast(`${E.name} is already maxed on the ${AXES[i].name}.`, "bad"); return; }
+    const cost = enchCost(k, lv, i);
+    if (save.money < cost) { toast("Not enough cash.", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return; }
+    save.money -= cost;
+    save.ench[i] = save.ench[i] || {}; save.ench[i][k] = lv + 1;
+    enchFx();
+    toast(`${AXES[i].name} is enchanted with ${E.name} ${ROMAN[lv + 1]}!`, "rare");
+    writeSave(); renderEnch();
+    const card = document.querySelector(`#enchRunes [data-ench="${k}"]`); if (card) { card.classList.remove("zap"); void card.offsetWidth; card.classList.add("zap"); }
+    const pnl = $("panelEnch"); pnl.classList.remove("flash"); void pnl.offsetWidth; pnl.classList.add("flash");
+}
+document.addEventListener("click", e => {
+    if (panel !== "ench") return;
+    const ea = e.target.closest("[data-eaxe]"); if (ea) { enchSel = +ea.dataset.eaxe; sfx(500, 0.06, "square", 0.05, 1.3); renderEnch(); return; }
+    const er = e.target.closest("[data-ench]"); if (er) buyEnch(er.dataset.ench);
+});
+// runes orbit the head of an enchanted axe in your hands
+const axeRunes = (() => {
+    const grp = new THREE.Group(); grp.position.set(0, 0.74, -0.08); axe.add(grp);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xc8a0ff, transparent: true, opacity: 0.9, depthWrite: false }), ms = [];
+    for (let i = 0; i < 7; i++) { const m = new THREE.Mesh(BOX, mat); m.scale.set(0.03, 0.045, 0.008); grp.add(m); ms.push(m); }
+    grp.visible = false;
+    return { grp, ms, mat };
+})();
+function updateAxeRunes() {
+    const on = !holdingGun() && enchTotal(save.equipped) > 0;
+    axeRunes.grp.visible = on;
+    if (!on) return;
+    axeRunes.ms.forEach((m, i) => { const a = time * 1.7 + i * 0.9; m.position.set(Math.cos(a) * 0.24, Math.sin(time * 2.3 + i) * 0.13, Math.sin(a) * 0.24); m.rotation.y = -a; });
+    axeRunes.mat.color.setHSL(0.76 + 0.06 * Math.sin(time * 2), 0.9, 0.72);
+}
+
+// ---------- the Casino: a tower on the newest island. Its doors open in a future update ----------
+// it always lives on the latest island: when a new island ships, point CASINO_ISLE at it and give it a style here
+const CASINO_ISLE = 4;
+const CASINO_STYLE = {
+    4: { at: () => at4(-0.55, 104), gy: (x, z) => groundY4(x, z), base: 0x221c1a, wall: 0x2c2624, trim: 0x9a7a3a, glow: 0xff8a3a, dim: 0x5a2a10, roof: 0x161214, sign: "#ff9a4a", rock: 0x2a2424, lm: "#ffb060" }
+};
+let casino = null;
+const OCTA = new THREE.OctahedronGeometry(1, 0);
+function casinoTex(lines, w, h, bg) {
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h; const g = cv.getContext("2d");
+    if (bg) { g.fillStyle = bg; g.fillRect(0, 0, w, h); g.strokeStyle = "rgba(255,180,90,.6)"; g.lineWidth = 6; g.strokeRect(6, 6, w - 12, h - 12); }
+    g.textAlign = "center"; g.textBaseline = "middle";
+    for (const [txt, size, col, y] of lines) { g.font = `900 ${size}px Consolas, monospace`; g.shadowColor = col; g.shadowBlur = size * 0.5; g.fillStyle = col; g.fillText(txt, w / 2, y); }
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function buildCasino(n) {
+    const S = CASINO_STYLE[n]; if (!S || n !== CASINO_ISLE) return;
+    const prev = addTgt, prevB = curBuild; addTgt = isleGroup(n); curBuild = n;
+    const p = S.at(), x = p.x, z = p.z, face = Math.atan2(-x, -z), gy = S.gy(x, z) - 0.4;
+    const g = new THREE.Group(); g.position.set(x, gy, z); g.rotation.y = face; scene.add(g);
+    const wall = lamb(S.wall), base = lamb(S.base), trim = lamb(S.trim), roof = lamb(S.roof), rock = lamb(S.rock), glow = new THREE.MeshBasicMaterial({ color: S.glow }), dim = new THREE.MeshBasicMaterial({ color: S.dim }), plank = lamb(0x5a3a22), H6 = Math.PI / 6;
+    // a stepped hexagonal plinth, then four tapering tiers banded in old gold
+    part(g, CYL6, base, 0, 0.6, 0, 10, 1.4, 10, 0, H6); part(g, CYL6, base, 0, 1.55, 0, 8.6, 0.7, 8.6, 0, H6);
+    let y = 1.9;
+    [[7, 9], [6, 7.5], [5, 6.5], [4.1, 5.5]].forEach(([r, h], ti) => {
+        part(g, CYL6, wall, 0, y + h / 2, 0, r, h, r, 0, H6);
+        part(g, CYL6, trim, 0, y + h, 0, r + 0.35, 0.35, r + 0.35, 0, H6);
+        for (let f = 0; f < 6; f++) {
+            if (ti < 2 && f === 0) continue; // the doorway, and the face the sign hangs on
+            const a = f * Math.PI / 3, wr = r * 0.866 + 0.03, lit = (f * 7 + ti * 3) % 5 < 2;
+            part(g, BOX, lit ? glow : dim, Math.sin(a) * wr, y + h * 0.55, Math.cos(a) * wr, 0.55, h * 0.45, 0.08, 0, a);
+            part(g, BOX, trim, Math.sin(a) * (wr + 0.02), y + h * 0.55 + h * 0.25, Math.cos(a) * (wr + 0.02), 0.9, 0.14, 0.1, 0, a);
+        }
+        y += h;
+    });
+    part(g, CONE6, roof, 0, y + 3, 0, 4.8, 6, 4.8, 0, H6);
+    part(g, CYL6, trim, 0, y + 6.6, 0, 0.12, 2.2, 0.12);
+    part(g, OCTA, glow, 0, y + 7.9, 0, 0.45, 0.65, 0.45);
+    // the boarded-up door, with a COMING SOON banner across it
+    const fz = 7 * 0.866;
+    part(g, BOX, lamb(0x140c08), 0, 1.9 + 2.2, fz + 0.02, 3, 4.4, 0.25);
+    part(g, BOX, trim, 0, 1.9 + 4.55, fz + 0.1, 3.6, 0.3, 0.3);
+    for (const [py, rz] of [[2.8, 0.5], [3.4, -0.5], [4.6, 0.12]]) part(g, BOX, plank, 0, py, fz + 0.2, 3.4, 0.28, 0.08, 0, 0, rz);
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.1), new THREE.MeshBasicMaterial({ map: casinoTex([["COMING SOON", 64, "#ffd060", 64]], 512, 128, "#2a0e06") })); banner.position.set(0, 7.0, fz + 0.12); g.add(banner);
+    const signMat = new THREE.MeshBasicMaterial({ map: casinoTex([["CASINO", 120, S.sign, 96]], 512, 192), transparent: true, depthWrite: false, color: 0xd8b8a8 });
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 2.1), signMat); sign.position.set(0, 1.9 + 9 + 3.8, 6 * 0.866 + 0.12); g.add(sign);
+    for (const s of [-1, 1]) part(g, OCTA, trim, s * 3.4, 1.9 + 9 + 3.8, 6 * 0.866 + 0.15, 0.4, 0.6, 0.12); // diamond emblems either side of the sign
+    // ember braziers by the steps, two huge obsidian dice, basalt columns round the base and scaffolding up one side
+    for (const s of [-1, 1]) { part(g, CYL6, trim, s * 2.6, 2.4, fz + 1.2, 0.3, 1, 0.3); part(g, CYL8, lamb(0x1a1210), s * 2.6, 3.0, fz + 1.2, 0.55, 0.3, 0.55); part(g, ICO, glow, s * 2.6, 3.25, fz + 1.2, 0.38, 0.3, 0.38); }
+    for (const [dx, dz, ry, sc] of [[-6.2, 9.4, 0.4, 1.3], [-4.6, 10.6, 1.1, 1]]) {
+        const d = new THREE.Group(); d.position.set(dx, sc * 0.5 + 0.1, dz); d.rotation.set(0.15, ry, 0.08); g.add(d);
+        part(d, BOX, rock, 0, 0, 0, sc, sc, sc);
+        const pips = [[0, 0.51, 0], [-0.25, 0.51, -0.25], [0.25, 0.51, 0.25], [0.51, 0.2, 0.2], [0.51, -0.2, -0.2], [0, 0, 0.51]];
+        for (const [px2, py2, pz2] of pips) part(d, BOX, glow, px2 * sc, py2 * sc, pz2 * sc, Math.abs(px2) > 0.5 ? 0.02 : 0.16 * sc, Math.abs(py2) > 0.5 ? 0.02 : 0.16 * sc, Math.abs(pz2) > 0.5 ? 0.02 : 0.16 * sc);
+    }
+    for (let i = 0; i < 16; i++) { const a = i * 0.4 + 0.9 + (i % 3) * 0.1, rr = 10.6 + (i % 4) * 0.5, h = 1.2 + ((i * 7) % 5) * 0.8; if (Math.abs(angDiff(a, 0)) < 0.7) continue; part(g, CYL6, rock, Math.sin(a) * rr, h / 2, Math.cos(a) * rr, 0.7, h, 0.7, 0, (i % 2) * 0.5); }
+    for (let k = 0; k < 4; k++) { const sx = -5.2 - (k % 2) * 0.1; part(g, BOX, plank, sx, 4 + k * 4, -3 + (k % 2) * 3, 0.15, 8, 0.15); }
+    for (let k = 0; k < 4; k++) part(g, BOX, plank, -5.4, 3 + k * 4, 0, 0.12, 0.12, 6.6);
+    // easel sign by the path in
+    const easel = new THREE.Group(); easel.position.set(3.5, 0, 13); easel.rotation.y = -0.25; g.add(easel);
+    for (const s of [-1, 1]) part(easel, BOX, plank, s * 0.6, 0.9, 0, 0.1, 1.8, 0.1, 0.15);
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.1), new THREE.MeshBasicMaterial({ map: casinoTex([["CASINO", 56, S.sign, 44], ["COMING SOON", 34, "#ffe0b0", 96]], 256, 140, "#1a0c08") })); board.position.set(0, 1.3, 0.1); board.rotation.x = -0.15; easel.add(board);
+    // collisions and a spot on the map
+    const toW = (lx, lz) => ({ x: x + Math.cos(face) * lx + Math.sin(face) * lz, z: z - Math.sin(face) * lx + Math.cos(face) * lz });
+    circles.push({ x, z, r: 10.2 });
+    for (const [lx, lz, r] of [[-6.2, 9.4, 1], [-4.6, 10.6, 0.8], [3.5, 13, 0.6]]) { const w2 = toW(lx, lz); circles.push({ x: w2.x, z: w2.z, r }); }
+    const door = { x: x + Math.sin(face) * 11.4, z: z + Math.cos(face) * 11.4 };
+    const lm = { name: "THE CASINO", x, z, r: 13, col: S.lm };
+    if (n === 4) LM4.push(lm);
+    casino = { isle: n, x, z, door, signMat };
+    addTgt = prev; curBuild = prevB;
+}
+function updateCasino() {
+    if (!casino || casino.isle !== isle) return;
+    casino.signMat.opacity = Math.random() < 0.015 ? 0.35 : 0.92; // an old neon sign, flickering
+}
+
 // a save that's already on another island starts there (this must run after everything above is defined)
 if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
 placeEnchTable();
@@ -7387,7 +8137,7 @@ if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1,
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
-    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
+    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => "THE CASINO · COMING SOON  [F] knock", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
@@ -7434,12 +8184,15 @@ function hud(dt) {
     const hot = save.hotbar.map((id, slot) => {
         if (!id) return `<div class="slot empty"><span class="k">${slot + 1}</span></div>`;
         const sel = wEquipped(id), dm = id[0] === "a" ? axeDmgFor(+id.slice(1)) : gunDmg(+id.slice(1));
-        return `<div class="slot ${sel ? "sel" : ""}" style="--c:${wCol(id)}"><span class="k">${slot + 1}</span><img class="ic" src="${iconURL(id)}"><span class="nm">${wName(id)}</span><span class="ct">${dm} dmg</span>${sel ? '<span class="eqtag">EQUIPPED</span>' : ""}</div>`;
+        const en = id[0] === "a" ? enchTotal(+id.slice(1)) : 0;
+        return `<div class="slot ${sel ? "sel" : ""}${en ? " ench" : ""}" style="--c:${wCol(id)}"><span class="k">${slot + 1}</span>${en ? `<span class="ebadge">✦${en}</span>` : ""}<img class="ic" src="${iconURL(id)}"><span class="nm">${wName(id)}</span><span class="ct">${dm} dmg</span>${sel ? '<span class="eqtag">EQUIPPED</span>' : ""}</div>`;
     }).join("");
     { const am = holdingGun() ? gunAm(save.gunEq) : null, ae = $("ammo"); ae.style.display = am ? "" : "none"; if (am) ae.innerHTML = `<small>${GUNS[save.gunEq].name.toUpperCase()}</small><b>${am.mag}</b> / ${am.res}${reloading ? "<em>RELOADING</em>" : am.mag === 0 && am.res === 0 ? "<em>NO AMMO</em>" : ""}`; }
     if (el.hot.dataset.h !== hot) { el.hot.innerHTML = hot; el.hot.dataset.h = hot; }
+    { const en = !holdingGun() && enchTotal(save.equipped) ? "✦ " + enchShort(save.equipped) + " ✦" : "", e = $("enchLine"); if (e.textContent !== en) e.textContent = en; e.style.display = en ? "" : "none"; }
     if (panel === "inv") renderInv();
     if (panel === "shop") renderShop();
+    if (panel === "ench") renderEnch();
     if (panel === "map") drawMap();
     if (panel === "ferry") renderFerry();
 }
@@ -7513,7 +8266,7 @@ if (DEBUG) window.__ts4 = {
     setState(s) { state = s; renderMenu(); },
     interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, enterIsle4, startFight4, fight4, startEruption, getKing: () => king, VOLC, syncKing, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
     // the dev panel (dev.js) drives the game through these
-    get panel() { return panel; }, togglePanel, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
+    get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
     FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z }, FERRYMAN3: { x: FERRYMAN3.x, z: FERRYMAN3.z },
     setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
     freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)

@@ -190,6 +190,50 @@
   #bossFill { background: linear-gradient(#ff6a9a, #b01a4a); } #bossLag { background: rgba(255,255,255,.75); }
   #bossBar.rage .bb { animation: pulse .5s infinite alternate; }
   #bossHp { font: 700 12px Consolas; opacity: .8; margin-top: 4px; }
+  /* ---------- 1.4.1: enchanting, mutations ---------- */
+  @property --ea { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  @keyframes espin { to { --ea: 360deg; } }
+  #enchLine { bottom: 158px; left: 50%; transform: translateX(-50%); white-space: nowrap; padding: 3px 14px; border-radius: 7px; font: 800 12px Consolas, monospace; letter-spacing: 1.5px; color: #ead8ff; background: rgba(40,10,70,.6); border: 1px solid rgba(176,122,255,.55); text-shadow: 0 0 8px #9a4aff, 0 2px 0 #000; box-shadow: 0 0 14px rgba(140,80,255,.35); }
+  .slot.ench { box-shadow: 0 0 14px rgba(176,122,255,.55); }
+  .slot.ench::before { content: ""; position: absolute; inset: -3px; border-radius: 12px; padding: 2px; background: conic-gradient(from var(--ea), #b07aff, #7affef, #ff7ad8, #ffd040, #b07aff); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: espin 3s linear infinite; pointer-events: none; }
+  .slot.sel.ench { box-shadow: 0 0 22px rgba(255,208,64,.6), 0 0 18px rgba(176,122,255,.7), 0 0 0 2px #000; }
+  .ebadge { position: absolute; top: 3px; right: 6px; font: 800 10px Consolas; color: #e0c0ff; text-shadow: 0 0 6px #b07aff; }
+  .card.ench { box-shadow: 0 0 14px rgba(176,122,255,.45); } .card .eline { display: block; margin-top: 3px; font: 700 10px Consolas; font-style: normal; letter-spacing: .5px; color: #d8b0ff; text-shadow: 0 0 6px rgba(176,122,255,.7); }
+  .np i.mut { display: block; margin-bottom: 1px; font: 900 11px Consolas, monospace; font-style: normal; letter-spacing: 2px; text-shadow: 0 0 8px currentColor, 0 1px 0 #000; }
+  .np.mutd { box-shadow: 0 0 14px var(--mc), inset 0 0 10px color-mix(in srgb, var(--mc) 30%, transparent); animation: mutglow 1.6s ease-in-out infinite; }
+  .np.rbw { animation: mutglow 1.6s ease-in-out infinite, rbborder 2s linear infinite; }
+  @keyframes mutglow { 50% { box-shadow: 0 0 24px var(--mc), inset 0 0 14px color-mix(in srgb, var(--mc) 45%, transparent); } }
+  @keyframes rbborder { 0%, 100% { border-color: #ff5a5a; } 20% { border-color: #ffd040; } 40% { border-color: #6dffa0; } 60% { border-color: #7fd8ff; } 80% { border-color: #c07aff; } }
+  .rbtxt { background: linear-gradient(90deg, #ff5a5a, #ffd040, #6dffa0, #7fd8ff, #c07aff, #ff5a5a); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent !important; animation: rbshift 2s linear infinite; text-shadow: none !important; }
+  @keyframes rbshift { to { background-position: 200% 0; } }
+  #panelEnch { width: min(880px, 94vw); max-height: 92vh; overflow-y: auto; border-color: rgba(176,122,255,.6); background: radial-gradient(120% 80% at 50% 0%, rgba(80,30,140,.6), rgba(14,8,28,.95) 62%); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgba(140,80,255,.25); }
+  #panelEnch h2 { color: #dcb8ff; text-shadow: 0 0 14px rgba(176,122,255,.8); }
+  #enchCash { margin-left: 14px; color: var(--green); font: 800 18px Consolas; letter-spacing: 1px; text-shadow: none; }
+  #enchSay { font-style: italic; opacity: .7; margin: -6px 0 12px; }
+  #enchAxes { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 2px 4px; margin-bottom: 12px; }
+  .eaxe { --c: #fff; flex: none; position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 74px; padding: 6px 4px; cursor: pointer; background: rgba(255,255,255,.05); border: 2px solid color-mix(in srgb, var(--c) 40%, transparent); border-radius: 10px; color: var(--ink); font: 700 9px "Segoe UI"; letter-spacing: .5px; text-transform: uppercase; }
+  .eaxe:hover { background: rgba(176,122,255,.12); } .eaxe img { width: 40px; height: 40px; } .eaxe span { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .eaxe.on { border-color: var(--c); background: rgba(176,122,255,.2); box-shadow: 0 0 14px color-mix(in srgb, var(--c) 60%, transparent); }
+  .eaxe em { position: absolute; top: 3px; right: 5px; font: 800 10px Consolas; font-style: normal; color: #e0c0ff; text-shadow: 0 0 6px #b07aff; }
+  .enchMain { display: grid; grid-template-columns: 260px 1fr; gap: 16px; }
+  .eshow { text-align: center; padding: 14px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid rgba(176,122,255,.3); }
+  .eframe { position: relative; width: 136px; height: 136px; margin: 4px auto 10px; border-radius: 16px; display: grid; place-items: center; background: radial-gradient(circle, rgba(176,122,255,.28), transparent 70%); }
+  .eframe img { width: 114px; height: 114px; filter: drop-shadow(0 0 10px rgba(176,122,255,.55)); }
+  .eshow.glint .eframe::before { content: ""; position: absolute; inset: 0; border-radius: 16px; padding: 3px; background: conic-gradient(from var(--ea), #b07aff, #7affef, #ff7ad8, #ffd040, #b07aff); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: espin 2.4s linear infinite; }
+  .eshow.glint .eframe img { animation: efloat 2.6s ease-in-out infinite; }
+  @keyframes efloat { 50% { transform: translateY(-5px) rotate(-4deg); filter: drop-shadow(0 0 18px rgba(200,140,255,.95)); } }
+  .eshow > b { display: block; font: 800 17px "Segoe UI"; letter-spacing: 1px; }
+  .edmg { font: 800 22px Consolas; color: var(--amber); margin: 4px 0 8px; } .edmg small { font-size: 11px; opacity: .6; color: var(--ink); }
+  .elist div { text-align: left; font: 800 13px "Segoe UI"; padding: 5px 8px; margin-top: 5px; border-radius: 6px; background: rgba(255,255,255,.05); } .elist span { display: inline-block; width: 18px; text-align: center; } .elist small { display: block; font: 600 11px "Segoe UI"; opacity: .75; color: var(--ink); margin-left: 22px; }
+  .enone { opacity: .55; font-size: 13px; margin-top: 14px; line-height: 1.5; }
+  .rune { --c: #b07aff; display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 8px; border-radius: 10px; cursor: pointer; background: linear-gradient(90deg, color-mix(in srgb, var(--c) 14%, transparent), rgba(255,255,255,.03)); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); transition: transform .08s, background .1s; }
+  .rune:hover { transform: translateX(3px); background: linear-gradient(90deg, color-mix(in srgb, var(--c) 26%, transparent), rgba(255,255,255,.05)); }
+  .rune .rg { width: 44px; height: 44px; flex: none; display: grid; place-items: center; font-size: 24px; color: var(--c); background: rgba(0,0,0,.35); border: 2px solid var(--c); border-radius: 50%; text-shadow: 0 0 10px var(--c); box-shadow: 0 0 12px color-mix(in srgb, var(--c) 40%, transparent); }
+  .rune .ri { flex: 1; } .rune .ri b { font: 800 15px "Segoe UI"; letter-spacing: 1px; color: var(--c); } .rune .ri small { display: block; opacity: .75; font-size: 12px; margin-top: 3px; }
+  .pips { display: inline-flex; gap: 5px; margin-left: 10px; vertical-align: middle; } .pips i { width: 9px; height: 9px; border-radius: 2px; transform: rotate(45deg); border: 1px solid var(--c); background: rgba(0,0,0,.4); } .pips i.on { background: var(--c); box-shadow: 0 0 6px var(--c); }
+  .rune .rc { font: 800 16px Consolas; } .rune.ok .rc { color: var(--green); } .rune.no { opacity: .55; } .rune.no .rc { color: #ff8a7a; } .rune.max { cursor: default; } .rune.max .rc { color: #dcb8ff; letter-spacing: 2px; }
+  .rune.zap { animation: rzap .7s ease-out; } @keyframes rzap { 0% { box-shadow: 0 0 0 0 var(--c); background: color-mix(in srgb, var(--c) 60%, transparent); } 100% { box-shadow: 0 0 0 18px transparent; } }
+  #panelEnch.flash { animation: eflash .8s ease-out; } @keyframes eflash { 0% { box-shadow: 0 0 90px rgba(200,140,255,.95), inset 0 0 60px rgba(200,140,255,.5); } }
   #titleCard { position: fixed; left: 0; right: 0; top: 30%; text-align: center; z-index: 5; pointer-events: none; opacity: 0; text-shadow: 0 4px 0 #000, 0 0 30px rgba(255,60,120,.8); }
   #titleCard.show { animation: tcpop 3.6s ease-out forwards; }
   @keyframes tcpop { 0% { opacity: 0; transform: translateY(20px) scale(.8); } 12% { opacity: 1; transform: translateY(0) scale(1.06); } 20% { transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-30px); } }
@@ -290,6 +334,7 @@
   <div id="cross" class="hud"></div>
   <div id="prompt" class="hud"></div>
   <div id="hotbar" class="hud"></div>
+  <div id="enchLine" class="hud" style="display:none"></div>
   <div id="ammo" class="hud"></div>
   <div id="fps" class="hud"></div>
 </div>
@@ -317,6 +362,15 @@
   <div class="tabs" id="shopTabs"></div>
   <div id="shopList"></div>
   <div class="foot">click a row · 1-4 picks a row · ◀ ▶ arrows change page · Tab switches tab · F or Esc to leave</div>
+</div>
+
+<div id="panelEnch" class="panel">
+  <button class="xbtn" data-close>✕ LEAVE <kbd>F</kbd></button>
+  <h2>THE ENCHANTING TABLE <span id="enchCash">$0</span></h2>
+  <div id="enchSay"></div>
+  <div id="enchAxes"></div>
+  <div class="enchMain"><div id="enchShow"></div><div id="enchRunes"></div></div>
+  <div class="foot">pick an axe along the top · click a rune to enchant it · F or Esc to leave</div>
 </div>
 
 <div id="panelTalk" class="panel talk">
