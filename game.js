@@ -47,8 +47,8 @@ let addTgt = null; // while set, scene.add puts new objects in this group
 let isle = 1; // 1 = Pine Island, 2 = the Highland Isle, 3 = Mooncap Isle
 let groundFn = null;
 const groundY = (x, z) => (groundFn ? groundFn(x, z) : 0);
-const curShoreAt = (x, z) => (isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
-const curShoreR = a => (isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
+const curShoreAt = (x, z) => (isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
+const curShoreR = a => (isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
 
 // viewmodel (axe) gets its own scene + depth pass so it never clips into trees
 const viewScene = new THREE.Scene();
@@ -91,7 +91,7 @@ const shoreAt = (x, z) => shoreR(Math.atan2(z, x));
 const BED = { x: 2.75, z: 1.7 }, HOPPER = { x: 5, z: -7 };
 const MILL = { x: 17.5, z: -12.5 };
 const RESPAWN = { x: 1.0, z: 0.0 };
-const N_AXES = 14;
+const N_AXES = 16;
 
 // ---------- save ----------
 const SAVE_KEY = "ts4_save_v1";
@@ -123,7 +123,7 @@ const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; 
 const gunPow = () => { let p = 0; (save.gunOwned || []).forEach((o, i) => { if (o) p = Math.max(p, GUNS[i].pow); }); return p; };
 const gunTier = () => (save.gunOwned || []).filter(Boolean).length * 2;
 const bestDmg = () => Math.max(AXES[bestIdx()].dmg, gunPow());
-const isleHp = () => (isle === 3 ? 3 : isle === 2 ? 2.2 : 1), isleRw = () => (isle === 3 ? 2.1 : isle === 2 ? 1.6 : 1), isleDm = () => (isle === 3 ? 1.9 : isle === 2 ? 1.5 : 1);
+const isleHp = () => [1, 1, 2.2, 3, 4][isle], isleRw = () => [1, 1, 1.6, 2.1, 2.8][isle], isleDm = () => [1, 1, 1.5, 1.9, 2.4][isle];
 // timed buffs from the Apothecary and the Moonwell (they tick on play time, so pausing doesn't waste them)
 const buffOn = k => (save.buffs[k] || 0) > save.seconds;
 const dmgBuff = () => (buffOn("fury") ? 1.4 : 1) * (buffOn("blessed") ? 1.25 : 1);
@@ -223,11 +223,14 @@ const cNightSun = new THREE.Color(0x9fb0ff), cDaySun = new THREE.Color(0xfff2d8)
 // Mooncap Isle has its own sky: periwinkle days, pink dusks, deep violet nights
 const cNightFog3 = new THREE.Color(0x150a30), cDayFog3 = new THREE.Color(0xa6b4f2), cDusk3 = new THREE.Color(0xff7ab4);
 const cNightAmb3 = new THREE.Color(0x7a5ab8), cDayAmb3 = new THREE.Color(0xe6dcff);
+// Ashfall Isle: hazy orange days, blood-red dusks, nights lit by the volcano
+const cNightFog4 = new THREE.Color(0x1c0a06), cDayFog4 = new THREE.Color(0xb8907a), cDusk4 = new THREE.Color(0xff4a1a);
+const cNightAmb4 = new THREE.Color(0x8a3a2a), cDayAmb4 = new THREE.Color(0xffe2cc);
 const tmpC = new THREE.Color();
 function applySky() {
-    const d = dayAmt(), el = sunElev(), m3 = isle === 3;
+    const d = dayAmt(), el = sunElev(), m3 = isle === 3, m4 = isle === 4;
     const dusk = clamp(1 - Math.abs(el) * 4.5, 0, 1) * 0.65;
-    tmpC.copy(m3 ? cNightFog3 : cNightFog).lerp(m3 ? cDayFog3 : cDayFog, d).lerp(m3 ? cDusk3 : cDusk, dusk * 0.7);
+    tmpC.copy(m4 ? cNightFog4 : m3 ? cNightFog3 : cNightFog).lerp(m4 ? cDayFog4 : m3 ? cDayFog3 : cDayFog, d).lerp(m4 ? cDusk4 : m3 ? cDusk3 : cDusk, dusk * 0.7);
     const gray = clamp(wx.rain * 0.8 + wx.cloud * 0.25 + wx.fog * 0.6, 0, 1), blood = isBlood() ? 1 - d : 0;
     tmpC.lerp(cGray, gray * (0.25 + 0.5 * d)).lerp(cBlood, blood * 0.7);
     if (wx.light > 0) tmpC.lerp(cLightning, wx.light * 0.6);
@@ -235,7 +238,7 @@ function applySky() {
     scene.fog.color.copy(tmpC);
     scene.fog.near = lerp(6, 16, d) * (1 - wx.fog * 0.75) * (1 - wx.rain * 0.25);
     scene.fog.far = lerp(lerp(56, 120, d), 34, wx.fog) * (1 - wx.rain * 0.25) * (1 - blood * 0.25);
-    ambL.color.copy(m3 ? cNightAmb3 : cNightAmb).lerp(m3 ? cDayAmb3 : cDayAmb, d).lerp(cRed, blood * 0.45);
+    ambL.color.copy(m4 ? cNightAmb4 : m3 ? cNightAmb3 : cNightAmb).lerp(m4 ? cDayAmb4 : m3 ? cDayAmb3 : cDayAmb, d).lerp(cRed, blood * 0.45);
     ambL.intensity = lerp(1.5, 2.0, d) * (1 - 0.3 * gray) + wx.light * 3;
     sunL.color.copy(cNightSun).lerp(cDaySun, d).lerp(cDusk, dusk * 0.5).lerp(cRed, blood * 0.6);
     sunL.intensity = lerp(1.1, 2.6, d) * (1 - 0.65 * gray) * (1 + blood * 0.5);
@@ -260,6 +263,7 @@ function applySky() {
     lantern.intensity = (lerp(26, 8, d) + save.oilLvl * 6) * (player && player.lantern ? 1 : 0);
     lantern.distance = 24 + save.oilLvl * 6;
     if (m3) sky3(d);
+    if (m4) { scene.fog.near *= 1.6; scene.fog.far *= 2.4; sky4(d); } // the volcano should always loom over the island
     if (inCave()) caveSky();
 }
 
@@ -871,6 +875,7 @@ function ferrymanTex() {
     farGlow = canopyM;
 }
 function clampToIsland(p) {
+    if (isle === 4) { clampIsle4(p); return; }
     if (isle === 3) { clampIsle3(p); return; }
     if (isle === 2) { clampIsle2(p); return; }
     const dx = p.x - FB.x, dz = p.z - FB.z;
@@ -1221,6 +1226,15 @@ const TYPES = {
     voidspire:   { name: "Voidspire",       leaf: [0x6a3aff, 0x3a1a8a],           trunk: 0x1a1430, hp: 3.6, logs: 1.8, dmg: 1.6,  speed: 1.1, bonus: 30, wd: 0.08, wn: 0.18, col: "#8a5aff", glow: 0x3a10a0, isl: [3], minTier: 7, mat: "void" },
     starwisp:    { name: "Starwisp",        leaf: [0xfff2a0],                     trunk: 0xd8c8a0, hp: 2,   logs: 0.3, dmg: 0,    speed: 1,   bonus: 40, wd: 0.02, wn: 0.06, col: "#fff6a0", glow: 0x6a5a10, isl: [3], rare: true, flee: true, mat: "star" },
     mooncap:     { name: "Ancient Mooncap", leaf: [0x6a4ae0, 0x9a5ad8],           trunk: 0xd8ccb8, hp: 8,   logs: 6,   dmg: 2.4,  speed: 0.6, bonus: 90, wd: 0.05, wn: 0.06, col: "#e0c8ff", glow: 0x200a40, isl: [3], minTier: 8, titan: true, mat: "moonstone" },
+    // ---- Ashfall Isle ----
+    ashwood:   { name: "Ashwood",         leaf: [0x5a5450, 0x4a4440],           trunk: 0x2a2220, hp: 1.3, logs: 1.6, dmg: 1.1,  speed: 1,   bonus: 6,  wd: 0.9,  wn: 0.7,  col: "#c8bcb0", isl: [4], mat: "ash" },
+    cinderpine:{ name: "Cinder Pine",     leaf: [0x2a2624, 0x3a2a24],           trunk: 0x1a1210, hp: 1.6, logs: 1.4, dmg: 1.15, speed: 1,   bonus: 8,  wd: 0.7,  wn: 0.45, col: "#ff8a5a", glow: 0x1a0600, isl: [4], mat: "cinder" },
+    sulfurspire:{ name: "Sulfur Spire",   leaf: [0xd8c83a, 0xc8b030],           trunk: 0x5a4a1a, hp: 2.0, logs: 1.3, dmg: 1.2,  speed: 1,   bonus: 10, wd: 0.5,  wn: 0.35, col: "#ffe060", glow: 0x3a3000, isl: [4], minTier: 2, mat: "sulfur" },
+    obsidianoak:{ name: "Obsidian Oak",   leaf: [0x1a1420, 0x24182e],           trunk: 0x100c14, hp: 2.6, logs: 1.3, dmg: 1.3,  speed: 1,   bonus: 14, wd: 0.3,  wn: 0.3,  col: "#b88aff", glow: 0x0a0414, isl: [4], minTier: 4, mat: "obsidian" },
+    emberwillow:{ name: "Ember Willow",   leaf: [0xff6a1a, 0xff8a2a],           trunk: 0x2a1008, hp: 3.2, logs: 1.5, dmg: 1.5,  speed: 1.1, bonus: 22, wd: 0.12, wn: 0.35, col: "#ff7a3a", glow: 0x8a2a00, isl: [4], minTier: 6, mat: "ember" },
+    phoenixtree:{ name: "Phoenix Tree",   leaf: [0xffa02a, 0xffd060],           trunk: 0x6a2a10, hp: 2,   logs: 0.3, dmg: 0,    speed: 1,   bonus: 50, wd: 0.02, wn: 0.07, col: "#ffc060", glow: 0xa04000, isl: [4], rare: true, flee: true, night: true, mat: "phoenixf" },
+    basalt:    { name: "Basalt Colossus", leaf: [0x2a2626, 0x3a3030],           trunk: 0x1e1a1a, hp: 9,   logs: 7,   dmg: 2.8,  speed: 0.6, bonus: 100, wd: 0.05, wn: 0.05, col: "#d8a080", isl: [4], minTier: 9, titan: true, mat: "obsidian" },
+    emberling: { name: "Emberling",       leaf: [0xff5a1a, 0xff8a2a],           trunk: 0x2a0a04, hp: 0.6, logs: 0.6, dmg: 0.85, speed: 2.5, bonus: 0,  wd: 0,    wn: 0,    col: "#ffa040", glow: 0x6a1a00, isl: [], rush: true, mat: "ash" },
     // the Elder Heart's children: they never spawn on their own, and they don't care if you're looking
     thornling:   { name: "Thornling",       leaf: [0x6a1a3a, 0x8a2a4a],           trunk: 0x2a0a18, hp: 0.6, logs: 0.6, dmg: 0.8,  speed: 2.4, bonus: 0,  wd: 0,    wn: 0,    col: "#ff5a8a", glow: 0x3a0018, isl: [], rush: true, mat: "spore" }
 };
@@ -1241,7 +1255,9 @@ const TREE_STYLE = {
     crystal: { s: "crystal", dots: 0xbffff6 }, magma: { s: "round", dots: 0xffa030 }, colossus: { s: "conifer" },
     glowcap: { s: "shroom", dots: 0xfff0ff }, silverbirch: { s: "birch", dots: 0x2a2a34 }, amberpine: { s: "conifer", dots: 0xffb040 }, moonbloom: { s: "round", dots: 0xf4f6ff },
     gloomwood: { s: "dead", dots: 0xb07aff }, voidspire: { s: "crystal", dots: 0xd8b0ff }, starwisp: { s: "round", dots: 0xffffff }, mooncap: { s: "shroom", dots: 0xfff0ff },
-    thornling: { s: "spiky", dots: 0xff4a8a }
+    thornling: { s: "spiky", dots: 0xff4a8a },
+    ashwood: { s: "dead", dots: 0xff6a2a }, cinderpine: { s: "conifer", dots: 0xff7a2a }, sulfurspire: { s: "crystal", dots: 0xfff4a0 }, obsidianoak: { s: "round", dots: 0xb07aff },
+    emberwillow: { s: "round", dots: 0xffe070 }, phoenixtree: { s: "round", dots: 0xffffff }, basalt: { s: "conifer", dots: 0xff6a2a }, emberling: { s: "spiky", dots: 0xffd040 }
 };
 const snowMat = new THREE.MeshLambertMaterial({ color: 0xf2f6ff, flatShading: true }), rockMat = new THREE.MeshLambertMaterial({ color: 0x7a7a84, flatShading: true });
 const dotMats = {};
@@ -1432,7 +1448,7 @@ function pickType(px = 0, pz = 0) {
     for (const T of Object.values(TYPES)) if (ok(T)) total += tw(T);
     let r = Math.random() * total;
     for (const [k, T] of Object.entries(TYPES)) { if (!ok(T)) continue; r -= tw(T); if (r <= 0) return k; }
-    return isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
+    return isle === 4 ? "ashwood" : isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
 }
 let lastRareToast = -99;
 function spawnTree(announce = true) {
@@ -1445,6 +1461,7 @@ function spawnTree(announce = true) {
         if (bad) continue;
         if (isle === 2 && Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 5) continue;
         if (isle === 3 && !treeOk3(x, z)) continue;
+        if (isle === 4 && !treeOk4(x, z)) continue;
         for (const o of trees) if (!o.gone && Math.hypot(x - o.x, z - o.z) < 6) { bad = true; break; }
         if (bad) continue;
         const key = pickType(x, z), T = TYPES[key];
@@ -1513,7 +1530,10 @@ const AXES = [
     // forged on Mooncap Isle
     { name: "Lunar Cleaver",  dmg: 180, cost: 0, steel: 0xb8c4e8, edge: 0xf4f8ff, glow: 0x3a4a9a, scale: 1.66, rarity: "#cfe0ff", isle3: true, night: 1.3 },
     { name: "Voidreaver",     dmg: 280, cost: 0, steel: 0x1a0a3a, edge: 0x9a5aff, glow: 0x4a1aa0, scale: 1.72, rarity: "#9a6aff", isle3: true },
-    { name: "Elder's Bane",   dmg: 450, cost: 0, steel: 0x3a0a1a, edge: 0xff4a7a, glow: 0x8a0a3a, scale: 1.82, rarity: "#ff5a8a", isle3: true }
+    { name: "Elder's Bane",   dmg: 450, cost: 0, steel: 0x3a0a1a, edge: 0xff4a7a, glow: 0x8a0a3a, scale: 1.82, rarity: "#ff5a8a", isle3: true },
+    // forged in the Crucible on Ashfall Isle
+    { name: "Cinderbrand",    dmg: 700, cost: 0, steel: 0x2a1410, edge: 0xff8a2a, glow: 0x8a3000, scale: 1.88, rarity: "#ff9a4a", isle3: true },
+    { name: "Volcano's Wrath", dmg: 1100, cost: 0, steel: 0x1a0a08, edge: 0xffd040, glow: 0xc04000, scale: 1.96, rarity: "#ffd040", isle3: true }
 ];
 const axeDmg = () => axeDmgFor(save.equipped);
 const ownedList = () => AXES.map((a, i) => i).filter(i => save.owned[i]);
@@ -1567,7 +1587,7 @@ function dropLogs(x, z, n, back, key = "pine") {
     const T = TYPES[key];
     const meshes = Math.min(n, 14), base = Math.floor(n / meshes), extra = n % meshes; // big drops are stacks of logs, not hundreds of meshes
     for (let i = 0; i < meshes; i++) {
-        const mk = isle >= 2 ? (T.mat || (isle === 3 ? "spore" : "wood")) : null;
+        const mk = isle >= 2 ? (T.mat || (isle === 4 ? "ash" : isle === 3 ? "spore" : "wood")) : null;
         const m = mk ? new THREE.Mesh(matGeo, matMeshMat[mk]) : new THREE.Mesh(logGeo, logMats[key] || logMat);
         const d = Math.random() * 2.5;
         m.position.set(x + back.x * d, groundY(x + back.x * d, z + back.z * d) + 0.4, z + back.z * d);
@@ -1608,7 +1628,7 @@ function newContract() {
     if (isNight() && roll < 0.5) save.contract = { type: "rare", goal: 1, prog: 0, reward: Math.round(170 * m), text: "Fell a rare tree" };
     else if (roll < 0.6) { const g = 4 + Math.floor(Math.random() * 5); save.contract = { type: "fell", goal: g, prog: 0, reward: Math.round(g * 14 * m), text: `Fell ${g} trees` }; }
     else { const g = 12 + Math.floor(Math.random() * 14); save.contract = { type: "sell", goal: g, prog: 0, reward: Math.round(g * 6 * m), text: isle >= 2 ? `Sell ${g} materials at the Trading Post` : `Sell ${g} logs at the mill` }; }
-    if (isle === 3) save.contract.reward *= 40; // Mooncap money is bigger money
+    if (isle >= 3) save.contract.reward *= isle === 4 ? 400 : 40; // later islands pay bigger money
 }
 function contractProgress(kind, n = 1) {
     const c = save.contract;
@@ -1637,6 +1657,7 @@ function onDawn() {
     resetChests();
     if (typeof syncVeins === "function" && mineBuilt) syncVeins();
     if (isle === 3) dawn3();
+    if (isle === 4) dawn4();
     if (!save.contract) newContract();
     writeSave();
 }
@@ -1675,7 +1696,7 @@ function hitTree(best, dmg, melee) {
 }
 function fellTree(t) {
     t.dying = true; t.t = 0;
-    if (t.boss) { bossDefeated(t); return; }
+    if (t.boss) { (t.key === "cinderking" ? kingDefeated : bossDefeated)(t); return; }
     save.felled++;
     if (isBlood()) bmFelled++;
     contractProgress("fell");
@@ -1713,6 +1734,7 @@ function die() {
         return;
     }
     endFishing();
+    if (isle === 4 && fight4.on) endFight4(false);
     if (isle === 3 && fight3.on) endFight(false); // dying ends the fight: the Elder Heart goes back to sleep and you wake up in camp
     player.hp = 0;
     state = "dead";
@@ -1791,10 +1813,10 @@ function openChest(c) {
     c.opened = true; c.beacon.visible = false; save.chestsOpened++;
     const m = (1 + 0.15 * (save.day - 1)) * (isBlood() ? 2 : 1), r = Math.random();
     let msg;
-    if (isle === 3) { // Mooncap chests: real money and a handful of materials
-        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1)), ks = c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
+    if (isle >= 3) { // Mooncap and Ashfall chests: real money and a handful of materials
+        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle === 4 ? 10 : 1)), ks = isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
         save.money += cash; save.mats[k] = (save.mats[k] || 0) + n; if (c.special) save.bandages++;
-        msg = `${c.special ? "Moonlit chest" : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
+        msg = `${c.special ? (isle === 4 ? "Scorched chest" : "Moonlit chest") : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
     } else if (c.special) { const cash = Math.round(rand(120, 260) * m); save.money += cash; save.bandages++; msg = `Cursed chest: +${money(cash)} and a bandage`; }
     else if (r < 0.6) { const cash = Math.round(rand(25, 85) * m); save.money += cash; msg = `Chest: +${money(cash)}`; }
     else if (r < 0.85) { const cash = Math.round(rand(10, 30) * m); save.money += cash; save.bandages++; msg = `Chest: a bandage and ${money(cash)}`; }
@@ -1885,7 +1907,7 @@ function buy(i) {
 const recipeHtml = r => '<span class="recipe">' + Object.entries(r).map(([k, n]) => { const have = save.mats[k] || 0; return `<span class="rp ${have >= n ? "ok" : "no"}"><img src="${iconURL("m:" + k)}">${Math.min(have, n)}/${n} ${MATS[k].name}</span>`; }).join("") + "</span>";
 function renderShop() {
     $("shopCash").textContent = money(save.money);
-    $("shopName").textContent = shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : SHOP_NAMES[shopMode];
+    $("shopName").textContent = shopMode === "forge" && isle === 4 ? "THE CRUCIBLE" : shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : shopMode === "brew" && isle === 4 ? "THE ALCHEMIST" : SHOP_NAMES[shopMode];
     const tabs = SHOP_TABS[shopMode];
     if (!tabs.some(t => t[0] === shopTab)) shopTab = tabs[0][0];
     const th = tabs.length > 1 ? tabs.map(t => `<button class="tab ${t[0] === shopTab ? "on" : ""}" data-tab="${t[0]}">${t[1]}</button>`).join("") : "";
@@ -1974,7 +1996,8 @@ function renderInv() {
         ["Rare trees", save.rareFelled],
         ["Chests opened", save.chestsOpened],
         [isle >= 2 ? "Materials sold" : "Logs sold", save.sold],
-        ...(isle === 3 || save.bossKills ? [["Elder Heart felled", save.bossKills || 0], ["Stars caught", save.starsCaught || 0]] : []),
+        ...(isle >= 3 || save.bossKills ? [["Elder Heart felled", save.bossKills || 0], ["Stars caught", save.starsCaught || 0]] : []),
+        ...(isle >= 4 || save.kingKills ? [["Cinder King felled", save.kingKills || 0]] : []),
         ["Deaths", save.deaths],
         ["Fish caught", Object.values(save.fishDex || {}).reduce((a, d) => a + d.n, 0)],
         ["Blood moons survived", save.bmSurvived || 0],
@@ -2136,7 +2159,7 @@ function updateNameplates() {
         if (!(nowMs - (t._occT || 0) < 120)) { t._occT = nowMs; t._occ = isOccluded(V3(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 1.5, t.z), t.solid); }
         if (t._occ || behindAxe(px, py)) { e.style.display = "none"; continue; }
         const T = t.type, dmg = treeDmg(t);
-        const tm = T.mat || (isle === 3 ? "spore" : "wood");
+        const tm = T.mat || (isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
         const html = '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle >= 2 ? ' · <em style="color:' + MATS[tm].col + '">' + treeLogs(t) + ' ' + MATS[tm].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
         if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = T.col; }
         e.style.display = "";
@@ -2151,6 +2174,7 @@ function updateNameplates() {
 
 // ---------- map ----------
 function drawMap() {
+    if (isle === 4) { drawMap4(); return; }
     if (isle === 3) { drawMap3(); return; }
     if (isle === 2) { drawMap2(); return; }
     const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 112;
@@ -2346,6 +2370,7 @@ addEventListener("mousemove", e => {
 });
 
 function nearest() {
+    if (isle === 4) return nearest4();
     if (isle === 3) return nearest3();
     if (isle === 2) return nearest2();
     const px = player.pos.x, pz = player.pos.z;
@@ -2367,10 +2392,11 @@ function interact() {
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
     if (n.k === "smith") {
-        openShop("forge", pick(isle === 3 ? SMITH3_SAY : SMITH_SAY));
-    } else if (n.k === "depot") openShop("trade", isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
+        openShop("forge", pick(isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
+    } else if (n.k === "depot") openShop("trade", isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
     else if (n.k === "witch") openShop("brew", pick(WITCH_SAY));
     else if (n.k === "ferry3") { if (!save.ferry3Talk) { save.ferry3Talk = 1; startTalk("THE FERRYMAN", FERRY3_LINES, () => openFerry3()); } else openFerry3(); }
+    else if (n.k === "ferry4") openFerry4();
     else if (n.k === "well") drinkWell();
     else if (n.k === "scope") useScope();
     else if (n.k === "star") takeStar(n.s);
@@ -2626,7 +2652,7 @@ function update(dt) {
     camera.getWorldDirection(fwd);
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
-    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt);
+    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt);
     updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
@@ -3350,6 +3376,7 @@ function openFerry() {
     openPanel("ferry");
 }
 function renderFerry() {
+    if (isle === 4) { renderFerry4(); return; }
     if (isle === 3) { renderFerry3(); return; }
     if (isle === 2) { renderFerry2(); return; }
     const cost = rebirthCost(), n = (save.rebirths || 0) + 1, can = save.money >= cost;
@@ -3366,10 +3393,10 @@ function renderFerry() {
     b.classList.toggle("danger", !!ferryConfirm);
 }
 $("ferryBuy").addEventListener("click", () => {
-    if (isle === 3) return;
-    if (isle === 2 ? !rebirth2Ready() : save.money < rebirthCost()) return;
+    if (isle === 4) return;
+    if (isle === 3 ? !rebirth3Ready() : isle === 2 ? !rebirth2Ready() : save.money < rebirthCost()) return;
     if (!ferryConfirm) { ferryConfirm = 1; renderFerry(); setTimeout(() => { ferryConfirm = 0; if (panel === "ferry") renderFerry(); }, 5000); return; }
-    if (isle === 2) startRebirthRide(2); else doRebirth();
+    if (isle >= 2) startRebirthRide(isle); else doRebirth();
 });
 function doRebirth() { startRebirthRide(); }
 
@@ -3421,7 +3448,8 @@ const GUNS = [
     { name: "Chop-Chop SMG",      kind: "smg",      dmg: 8,   pel: 1, spread: 0.025, mag: 32,  rate: 0.085, reload: 1.9, range: 60, auto: true,  cost: 24000,  pack: 96,  packCost: 300,  pow: 30,  metal: 0x2e3a4a, wood: 0x2a2a30, col: "#7fd8ff", muz: -0.52 },
     { name: "Timber Rifle",       kind: "rifle",    dmg: 120, pel: 1, spread: 0.0015, mag: 5,  rate: 0.95, reload: 2.4, range: 140, auto: false, cost: 48000,  pack: 15,  packCost: 330,  pow: 38,  metal: 0x3a4a3a, wood: 0x8a5a34, col: "#6dffa0", muz: -1.0 },
     { name: "Lumberjack Minigun", kind: "minigun",  dmg: 16,  pel: 1, spread: 0.04,  mag: 150, rate: 0.05, reload: 4.0, range: 70,  auto: true,  cost: 150000, pack: 300, packCost: 1500, pow: 100, metal: 0x6a2a2a, wood: 0x2a1a1a, col: "#ff6a5a", muz: -0.95 },
-    { name: "Moonbeam Lance",     kind: "lance",    dmg: 260, pel: 1, spread: 0.001, mag: 6,   rate: 0.55, reload: 2.2, range: 130, auto: false, cost: 0,      pack: 18,  packCost: 0,    pow: 220, metal: 0xd8e0f8, wood: 0x3a2a6a, col: "#c8a0ff", muz: -0.9, pierce: true }
+    { name: "Moonbeam Lance",     kind: "lance",    dmg: 260, pel: 1, spread: 0.001, mag: 6,   rate: 0.55, reload: 2.2, range: 130, auto: false, cost: 0,      pack: 18,  packCost: 0,    pow: 220, metal: 0xd8e0f8, wood: 0x3a2a6a, col: "#c8a0ff", muz: -0.9, pierce: true },
+    { name: "Magma Launcher",     kind: "launcher", dmg: 900, pel: 1, spread: 0.002, mag: 4,   rate: 0.9,  reload: 2.6, range: 90,  auto: false, cost: 0,      pack: 12,  packCost: 0,    pow: 420, metal: 0x3a2a24, wood: 0x6a2a14, col: "#ff7a3a", muz: -0.95, splash: 5 }
 ];
 const gunAm = i => save.gunAmmo[i] || (save.gunAmmo[i] = { mag: 0, res: 0 });
 const magSize = i => Math.round(GUNS[i].mag * (1 + 0.25 * (save.magLvl || 0)));
@@ -3455,6 +3483,11 @@ function gunParts(i, grp, hands) {
     else if (G.kind === "shotgun") { gc(0.03, 0.62, 0, 0.035, -0.5, metal); gc(0.025, 0.5, 0, -0.02, -0.46, metal); gb(0.075, 0.07, 0.22, 0, -0.04, -0.45, wd); gb(0.06, 0.12, 0.3, 0, -0.03, 0.28, wd); }
     else if (G.kind === "smg") { gc(0.022, 0.26, 0, 0.025, -0.32, metal); gb(0.05, 0.23, 0.07, 0, -0.2, -0.08, dark, 0.1); gb(0.045, 0.1, 0.22, 0, -0.02, 0.22, dark); gb(0.03, 0.03, 0.05, 0, 0.075, -0.3, dark); }
     else if (G.kind === "rifle") { gc(0.024, 0.78, 0, 0.03, -0.62, metal); gb(0.065, 0.13, 0.34, 0, -0.03, 0.3, wd); gc(0.03, 0.26, 0, 0.115, -0.08, dark); gc(0.04, 0.05, 0, 0.115, -0.22, glove); }
+    else if (G.kind === "launcher") {
+        const glowL = new THREE.MeshBasicMaterial({ color: 0xff7a2a });
+        gc(0.075, 0.7, 0, 0.04, -0.45, metal); gc(0.085, 0.08, 0, 0.04, -0.8, dark); gc(0.06, 0.02, 0, 0.04, -0.85, glowL);
+        gb(0.08, 0.14, 0.3, 0, -0.03, 0.27, wd); gb(0.06, 0.08, 0.2, 0, 0.12, -0.2, dark); gb(0.03, 0.06, 0.1, 0, 0.17, -0.25, glowL);
+    }
     else if (G.kind === "lance") {
         const glowL = new THREE.MeshBasicMaterial({ color: 0xc8a0ff });
         gc(0.034, 0.7, 0, 0.03, -0.55, metal); gb(0.07, 0.12, 0.3, 0, -0.03, 0.27, wd);
@@ -3524,6 +3557,19 @@ function fireGun() {
     camRight.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
     const mz = V3(camera.position.x, camera.position.y - 0.25, camera.position.z).addScaledVector(camRight, 0.28).addScaledVector(gdir, 0.9);
     const dmg = gunDmg(i), hits = new Map();
+    if (G.splash) { // the launcher lobs a ball of magma that bursts and burns every tree around where it lands
+        const hit = rayTree(camera.position, gdir, G.range), s = hit ? hit.s : G.range;
+        const ix = camera.position.x + gdir.x * s, iz = camera.position.z + gdir.z * s, iy = hit ? camera.position.y + gdir.y * s : groundY(ix, iz) + 0.5;
+        addTracer(mz, V3(ix, iy, iz), 0xff8a2a, 0.18);
+        let n = 0;
+        for (const t of trees) { if (t.gone || t.dying || t.burn) continue; const dd = Math.hypot(t.x - ix, t.z - iz) - t.r; if (dd < G.splash) { hitTree(t, Math.round(dmg * (dd < 1.5 ? 1 : 0.6)), false); n++; } }
+        burst(V3(ix, iy, iz), 40, 9, [new THREE.MeshBasicMaterial({ color: 0xff7a2a }), new THREE.MeshBasicMaterial({ color: 0xffd060 }), chipMats[2]]);
+        if (n > 1) floatScreen(n + " TREES SCORCHED", "cash");
+        shake = Math.min(0.8, shake + 0.35); fovKick = Math.max(fovKick, 1); flash = Math.max(flash, 0.15);
+        sfx(70, 0.6, "sawtooth", 0.2, 0.3); sfx(140, 0.4, "square", 0.12, 0.4); setTimeout(() => sfx(55, 0.7, "sawtooth", 0.16, 0.4), 120);
+        if (am.mag === 0 && am.res > 0) setTimeout(() => { if (holdingGun() && gunAm(save.gunEq).mag === 0) startReload(); }, 250);
+        return;
+    }
     if (G.pierce) { // the lance goes through everything in its way
         const end = V3(camera.position.x + gdir.x * G.range, camera.position.y + gdir.y * G.range, camera.position.z + gdir.z * G.range);
         for (const o of [0, 0.03, -0.03]) addTracer(mz.clone().addScaledVector(camRight, o), end, 0xd8b8ff, 0.16);
@@ -3592,11 +3638,19 @@ const MATS = {
     moonstone: { name: "Moonstone", col: "#9fe0ff", price: 95,   hex: 0x9fdcff },
     void:      { name: "Voidglass", col: "#a47aff", price: 180,  hex: 0x6a3aff },
     star:      { name: "Star Shard", col: "#fff4a0", price: 600, hex: 0xfff09a },
-    heartwood: { name: "Heartwood", col: "#ff5a8a", price: 2500, hex: 0xd02a5a }
+    heartwood: { name: "Heartwood", col: "#ff5a8a", price: 2500, hex: 0xd02a5a },
+    // Ashfall Isle
+    ash:       { name: "Ash",       col: "#c8bcb0", price: 40,  hex: 0x8a8480 },
+    cinder:    { name: "Cinder",    col: "#ff8a5a", price: 70,  hex: 0x5a2a1a },
+    sulfur:    { name: "Sulfur",    col: "#ffe060", price: 110, hex: 0xe0d040 },
+    obsidian:  { name: "Obsidian",  col: "#b88aff", price: 180, hex: 0x1e1428 },
+    ember:     { name: "Ember",     col: "#ff7a3a", price: 300, hex: 0xff6a1a },
+    phoenixf:  { name: "Phoenix Feather", col: "#ffc060", price: 900, hex: 0xffa030 },
+    molten:    { name: "Molten Core", col: "#ff6a2a", price: 9000, hex: 0xff4a10 }
 };
-const MATS_BY_ISLE = { 2: ["wood", "stone", "copper", "iron", "gunpowder", "gold", "crystal", "magma"], 3: ["spore", "silver", "amber", "moonstone", "void", "star", "heartwood"] };
+const MATS_BY_ISLE = { 2: ["wood", "stone", "copper", "iron", "gunpowder", "gold", "crystal", "magma"], 3: ["spore", "silver", "amber", "moonstone", "void", "star", "heartwood"], 4: ["ash", "cinder", "sulfur", "obsidian", "ember", "phoenixf", "molten"] };
 const isleMats = () => MATS_BY_ISLE[isle] || MATS_BY_ISLE[2];
-const GLOW_MATS = ["gold", "crystal", "magma", "moonstone", "void", "star", "heartwood"];
+const GLOW_MATS = ["gold", "crystal", "magma", "moonstone", "void", "star", "heartwood", "ember", "phoenixf", "molten"];
 const matPrice = k => Math.round(MATS[k].price * rebirthMult() * (1 + 0.15 * (save.priceLvl || 0)));
 const hasMats = r => Object.entries(r).every(([k, n]) => (save.mats[k] || 0) >= n);
 function payMats(r) { for (const [k, n] of Object.entries(r)) save.mats[k] -= n; }
@@ -3652,14 +3706,20 @@ const GUN_RECIPES3 = [
     { moonstone: 30, void: 40, star: 8 }
 ];
 const AMMO_RECIPES3 = [{ spore: 2, silver: 1 }, { spore: 3, silver: 3 }, { silver: 4, amber: 2 }, { silver: 3, amber: 3 }, { amber: 10, moonstone: 4 }, { moonstone: 3, void: 2 }];
-const axeRecipe = i => (isle === 3 ? AXE_RECIPES3 : AXE_RECIPES)[i];
-const gunRecipe = i => (isle === 3 ? GUN_RECIPES3 : GUN_RECIPES)[i];
-const ammoRecipe = i => (isle === 3 ? AMMO_RECIPES3 : AMMO_RECIPES)[i];
+// the Crucible on Ashfall Isle
+const AXE_RECIPES4 = [null, { ash: 8 }, { ash: 12, cinder: 4 }, { ash: 16, cinder: 8 }, { cinder: 14, sulfur: 4 }, { cinder: 20, sulfur: 10 }, { cinder: 26, sulfur: 12, obsidian: 4 }, { sulfur: 20, obsidian: 10 },
+    { obsidian: 18, ember: 4 }, { sulfur: 20, obsidian: 26, ember: 10 }, { obsidian: 30, ember: 22, phoenixf: 2 }, { cinder: 60, ember: 34, phoenixf: 5 }, { obsidian: 50, ember: 60, phoenixf: 10 }, { obsidian: 60, ember: 80, phoenixf: 16 }, { obsidian: 80, ember: 100, phoenixf: 20 }, { molten: 3, ember: 120, phoenixf: 30 }];
+const GUN_RECIPES4 = [{ ash: 10, cinder: 6 }, { ash: 20, cinder: 12, sulfur: 4 }, { cinder: 26, sulfur: 12 }, { cinder: 30, sulfur: 18, obsidian: 6 }, { sulfur: 40, obsidian: 40, ember: 18 }, { obsidian: 30, ember: 40, phoenixf: 8 }, { obsidian: 60, ember: 60, phoenixf: 12 }];
+const AMMO_RECIPES4 = [{ ash: 2, sulfur: 1 }, { ash: 3, sulfur: 3 }, { cinder: 4, sulfur: 2 }, { cinder: 3, sulfur: 3 }, { sulfur: 10, obsidian: 4 }, { obsidian: 3, ember: 2 }, { sulfur: 8, ember: 3 }];
+const RECIPES = { 3: [AXE_RECIPES3, GUN_RECIPES3, AMMO_RECIPES3], 4: [AXE_RECIPES4, GUN_RECIPES4, AMMO_RECIPES4] };
+const axeRecipe = i => (RECIPES[isle] ? RECIPES[isle][0] : AXE_RECIPES)[i];
+const gunRecipe = i => (RECIPES[isle] ? RECIPES[isle][1] : GUN_RECIPES)[i];
+const ammoRecipe = i => (RECIPES[isle] ? RECIPES[isle][2] : AMMO_RECIPES)[i];
 function axeCraftItems() {
     const out = [];
     AXES.forEach((a, i) => {
         if (i === 0 || !axeRecipe(i)) return;
-        const need = isle === 3 && i === 13 && !save.bossKills ? " · Heartwood only falls from the Elder Heart" : "";
+        const need = isle === 3 && i === 13 && !save.bossKills ? " · Heartwood only falls from the Elder Heart" : isle === 4 && i === 15 && !save.kingKills ? " · Molten Cores only come from the Cinder King" : "";
         out.push({ name: a.name, icon: "a" + i, col: a.rarity, desc: `${Math.round(a.dmg * (1 + 0.1 * (save.rebirths || 0)))} damage per swing${a.night ? ` (x${a.night} at night)` : ""}${need}`, craft: axeRecipe(i), owned: !!save.owned[i], axe: i, buy() { gainAxe(i); } });
     });
     return out;
@@ -3674,7 +3734,7 @@ function ammoCraftItems() {
         const am = gunAm(i);
         out.push({ name: g.name + " ammo", icon: "g" + i, col: g.col, desc: `+${g.pack} rounds · you have ${am.mag} + ${am.res} (max ${resCap(i)} spare)`, craft: ammoRecipe(i), maxed: am.res >= resCap(i), buy() { am.res = Math.min(resCap(i), am.res + g.pack); if (holdingGun() && save.gunEq === i && am.mag === 0) startReload(); } });
     });
-    if (!out.length) out.push({ name: "No guns yet", desc: isle === 3 ? "Craft a gun first. Then bring Spores, Moonsilver and Amber here to make rounds." : "Craft a gun first. Then bring Copper and Gunpowder here to make bullets.", sell: true, value: 0, buy() {} });
+    if (!out.length) out.push({ name: "No guns yet", desc: isle === 4 ? "Craft a gun first. Then bring Ash, Cinder and Sulfur here to make rounds." : isle === 3 ? "Craft a gun first. Then bring Spores, Moonsilver and Amber here to make rounds." : "Craft a gun first. Then bring Copper and Gunpowder here to make bullets.", sell: true, value: 0, buy() {} });
     return out;
 }
 function tradeItems() {
@@ -3735,6 +3795,13 @@ function propModel(key) {
         else if (k === "void") { add(CONE6, m, 0, 0.15, 0, 0.32, 1.25, 0.32); add(CONE6, icM(0x2a1050, 0x3a10a0), 0.3, -0.05, 0.1, 0.2, 0.75, 0.2, 0, 0, -0.55); add(CONE6, m, -0.3, -0.1, 0, 0.18, 0.62, 0.18, 0, 0, 0.55); }
         else if (k === "star") { const s = new THREE.Shape(); for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 + Math.PI / 2, rr = i % 2 ? 0.26 : 0.62; i ? s.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : s.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); } s.closePath(); const sg = new THREE.ExtrudeGeometry(s, { depth: 0.16, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 1 }); sg.translate(0, 0, -0.08); add(sg, icM(0xfff09a, 0xffd040)); g.rotation.set(0.15, 0.5, 0.1); }
         else if (k === "heartwood") { add(CYL8, icM(0x5a2a1a), 0, 0, 0, 0.5, 0.8, 0.5, Math.PI / 2, 0.4, 0); add(CYL8, icM(0xff4a7a, 0xd01a4a), Math.sin(0.4) * 0.41, 0, Math.cos(0.4) * 0.41, 0.3, 0.02, 0.3, Math.PI / 2, 0.4, 0); add(CYL8, icM(0xc89a6a), Math.sin(0.4) * 0.405, 0, Math.cos(0.4) * 0.405, 0.46, 0.01, 0.46, Math.PI / 2, 0.4, 0); }
+        else if (k === "molten") { add(new THREE.IcosahedronGeometry(1, 1), icM(0x2a1410), 0, 0, 0, 0.55); add(new THREE.IcosahedronGeometry(1, 1), icM(0xffa020, 0xff6a00), 0, 0, 0, 0.42); for (let s = 0; s < 6; s++) add(BOX, icM(0xff7a1a, 0xff4a00), Math.cos(s) * 0.5, Math.sin(s * 1.7) * 0.4, Math.sin(s) * 0.5, 0.18, 0.04, 0.04, 0, s, s); }
+        else if (k === "ash") { add(ICO, m, 0, -0.1, 0, 0.6, 0.35, 0.55); add(ICO, icM(0x6a6460), 0.35, 0.05, 0.1, 0.3, 0.2, 0.3); add(ICO, icM(0xff6a2a, 0xff4a10), -0.2, 0.12, 0.25, 0.08); }
+        else if (k === "cinder") { add(ICO, m, 0, 0, 0, 0.5, 0.45, 0.5, 0.3, 0.5); for (let s = 0; s < 5; s++) add(BOX, icM(0xff5a1a, 0xff3a0a), Math.cos(s * 1.3) * 0.38, Math.sin(s * 2) * 0.3, Math.sin(s * 1.3) * 0.38, 0.12, 0.05, 0.05, 0, s, 0); }
+        else if (k === "sulfur") { add(CONE6, m, 0, 0.1, 0, 0.32, 1.0, 0.32); add(CONE6, m, 0.32, -0.08, 0.1, 0.2, 0.6, 0.2, 0, 0, -0.5); add(CONE6, m, -0.3, -0.12, 0, 0.18, 0.5, 0.18, 0, 0, 0.5); add(ICO, icM(0x8a7a2a), 0, -0.45, 0, 0.5, 0.15, 0.4); }
+        else if (k === "obsidian") { add(ICO, icM(0x1e1428, 0x0a0414), 0, 0, 0, 0.6, 0.5, 0.35, 0.4, 0.7); add(BOX, icM(0xb07aff, 0x6a3aff), 0.12, 0.15, 0.25, 0.3, 0.02, 0.02, 0, 0, 0.5); }
+        else if (k === "ember") { add(ICO, icM(0xff6a1a, 0xff4a00), 0, 0, 0, 0.45); add(ICO, icM(0xffe070, 0xffc020), 0, 0.05, 0.2, 0.22); for (let s = 0; s < 4; s++) add(CONE6, icM(0xff8a2a, 0xff5a10), Math.cos(s * 1.57) * 0.3, 0.35, Math.sin(s * 1.57) * 0.3, 0.1, 0.4, 0.1); }
+        else if (k === "phoenixf") { const fg = new THREE.ConeGeometry(0.22, 1.4, 6); add(fg, icM(0xffa030, 0xff6a10), 0, 0, 0, 1, 1, 0.35, 0, 0, -0.6); add(CYL6, icM(0xfff0c0), 0.36, -0.5, 0, 0.03, 0.6, 0.03, 0, 0, -0.6); add(ICO, icM(0xff4a1a, 0xff2a00), -0.15, 0.3, 0.05, 0.12, 0.3, 0.05, 0, 0, -0.6); }
         else if (k === "wood") { add(CYL8, icM(0x8a5a34), 0, 0, 0, 0.32, 1.2, 0.32, Math.PI / 2, 0.4, 0); add(CYL8, icM(0xe0b070), Math.sin(0.4) * 0.61, 0, Math.cos(0.4) * 0.61, 0.28, 0.02, 0.28, Math.PI / 2, 0.4, 0); }
         else if (k === "stone") { add(ICO, m, 0, 0, 0, 0.55, 0.42, 0.5, 0.3, 0.4); add(ICO, icM(0x6a6a74), 0.45, -0.15, 0.2, 0.3, 0.25, 0.3); }
         else if (k === "copper" || k === "iron" || k === "gold" || k === "silver") { const tg = new THREE.CylinderGeometry(0.42, 0.62, 0.3, 4); tg.rotateY(Math.PI / 4); add(tg, m, 0, 0, 0, 1, 1, 0.55); add(tg, m, 0.12, 0.32, 0.02, 0.9, 1, 0.5); g.rotation.set(0.35, 0.5, 0); }
@@ -3795,7 +3862,7 @@ const LM2 = [
     { name: "OLD MINE", x: -81, z: -28.5, r: 9, col: "#c0a080" },
     { name: "HUNTER'S LODGE", x: 58, z: -14, r: 9, col: "#ff9a6a" }
 ];
-function curLM() { return isle === 2 ? LM2 : LANDMARKS; }
+function curLM() { return isle === 4 ? LM4 : isle === 3 ? LM3 : isle === 2 ? LM2 : LANDMARKS; }
 let isle2Built = false, altar2 = null, ferry2 = null, ferryman2 = null, ferryBoat2 = null, smithMesh = null, clerkMesh = null, mapBg2 = null;
 const isle2G = new THREE.Group(); // everything on the Highland Isle (and its cave and mine), so another island can hide it
 scene.add(isle2G);
@@ -4316,7 +4383,7 @@ function gunItems() {
     return out;
 }
 function gearItems2() {
-    const k3 = isle === 3 ? 6 : 1; // Mooncap pays more, so it charges more
+    const k3 = isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
     return [
         { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
         { name: "Better Prices", desc: `Materials sell for +15% more each level (now +${15 * (save.priceLvl || 0)}%)`, cost: priceCost(), buy() { save.priceLvl++; } },
@@ -4418,19 +4485,21 @@ const DECK = V3(0.55, 2.55, 3.0), deckV = new THREE.Vector3(); // where you stan
 const deckEye = (boat = ferryBoat) => { boat.updateMatrixWorld(); return deckV.copy(DECK).applyMatrix4(boat.matrixWorld); };
 function say(t) { const e = $("rideCap"); e.textContent = t; e.classList.toggle("show", !!t); }
 // which ferry you're riding: Pine Island's (to the Highland Isle) or the Highland Isle's (to Mooncap Isle)
-const rideCfg = n => (n === 2
+const rideCfg = n => (n === 3
+    ? { boat: isle3.boat3, man: ferryman3, pt: dock3Pt, DIR: D3DIR, A: D3LEN - 7, S: 4.4, lines: ["The air turns hot. Ash drifts over the water...", "A mountain on fire rises out of the sea."], finish: finishRebirth3 }
+    : n === 2
     ? { boat: ferryBoat2, man: ferryman2, pt: dock2Pt, DIR: D2DIR, A: D2LEN - 7, S: 4.4, lines: ["The violet light grows closer...", "Two moons rise over the water."], finish: finishRebirth2 }
     : { boat: ferryBoat, man: ferryman, pt: dockPt, DIR: FDIR, A: BOAT_A, S: BOAT_S, lines: ["The golden light grows closer...", "A new life awaits."], finish: finishRebirth });
 function startRebirthRide(from = 1) {
-    if (ride || (from === 2 ? !rebirth2Ready() : save.money < rebirthCost())) return;
+    if (ride || (from === 3 ? !rebirth3Ready() : from === 2 ? !rebirth2Ready() : save.money < rebirthCost())) return;
     closePanel();
     ride = { phase: "walk", t: 0, from: player.pos.clone(), fx: false, done: false, cfg: rideCfg(from) };
     mouseDown = false; endFishing();
     player.invuln = 99999; player.vel.set(0, 0, 0);
     const fl = labelList.find(l => l.el.textContent === "FERRYMAN" && l.isle === isle); if (fl) fl.visible = false;
-    $("rbSmall").textContent = from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
-    $("rebirthFx").classList.toggle("violet", from === 2);
-    say(from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
+    $("rbSmall").textContent = from === 3 ? "REBIRTH 3 · ASHFALL ISLE" : from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
+    $("rebirthFx").classList.toggle("violet", from === 2); $("rebirthFx").classList.toggle("ember", from === 3);
+    say(from === 3 ? "All aboard. Mind the Heartwood, it's still warm." : from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
     sfx(200, 0.9, "sine", 0.1, 2);
     writeSave();
 }
@@ -4835,12 +4904,13 @@ function loadWorld(n) {
 function leaveWorld() {
     if (isle === 1 && !worldSnap[1]) { snapWorld(1); isle1Water = waterMesh.geometry; isle1Emit = smokeEmit.slice(); }
     if (isle === 3 && fight3.on) endFight(false, true);
+    if (isle === 4 && fight4.on) endFight4(false, true);
     for (const p of smokePuffs) if (p.m.parent === isle1) { isle1.remove(p.m); scene.add(p.m); }
 }
 function showWorld(n) {
-    isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3;
-    moon2.visible = false; for (const a of aurora) a.visible = false; spores3.visible = n === 3;
-    wisps.material.color.setHex(n === 3 ? 0xffb0f0 : 0x9dffd0);
+    isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3; isle4G.visible = n === 4;
+    moon2.visible = false; for (const a of aurora) a.visible = false; spores3.visible = n === 3; ash4.visible = n === 4;
+    wisps.material.color.setHex(n === 4 ? 0xffa060 : n === 3 ? 0xffb0f0 : 0x9dffd0);
 }
 function resetIsleTrees(n) {
     for (const t of trees) { if (!t.boss) scene.remove(t.g); t.gone = true; if (t.bar) { t.bar.remove(); t.bar = null; } }
@@ -5224,7 +5294,7 @@ function buildIsle3() {
         for (let i = 0; i < D3LEN; i++) for (const sd of [-1.9, 1.9]) { const p = dock3Pt(i + 0.5, sd, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
         posts.build(); rails.build(); bulbs.build();
         for (const sd of [-2.0, 2.0]) { const p = dock3Pt(3.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
-        const db = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 3", "FERRY", "#9fe8ff") })); db.position.copy(dock3Pt(3.5, 0, 3.3)); db.rotation.y = yaw + Math.PI; scene.add(db);
+        const db = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("REBIRTH 3", "ASHFALL ISLE", "#ff9a5a") })); db.position.copy(dock3Pt(3.5, 0, 3.3)); db.rotation.y = yaw + Math.PI; scene.add(db);
         const db2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex("LANTERN CAMP", "THIS WAY ↑", "#c8a0ff") })); db2.position.copy(dock3Pt(3.5, 0, 3.3)); db2.rotation.y = yaw; scene.add(db2);
         const dl = label("REBIRTH 3 FERRY", "#9fe8ff", 3.2, 0.7); dl.position.copy(dock3Pt(3.5, 0, 4.6)); dl.maxD = 80;
         isle3.boat3 = makeBoat3(0x1a2a3a, 0x4a7a9a, 0x9fe8ff); isle3.boat3.position.copy(dock3Pt(D3LEN - 7, 4.4, -0.15)); isle3.boat3.rotation.y = yaw; scene.add(isle3.boat3);
@@ -5234,9 +5304,15 @@ function buildIsle3() {
         const FI = dock3Pt(D3LEN + 240);
         const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 220, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.12, fog: false, depthWrite: false, side: THREE.DoubleSide }));
         beam.position.set(FI.x, 110, FI.z); scene.add(beam); isle3.beam = beam;
-        const bl = label("???", "#9fe8ff", 4.2, 1.0); bl.position.set(FI.x, 46, FI.z); bl.maxD = 420; bl.blurK = 0.25;
+        const bl = label("ASHFALL ISLE", "#ff9a5a", 4.8, 1.1); bl.position.set(FI.x, 62, FI.z); bl.maxD = 420; bl.blurK = 0.25;
+        const bl2 = label("REBIRTH 3", "#ffffff", 4.0, 0.9); bl2.position.set(FI.x, 54, FI.z); bl2.maxD = 420; bl2.blurK = 0.25;
+        beam.material.color.setHex(0xff7a3a);
+        // Ashfall Isle on the horizon: a dark island with a glowing volcano
+        const farM = c => new THREE.MeshBasicMaterial({ color: c, fog: false });
+        const fb = new THREE.Mesh(new THREE.CylinderGeometry(62, 74, 5, 14), farM(0x241a18)); fb.position.set(FI.x, -2.2, FI.z); scene.add(fb);
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(48, 44, 12), farM(0x3a2620)); cone.position.set(FI.x, 22, FI.z); scene.add(cone);
+        const lip = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 2, 12), farM(0xff6a1a)); lip.position.set(FI.x, 43, FI.z); scene.add(lip);
     }
-
     // ----- the Hollow: where the Elder Heart sleeps -----
     buildHollow();
 
@@ -5503,7 +5579,7 @@ function startFight() {
     boss.maxHp = boss.hp = bossMaxHp(); boss.dying = false; boss.gone = false; boss.t = 0; boss.hurt = 0;
     if (!trees.includes(boss)) trees.push(boss);
     bossWall.visible = true; bossLabel.visible = false;
-    $("bossBar").classList.add("show"); $("bossPh").textContent = ""; $("bossBar").classList.remove("rage");
+    $("bossName").textContent = "THE ELDER HEART"; $("bossBar").classList.add("show"); $("bossPh").textContent = ""; $("bossBar").classList.remove("rage");
     roar(1); shake = 0.9; flash = 0.25;
     titleCard("THE ELDER HEART", "the oldest tree in the world wakes up");
     toast("Roots seal the Hollow. The only way out is through.", "bad");
@@ -5534,6 +5610,7 @@ function titleCard(big, small) {
     clearTimeout(titleT); titleT = setTimeout(() => e.classList.remove("show"), 3600);
 }
 function bossHurt(t, dmg) {
+    if (t.key === "cinderking") { fight4.heart = 1; return; }
     fight3.heart = 1;
     if (Math.random() < 0.3) sfx(60 + Math.random() * 20, 0.15, "sine", 0.12, 0.6);
 }
@@ -5861,7 +5938,8 @@ const BUFFS = {
     ironhide: { name: "IRONHIDE",   col: "#a9c0dc", icon: "◆" },
     fury:     { name: "LUMBERLUST", col: "#ff7a5a", icon: "⚔" },
     lucky:    { name: "LUCKY SPORE", col: "#ffd040", icon: "✦" },
-    blessed:  { name: "MOONBLESSED", col: "#7affef", icon: "☾" }
+    blessed:  { name: "MOONBLESSED", col: "#7affef", icon: "☾" },
+    fireproof: { name: "FIREPROOF",  col: "#ff9a4a", icon: "♨" }
 };
 const BUFF_CAP = 900;
 function giveBuff(k, secs) { const now = save.seconds, cur = Math.max(now, save.buffs[k] || 0); save.buffs[k] = Math.min(now + BUFF_CAP, cur + secs); }
@@ -5874,6 +5952,7 @@ function brewItems() {
         b("ironhide", "Ironhide Draught", "Take 40% less damage", 240, { spore: 4, silver: 6 }, 1200),
         b("fury", "Lumberlust Brew", "+40% axe and gun damage", 240, { spore: 6, amber: 5 }, 2500),
         b("lucky", "Lucky Spore Elixir", "+50% materials from every tree", 300, { spore: 12, moonstone: 2 }, 3500),
+        ...(isle === 4 ? [b("fireproof", "Fireproof Tonic", "Walk through lava, and fire hurts half as much", 180, { ash: 10, sulfur: 6 }, 30000)] : []),
         { name: "Phoenix Tear", icon: "phoenix", col: "#ffb060", desc: `If you would die, you rise again with 60% health instead. You have ${save.phoenix || 0} (max 3)`, craft: { amber: 10, star: 1 }, cost: 25000, verb: "Brewed", maxed: (save.phoenix || 0) >= 3, maxTxt: "MAX 3", buy() { save.phoenix = (save.phoenix || 0) + 1; sfx(500, 0.4, "triangle", 0.1, 1.8); } }
     ];
 }
@@ -5895,25 +5974,28 @@ const FERRY3_LINES = [
     "South of camp there's a sunken clearing called the Hollow. The oldest tree in the world sleeps there: the Elder Heart.",
     "Step inside and it wakes. Fell it and its Heartwood is yours. It always grows back by dawn.",
     "At night, watch the sky. Stars fall here, and they don't wait around to be picked up.",
-    "This is as far as my ferry goes. For now."
+    "Fell the Elder Heart, bring me five pieces of its Heartwood and $25,000,000, and I'll take you to Ashfall Isle. It's on fire. You'll love it."
 ];
-const FERRY3_QUIPS = ["The Hollow is south. Your nerve is your own business.", "Two moons. Twice the werewolves. Kidding. Probably.", "Stars fall on clear nights. Fast feet catch them.", "I'm building a bigger boat. It's taking a while.", "The Elder Heart has felled more woodcutters than you've felled trees."];
+const FERRY3_QUIPS = ["The Hollow is south. Your nerve is your own business.", "Two moons. Twice the werewolves. Kidding. Probably.", "Stars fall on clear nights. Fast feet catch them.", "See the smoke past the ??? light? That's Ashfall Isle. Rebirth 3.", "The Elder Heart has felled more woodcutters than you've felled trees."];
 function openFerry3() {
     ferryConfirm = 0;
     $("ferrySay").textContent = "“" + FERRY3_QUIPS[Math.floor(Math.random() * FERRY3_QUIPS.length)] + "”";
     openPanel("ferry");
 }
 function renderFerry3() {
-    document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
-    const k = save.bossKills || 0;
-    const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage)</span></div>
+    document.querySelector("#panelFerry h2").textContent = "REBIRTH 3: THE FERRY TO ASHFALL ISLE";
+    const k = save.bossKills || 0, hw = save.mats.heartwood || 0, cashOk = save.money >= REBIRTH3_COST, ok = rebirth3Ready();
+    const html = `<div class="fprice">Rebirth 3 ticket: <b>${money(REBIRTH3_COST)}</b> + <b>${REBIRTH3_HEART} Heartwood</b></div>
       <div class="flist">
-        <div class="${k ? "keep" : "lose"}"><h4>${k ? "✔" : "✘"} THE ELDER HEART</h4>${k ? `felled ${k} time${k === 1 ? "" : "s"}` : "still sleeping in the Hollow, to the south"}</div>
-        <div class="keep"><h4>FALLEN STARS CAUGHT</h4>${save.starsCaught || 0}</div>
-        <div class="gain"><h4>REBIRTH 3</h4>The Ferryman is building a bigger boat. Coming in a future update.</div>
+        <div class="${k ? "keep" : "lose"}"><h4>${k ? "✔" : "✘"} THE ELDER HEART</h4>${k ? `felled ${k} time${k === 1 ? "" : "s"}` : "still sleeping in the Hollow. Fell it at least once"}</div>
+        <div class="${hw >= REBIRTH3_HEART ? "keep" : "lose"}"><h4>${hw >= REBIRTH3_HEART ? "✔" : "✘"} HEARTWOOD</h4>${hw} / ${REBIRTH3_HEART} (it falls from the Elder Heart)</div>
+        <div class="${cashOk ? "keep" : "lose"}"><h4>${cashOk ? "✔" : "✘"} CASH</h4>${money(save.money)} of ${money(REBIRTH3_COST)}</div>
+        <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and materials · every axe and gun · all upgrades and potions · the day count</div>
+        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ ASHFALL ISLE: a living volcano, rivers of lava, hot springs, obsidian, and trees that burn</div>
       </div>`;
     if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
-    const b = $("ferryBuy"); b.disabled = true; b.classList.remove("danger"); b.textContent = "REBIRTH 3: COMING SOON";
+    const b = $("ferryBuy"); b.disabled = !ok; b.classList.toggle("danger", ok && !!ferryConfirm);
+    b.textContent = !k ? "FELL THE ELDER HEART FIRST" : hw < REBIRTH3_HEART ? `BRING ${REBIRTH3_HEART - hw} MORE HEARTWOOD` : !cashOk ? "NEED " + money(REBIRTH3_COST - save.money) + " MORE" : ferryConfirm ? "CLICK AGAIN TO CONFIRM" : "SAIL TO ASHFALL ISLE";
 }
 
 // ---- getting there: the Highland ferry's ride ends here ----
@@ -6060,9 +6142,731 @@ function drawMap3() {
     g.restore();
 }
 
+// =====================================================================
+//  REBIRTH 3: Ashfall Isle, a volcano island (part 1: the island, camp, trees, lava)
+// =====================================================================
+const shoreR4 = th => 148 + 12 * Math.sin(2 * th + 2.1) + 8 * Math.sin(3 * th + 0.4) + 5 * Math.sin(5 * th + 1.3);
+const shoreAt4 = (x, z) => shoreR4(Math.atan2(z, x));
+const ARR4TH = (() => { let b = 0, m = 1e9; for (let i = 0; i < 360; i++) { const th = (i / 360) * Math.PI * 2, r = shoreR4(th); if (r < m) { m = r; b = th; } } return b; })();
+const at4 = (k, d) => ({ x: Math.cos(ARR4TH + k * Math.PI) * d, z: Math.sin(ARR4TH + k * Math.PI) * d });
+const VOLC = { ...at4(0.66, 64), r: 56, rim: 17, peak: 58 };  // the volcano, off to one side so the far shore is clear for the next ferry
+const SPRINGS = { ...at4(0.22, 58), r: 9 };
+const SPIRES = { ...at4(-0.4, 72), r: 13 };
+const BASALT = { ...at4(-0.14, 98), r: 12 };
+const ASHWOOD4 = { ...at4(-0.72, 92), r: 15 };
+const ARR4DIR = V3(Math.cos(ARR4TH), 0, Math.sin(ARR4TH)), ARR4PERP = V3(-ARR4DIR.z, 0, ARR4DIR.x), ARR4LEN = 22;
+const ARR4B = V3(ARR4DIR.x * (shoreR4(ARR4TH) - 8), 0, ARR4DIR.z * (shoreR4(ARR4TH) - 8));
+const arr4Pt = (a, s = 0, y = 0) => V3(ARR4B.x + ARR4DIR.x * a + ARR4PERP.x * s, y, ARR4B.z + ARR4DIR.z * a + ARR4PERP.z * s);
+const D4TH = ARR4TH + Math.PI; // the next ferry: straight across the island from Arrivals
+const D4DIR = V3(Math.cos(D4TH), 0, Math.sin(D4TH)), D4PERP = V3(-D4DIR.z, 0, D4DIR.x), D4LEN = 24;
+const D4B = V3(D4DIR.x * (shoreR4(D4TH) - 8), 0, D4DIR.z * (shoreR4(D4TH) - 8));
+const dock4Pt = (a, s = 0, y = 0) => V3(D4B.x + D4DIR.x * a + D4PERP.x * s, y, D4B.z + D4DIR.z * a + D4PERP.z * s);
+const FERRYMAN4 = { x: dock4Pt(D4LEN - 3.5, -0.9).x, z: dock4Pt(D4LEN - 3.5, -0.9).z };
+const DOCKS4 = [[ARR4B, ARR4DIR, ARR4PERP, ARR4LEN], [D4B, D4DIR, D4PERP, D4LEN]];
+const BED4 = { x: -9, z: 6 }, SMITH4 = { x: -11, z: -7 }, DEPOT4 = { x: 11, z: -7 }, WITCH4 = { x: 10, z: 8 };
+const SMITH4_AT = standPt(SMITH4), DEPOT4_AT = standPt(DEPOT4), WITCH4_AT = standPt(WITCH4);
+const LM4 = [
+    { name: "EMBER CAMP", x: 0, z: 0, r: 24, col: "#ffb060", camp: true },
+    { name: "THE VOLCANO", x: VOLC.x, z: VOLC.z, r: 30, col: "#ff6a3a" },
+    { name: "HOT SPRINGS", x: SPRINGS.x, z: SPRINGS.z, r: SPRINGS.r + 3, col: "#7ae8ff" },
+    { name: "OBSIDIAN SPIRES", x: SPIRES.x, z: SPIRES.z, r: SPIRES.r, col: "#c8a0ff" },
+    { name: "BASALT COLUMNS", x: BASALT.x, z: BASALT.z, r: BASALT.r, col: "#c0b8b0" },
+    { name: "THE ASHWOOD", x: ASHWOOD4.x, z: ASHWOOD4.z, r: 6, col: "#d0c0b0" }
+];
+// three rivers of lava run from the crater down to the sea, away from camp
+const LAVA = (() => {
+    const out = [], vd = Math.atan2(VOLC.z, VOLC.x);
+    for (const [off, wig] of [[-0.62, 0.7], [0.02, -0.5], [0.62, 0.6]]) {
+        const pts = [];
+        for (let s = 0; s <= 1.0001; s += 0.04) {
+            const a = vd + off * s + Math.sin(s * 6 + off * 3) * 0.12 * wig, r0 = VOLC.rim + 2, x0 = VOLC.x + Math.cos(vd + off) * r0, z0 = VOLC.z + Math.sin(vd + off) * r0;
+            const d = s * 130, x = x0 + Math.cos(a) * d, z = z0 + Math.sin(a) * d;
+            if (Math.hypot(x, z) > shoreAt4(x, z) - 2) { pts.push([x, z]); break; }
+            pts.push([x, z]);
+        }
+        out.push(pts);
+    }
+    return out;
+})();
+const LAVA_W = 2.4;
+function lavaDist(x, z) { // distance to the nearest lava river centreline
+    let best = 1e9;
+    for (const pts of LAVA) for (let i = 0; i < pts.length - 1; i++) {
+        const [ax, az] = pts[i], [bx, bz] = pts[i + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+        const t = clamp(((x - ax) * dx + (z - az) * dz) / l2, 0, 1), d = Math.hypot(x - ax - dx * t, z - az - dz * t);
+        if (d < best) best = d;
+    }
+    return best;
+}
+function terrain4(x, z) {
+    const d = Math.hypot(x, z), inside = shoreAt4(x, z) - d;
+    if (inside < 5) return Math.max(-3.4, -(5 - inside) * 0.2);
+    let h = Math.max(0, fbm2(x * 0.018 - 7.1, z * 0.018 + 2.6, 4) - 0.42) * 18 * sstep(24, 56, d) + fbm2(x * 0.08, z * 0.08, 2) * 1.0;
+    const dv = Math.hypot(x - VOLC.x, z - VOLC.z);
+    if (dv < VOLC.r) { // the cone: steep near the top, a crater inside the rim
+        const k = 1 - dv / VOLC.r, rimH = VOLC.peak * Math.pow(1 - VOLC.rim / VOLC.r, 1.6);
+        h = Math.max(h, VOLC.peak * Math.pow(k, 1.6) * (0.92 + fbm2(x * 0.05, z * 0.05, 2) * 0.16));
+        if (dv < VOLC.rim + 2) h = lerp(rimH - 7, Math.max(h, rimH), sstep(VOLC.rim - 3, VOLC.rim + 1.5, dv)); // a flat crater floor inside a raised rim
+    }
+    h *= sstep(16, 30, d) * sstep(5, 28, inside);
+    const ds = Math.hypot(x - SPRINGS.x, z - SPRINGS.z); h = lerp(h, -0.9, sstep(SPRINGS.r + 4, SPRINGS.r - 2, ds));
+    const ld = lavaDist(x, z); if (dv > VOLC.rim) h -= 0.9 * sstep(LAVA_W + 2, LAVA_W - 0.5, ld); // the rivers cut little channels
+    return h;
+}
+function groundY4(x, z) {
+    if (Math.hypot(x - VOLC.x, z - VOLC.z) < VOLC.rim) for (const p of PILLARS4) if (Math.hypot(x - p.x, z - p.z) < p.r) return terrain4(x, z) + 0.8; // basalt pillars in the crater
+    for (const [B, DIR, PERP, LEN] of DOCKS4) { const { along, side } = dockLocal(x, z, B, DIR, PERP); if (along > 4 && along < LEN + 3 && Math.abs(side) < 3) return 0; }
+    return Math.max(-0.4, terrain4(x, z));
+}
+function clampIsle4(p) {
+    for (const [B, DIR, PERP, LEN] of DOCKS4) {
+        const { along, side } = dockLocal(p.x, p.z, B, DIR, PERP);
+        if (along > 4.5 && along < LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = B.x + DIR.x * a + PERP.x * s; p.z = B.z + DIR.z * a + PERP.z * s; return; }
+    }
+    const lim = shoreAt4(p.x, p.z) - 3, d = Math.hypot(p.x, p.z);
+    if (d > lim) { p.x *= lim / d; p.z *= lim / d; }
+    if (fight4.on) { const dx = p.x - VOLC.x, dz = p.z - VOLC.z, dd = Math.hypot(dx, dz), R = KARENA() - 0.6; if (dd > R) { p.x = VOLC.x + dx / dd * R; p.z = VOLC.z + dz / dd * R; } } // fire rings the crater
+}
+const treeOk4 = (x, z) => lavaDist(x, z) > LAVA_W + 3 && Math.hypot(x - VOLC.x, z - VOLC.z) > VOLC.rim + 6 && Math.hypot(x - SPRINGS.x, z - SPRINGS.z) > SPRINGS.r + 5 && Math.hypot(x - ARR4B.x, z - ARR4B.z) > 12 && Math.hypot(x - D4B.x, z - D4B.z) > 12;
+const onLava = () => isle === 4 && !buffOn("fireproof") && player.onGround && lavaDist(player.pos.x, player.pos.z) < LAVA_W - 0.3 && Math.hypot(player.pos.x - VOLC.x, player.pos.z - VOLC.z) > VOLC.rim;
+const inSprings = () => isle === 4 && Math.hypot(player.pos.x - SPRINGS.x, player.pos.z - SPRINGS.z) < SPRINGS.r;
+
+const isle4G = new THREE.Group(); isle4G.visible = false; scene.add(isle4G);
+const isle4 = { waterGeo: null, foam: null, emit: [], fireLight: null, lava: [], volcLight: null, boat: null, boat4: null, steam: [] };
+let isle4Built = false, ferryman4 = null, mapBg4 = null;
+const npcs4 = [];
+// falling ash and drifting embers
+const ash4 = (() => {
+    const N = 480, p = new Float32Array(N * 3), col = new Float32Array(N * 3), c = new THREE.Color();
+    for (let i = 0; i < N; i++) { p[i * 3] = rand(-40, 40); p[i * 3 + 1] = rand(0, 16); p[i * 3 + 2] = rand(-40, 40); c.setHex(i % 5 === 0 ? 0xff8a3a : i % 5 === 1 ? 0xffc060 : 0x8a8480); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(p, 3)); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.15, vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false }));
+    pts.visible = false; pts.frustumCulled = false; scene.add(pts);
+    return pts;
+})();
+function sky4(d) {
+    ash4.material.opacity = 0.55 + (1 - d) * 0.4;
+    wisps.material.color.setHex(0xffa060);
+}
+function updateSky4(dt) {
+    const p = ash4.geometry.attributes.position, cx = player.pos.x, cz = player.pos.z, cy = groundY(cx, cz);
+    for (let i = 0; i < p.count; i++) {
+        const ember = i % 5 < 2;
+        let x = p.getX(i) + Math.sin(time * 0.5 + i) * dt * 0.4 + dt * 0.6, y = p.getY(i) + dt * (ember ? 0.9 + (i % 7) * 0.1 : -(0.5 + (i % 4) * 0.15)), z = p.getZ(i) + Math.cos(time * 0.4 + i * 1.3) * dt * 0.4;
+        if (x - cx > 40) x -= 80; else if (x - cx < -40) x += 80;
+        if (z - cz > 40) z -= 80; else if (z - cz < -40) z += 80;
+        if (y > cy + 18) y = cy - 1; else if (y < cy - 1) y = cy + 17;
+        p.setXYZ(i, x, y, z);
+    }
+    p.needsUpdate = true;
+}
+
+function buildIsle4() {
+    isle4Built = true;
+    curBuild = 4;
+    const prevAdd = addTgt; addTgt = isle4G;
+    colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
+
+    // ----- the land: black sand, grey ash, red rock on the volcano -----
+    {
+        const g = new THREE.PlaneGeometry(420, 420, 220, 220);
+        g.rotateX(-Math.PI / 2);
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) pos.setY(i, terrain4(pos.getX(i), pos.getZ(i)));
+        g.computeVertexNormals();
+        const nor = g.attributes.normal, col = [], c = new THREE.Color();
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), z = pos.getZ(i), y = pos.getY(i), ny = nor.getY(i), d = Math.hypot(x, z), inside = shoreAt4(x, z) - d, rn = Math.random();
+            const dv = Math.hypot(x - VOLC.x, z - VOLC.z), ld = lavaDist(x, z);
+            if (y < -0.5 && Math.hypot(x - SPRINGS.x, z - SPRINGS.z) > SPRINGS.r + 2) c.setHSL(0.05, 0.15, 0.08 + rn * 0.03);
+            else if (Math.hypot(x - SPRINGS.x, z - SPRINGS.z) < SPRINGS.r + 3) c.setHSL(0.12, 0.25, 0.42 + rn * 0.06);   // pale mineral crust round the springs
+            else if (ld < LAVA_W + 1.4 && dv > VOLC.rim) c.setHSL(0.04, 0.5, 0.12 + rn * 0.04);                           // scorched banks
+            else if (inside < 12 && y < 2.2) c.setHSL(0.08, 0.08, 0.1 + rn * 0.04);                                       // black sand
+            else if (d < SAFE_R + 1) c.setHSL(0.06, 0.2, 0.2 + rn * 0.05);
+            else if (dv < VOLC.rim + 1) c.setHSL(0.03, 0.55, 0.16 + rn * 0.06);                                           // the crater floor glows red
+            else if (dv < VOLC.r * 0.7 || ny < 0.75) c.setHSL(0.02 + rn * 0.03, 0.32, 0.17 + rn * 0.06 + clamp(y / 60, 0, 1) * 0.08); // red-brown volcanic rock
+            else { const v = sstep(0.4, 0.62, fbm2(x * 0.03 - 4, z * 0.03 + 9, 3)); c.setHSL(lerp(0.08, 0.2, v) + rn * 0.02, lerp(0.06, 0.28, v), 0.22 + rn * 0.06); } // ash fields with tough olive scrub
+            col.push(c.r, c.g, c.b);
+        }
+        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+        const wg = new THREE.PlaneGeometry(760, 760, 152, 152);
+        wg.rotateX(-Math.PI / 2);
+        const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x3a8a8a), mid = new THREE.Color(0x24506a), deep = new THREE.Color(0x101e30);
+        for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), k = clamp((Math.hypot(x, z) - shoreAt4(x, z)) / 36, 0, 1); cc.copy(shallow).lerp(mid, clamp(k * 2, 0, 1)).lerp(deep, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
+        wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3));
+        isle4.waterGeo = wg;
+        const N = 300, fp = [], idx = [];
+        for (let i = 0; i <= N; i++) { const th = (i / N) * Math.PI * 2, r = shoreR4(th); fp.push(Math.cos(th) * (r - 3.5), -0.4, Math.sin(th) * (r - 3.5), Math.cos(th) * (r - 2.2), -0.4, Math.sin(th) * (r - 2.2)); if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } }
+        const fg = new THREE.BufferGeometry(); fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3)); fg.setIndex(idx);
+        isle4.foam = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0xd8d0c8, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+        scene.add(isle4.foam);
+    }
+    // ----- the lava rivers: glowing ribbons that hurt -----
+    for (const pts of LAVA) {
+        const p = [], cl = [], idx = [], c = new THREE.Color();
+        for (let i = 0; i < pts.length; i++) {
+            const [x, z] = pts[i], [nx, nz] = pts[Math.min(i + 1, pts.length - 1)], [px, pz] = pts[Math.max(i - 1, 0)], tx = nx - px, tz = nz - pz, tl = Math.hypot(tx, tz) || 1, sx = -tz / tl, sz = tx / tl;
+            for (const sd of [-1, -0.4, 0.4, 1]) { const wx = x + sx * LAVA_W * sd, wz = z + sz * LAVA_W * sd; p.push(wx, Math.max(-0.35, terrain4(wx, wz) + 0.12), wz); c.setHex(Math.abs(sd) > 0.5 ? 0xd02a0a : 0xffa020); cl.push(c.r, c.g, c.b); }
+            if (i < pts.length - 1) for (let k = 0; k < 3; k++) { const a = i * 4 + k; idx.push(a, a + 4, a + 1, a + 1, a + 4, a + 5); }
+        }
+        const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(p, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(cl, 3)); g.setIndex(idx); g.computeVertexNormals();
+        const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+        scene.add(m); isle4.lava.push(m);
+        // crusted rocks floating on the lava
+        const crust = batch(lamb(0x2a1a14));
+        for (let i = 2; i < pts.length; i += 2) { const [x, z] = pts[i]; crust.add(ICO, x + rand(-1, 1), terrain4(x, z) + 0.2, z + rand(-1, 1), srand(), srand() * 3, 0, rand(0.3, 0.7), 0.2, rand(0.3, 0.7)); }
+        crust.build();
+        for (let i = 3; i < pts.length; i += 5) { const [x, z] = pts[i]; isle4.emit.push({ x, y: terrain4(x, z) + 0.6, z, rate: 0.5, acc: srand() }); }
+    }
+    // ----- the volcano: a glowing crater, a smoke plume, a sign of what's to come -----
+    {
+        const y0 = terrain4(VOLC.x, VOLC.z);
+        const pool = new THREE.Mesh(new THREE.CircleGeometry(3.2, 16), new THREE.MeshBasicMaterial({ color: 0xff6a1a })); pool.rotation.x = -Math.PI / 2; pool.position.set(VOLC.x, y0 + 0.4, VOLC.z); scene.add(pool); isle4.crater = pool;
+        const vl = new THREE.PointLight(0xff5a1a, 30, 70, 1.4); vl.position.set(VOLC.x, y0 + 8, VOLC.z); scene.add(vl); isle4.volcLight = vl;
+        for (let i = 0; i < 4; i++) isle4.emit.push({ x: VOLC.x + rand(-9, 9), y: y0 + 3, z: VOLC.z + rand(-9, 9), rate: 1.2, acc: srand(), big: true });
+        const glow = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 7, 60, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, fog: false, depthWrite: false, side: THREE.DoubleSide })); glow.position.set(VOLC.x, y0 + 30, VOLC.z); scene.add(glow); isle4.plume = glow;
+        const l = label("THE VOLCANO", "#ff6a3a", 3.8, 0.9); l.position.set(VOLC.x, y0 + 28, VOLC.z); l.maxD = 320; l.blurK = 0.4;
+        buildCrater();
+    }
+    // ----- Ember Camp -----
+    {
+        const stones = batch(lamb(0x4a4040));
+        for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); }
+        stones.build();
+        const lg = batch(woodDark); for (let i = 0; i < 4; i++) lg.add(CYL6, 0, 0.25, -3, Math.PI / 2, i * 0.8, 0, 0.12, 1.3, 0.12); lg.build();
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.7, 6), glowM(0xff8a2a)); flame.position.set(0, 1.05, -3);
+        const core = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 5), glowM(0xffe070)); core.position.set(0, 0.72, -3);
+        scene.add(flame, core); fires.push({ flame, core, ph: srand() * 6 });
+        const fl = new THREE.PointLight(0xff9a40, 18, 18, 1.6); fl.position.set(0, 2, -3); scene.add(fl); isle4.fireLight = fl;
+        circles.push({ x: 0, z: -3, r: 1.3 }); isle4.emit.push({ x: 0, y: 2.0, z: -3, rate: 1.0, acc: 0.3 });
+        const seats = batch(lamb(0x3a3030)); for (const [dx, dz, r] of [[-2.6, -3.5, 0.2], [2.5, -2.4, -0.5], [0.4, -5.9, Math.PI / 2]]) seats.add(BOX, dx, 0.3, dz, 0, r, 0, 1.6, 0.6, 0.6); seats.build();
+        const cl = label("EMBER CAMP", "#ffb060", 3.4, 0.8); cl.position.set(0, 4.6, -3); cl.maxD = 90;
+        // the bed: a shelter of black stone
+        const g = new THREE.Group(); g.position.set(BED4.x, groundY4(BED4.x, BED4.z), BED4.z); g.rotation.y = Math.atan2(-BED4.x, -BED4.z);
+        part(g, BOX, lamb(0x2a2626), 0, 1.2, -1.3, 3.4, 2.4, 0.3); part(g, BOX, lamb(0x2a2626), -1.6, 1.2, -0.2, 0.3, 2.4, 2.4); part(g, BOX, lamb(0x2a2626), 1.6, 1.2, -0.2, 0.3, 2.4, 2.4);
+        part(g, BOX, lamb(0x3a2a24), 0, 2.45, -0.2, 3.6, 0.2, 2.8);
+        part(g, BOX, wood, 0, 0.35, -0.2, 1.4, 0.3, 2.3); part(g, BOX, lamb(0x8a2a1a), 0, 0.58, -0.55, 1.3, 0.14, 1.5); part(g, BOX, lamb(0xe8e0d0), 0, 0.58, 0.7, 1.0, 0.14, 0.5);
+        scene.add(g); circles.push({ x: BED4.x, z: BED4.z, r: 1.6 });
+        const bl = label("BED", "#ffc0a0", 2, 0.6); bl.position.set(BED4.x, 3.2, BED4.z);
+    }
+    {   // the Crucible (forge), the Trading Post, the alchemist
+        const g = stall3(SMITH4, "THE CRUCIBLE", "CRAFT AXES · GUNS", "#ff8a3a", 0x3a2420);
+        const smith = makeHumanoid({ face: "smith", skin: 0xb07a5a, shirt: 0x3a1a14, pants: 0x1a1414, apron: 0x2a1a14, beard: 0x1a1010, hat: "mask", wide: 1.3, belly: true });
+        smith.g.position.set(0, 0, -0.6); g.add(smith.g); smith.yaw = g.rotation.y; npcs4.push(smith);
+        const hm = new THREE.Group(); hm.position.set(0, -0.64, 0.05); smith.armR.add(hm);
+        part(hm, BOX, lamb(0x6a4a2a), 0, 0, 0.22, 0.05, 0.05, 0.5); smith.hammer = part(hm, BOX, lamb(0x2a2a30), 0, 0, 0.48, 0.24, 0.13, 0.13);
+        part(g, BOX, glowM(0xff7a2a), 0, 1.16, 0.5, 0.36, 0.06, 0.14);
+        const furnace = new THREE.Group(); furnace.position.set(1.4, 0, -1.4); g.add(furnace);
+        part(furnace, BOX, lamb(0x3a3434), 0, 0.6, 0, 1.0, 1.2, 0.8); part(furnace, BOX, glowM(0xff6a1a), 0, 0.55, 0.41, 0.5, 0.35, 0.02); part(furnace, CYL8, lamb(0x2a2626), 0, 1.6, -0.1, 0.18, 1.0, 0.18);
+        isle4.emit.push({ x: SMITH4.x, y: 3.2, z: SMITH4.z - 1.2, rate: 0.7, acc: 0.5 });
+        const l = label("THE CRUCIBLE", "#ff8a3a", 3.2, 0.8); l.position.set(SMITH4.x, 6.2, SMITH4.z);
+        const g2 = stall3(DEPOT4, "TRADING POST", "SELL MATERIALS", "#ffd040", 0x4a3020);
+        const clerk = makeHumanoid({ face: "clerk", skin: 0xe0b890, shirt: 0xd8c8b0, vest: 0x6a2a1a, pants: 0x3a2a20, hair: 0x2a1a10, hat: "cap", hatCol: 0x8a3a1a });
+        clerk.g.position.set(0, 0, -0.6); g2.add(clerk.g); clerk.yaw = g2.rotation.y; npcs4.push(clerk);
+        const l2 = label("TRADING POST", "#ffd040", 3.6, 0.8); l2.position.set(DEPOT4.x, 6.2, DEPOT4.z);
+        const g3 = stall3(WITCH4, "ALCHEMIST", "BREWS · TONICS", "#7aff9a", 0x2a3a24);
+        const witch = makeHumanoid({ face: "witch", skin: 0x8ac08a, shirt: 0x4a1a14, pants: 0x2a1a1a, hair: 0x1a1a1a, hat: "witch", hatCol: 0x3a1a14 });
+        witch.g.position.set(0, 0, -0.6); g3.add(witch.g); witch.yaw = g3.rotation.y; npcs4.push(witch);
+        const l3 = label("ALCHEMIST", "#7aff9a", 3.2, 0.8); l3.position.set(WITCH4.x, 6.2, WITCH4.z);
+        // signposts out of camp
+        const post = (to, name, col) => {
+            const dir = Math.atan2(to.x, to.z), x = Math.sin(dir) * 22, z = Math.cos(dir) * 22, y = groundY4(x, z), far = Math.round(Math.hypot(to.x - x, to.z - z) - (to.r || 0));
+            const p = new THREE.Mesh(CYL6, woodDark); p.scale.set(0.09, 2.4, 0.09); p.position.set(x, y + 1.2, z); scene.add(p);
+            const out = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex(name, `AHEAD ↑ ${far}m`, col) })); out.position.set(x, y + 2.6, z); out.rotation.y = dir + Math.PI; scene.add(out);
+            const home = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("EMBER CAMP", "AHEAD ↑", "#ffb060") })); home.position.set(x, y + 2.6, z); home.rotation.y = dir; scene.add(home);
+        };
+        post({ x: VOLC.x, z: VOLC.z, r: VOLC.r * 0.4 }, "THE VOLCANO", "#ff6a3a");
+        post(SPRINGS, "HOT SPRINGS", "#7ae8ff");
+        post({ x: D4B.x, z: D4B.z }, "REBIRTH 4 FERRY", "#9fe8ff");
+    }
+    // ----- docks: arrivals, and the next ferry -----
+    for (const [B, DIR, PERP, LEN, kind] of [[ARR4B, ARR4DIR, ARR4PERP, ARR4LEN, "arr"], [D4B, D4DIR, D4PERP, D4LEN, "next"]]) {
+        const pt = (a, s = 0, y = 0) => V3(B.x + DIR.x * a + PERP.x * s, y, B.z + DIR.z * a + PERP.z * s), yaw = Math.atan2(DIR.x, DIR.z);
+        const planks = batch(lamb(kind === "arr" ? 0x5a4a44 : 0x4a4a54));
+        for (let i = 0; i < LEN; i++) { const p = pt(i + 0.5); planks.add(BOX, p.x, 0.22, p.z, 0, yaw, 0, 3.6, 0.14, 0.92); }
+        planks.build();
+        const posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(glowM(kind === "arr" ? 0xffa050 : 0x9fe8ff));
+        for (let i = 0; i <= LEN; i += 3) for (const sd of [-1.9, 1.9]) { const p = pt(i, sd); posts.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) bulbs.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
+        for (let i = 0; i < LEN; i++) for (const sd of [-1.9, 1.9]) { const p = pt(i + 0.5, sd, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
+        posts.build(); rails.build(); bulbs.build();
+        for (const sd of [-2.0, 2.0]) { const p = pt(3.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
+        const [a1, a2, c1] = kind === "arr" ? ["ARRIVALS", "FROM MOONCAP ISLE", "#ffa050"] : ["REBIRTH 4", "COMING SOON", "#9fe8ff"];
+        const s1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(kind === "arr" ? "WELCOME TO" : a1, kind === "arr" ? "ASHFALL ISLE" : a2, c1) })); s1.position.copy(pt(3.5, 0, 3.3)); s1.rotation.y = kind === "arr" ? yaw : yaw + Math.PI; scene.add(s1);
+        const s2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(kind === "arr" ? a1 : "EMBER CAMP", kind === "arr" ? a2 : "THIS WAY ↑", c1) })); s2.position.copy(pt(3.5, 0, 3.3)); s2.rotation.y = kind === "arr" ? yaw + Math.PI : yaw; scene.add(s2);
+        const dl = label(kind === "arr" ? "ARRIVALS" : "REBIRTH 4 FERRY", c1, 3.2, 0.7); dl.position.copy(pt(3.5, 0, 4.6)); dl.maxD = 80;
+        const boat = makeBoat3(kind === "arr" ? 0x1a2a3a : 0x2a1a1a, kind === "arr" ? 0x4a7a9a : 0x7a3a2a, kind === "arr" ? 0x9fe8ff : 0xffa050);
+        boat.position.copy(pt(LEN - 7, 4.4, -0.15)); boat.rotation.y = yaw; scene.add(boat);
+        if (kind === "arr") isle4.boat = boat; else isle4.boat4 = boat;
+        // lanterns from the dock to camp
+        const lp = batch(woodDark), lg = batch(glowM(0xffb060)), land = Math.hypot(B.x, B.z);
+        for (let s = 4, k = 0; s < land - 26; s += 9, k++) { const sd = k % 2 ? 3.2 : -3.2, x = B.x - DIR.x * s + PERP.x * sd, z = B.z - DIR.z * s + PERP.z * sd, y = groundY4(x, z); if (lavaDist(x, z) < LAVA_W + 1) continue; lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lg.add(ICO, x, y + 2.5, z, 0, 0, 0, 0.18, 0.24, 0.18); }
+        lp.build(); lg.build();
+    }
+    {
+        const yaw = Math.atan2(D4DIR.x, D4DIR.z);
+        ferryman4 = makeFerrymanFigure(0x22163a, 0x6a4a9a, 0xe8d8ff); ferryman4.position.set(FERRYMAN4.x, 0.3, FERRYMAN4.z); ferryman4.rotation.y = yaw + Math.PI; scene.add(ferryman4);
+        const fm = label("FERRYMAN", "#c8a0ff", 2.6, 0.6); fm.position.set(FERRYMAN4.x, 4.7, FERRYMAN4.z); fm.maxD = 60;
+        const FI = dock4Pt(D4LEN + 240);
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 220, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.1, fog: false, depthWrite: false, side: THREE.DoubleSide })); beam.position.set(FI.x, 110, FI.z); scene.add(beam); isle4.beam = beam;
+        const bl = label("???", "#9fe8ff", 4.2, 1.0); bl.position.set(FI.x, 46, FI.z); bl.maxD = 420; bl.blurK = 0.25;
+    }
+    // ----- landmarks -----
+    {   // hot springs: steaming turquoise pools that heal you
+        const w = new THREE.Mesh(new THREE.CircleGeometry(SPRINGS.r + 1, 24), new THREE.MeshLambertMaterial({ color: 0x5ad8e8, emissive: 0x1a6a7a, transparent: true, opacity: 0.85, flatShading: true }));
+        w.rotation.x = -Math.PI / 2; w.position.set(SPRINGS.x, -0.25, SPRINGS.z); scene.add(w);
+        const rim = batch(lamb(0xd8c8a8)); for (let i = 0; i < 22; i++) { const a = (i / 22) * 6.283, x = SPRINGS.x + Math.cos(a) * (SPRINGS.r + 1.4), z = SPRINGS.z + Math.sin(a) * (SPRINGS.r + 1.4); rim.add(ICO, x, terrain4(x, z) + 0.2, z, srand(), srand() * 3, 0, rand(0.5, 1), 0.4, rand(0.5, 1)); } rim.build();
+        for (let i = 0; i < 4; i++) isle4.emit.push({ x: SPRINGS.x + rand(-4, 4), y: 0.2, z: SPRINGS.z + rand(-4, 4), rate: 1.2, acc: srand(), steam: true });
+        const l = label("HOT SPRINGS", "#7ae8ff", 3.2, 0.8); l.position.set(SPRINGS.x, 4, SPRINGS.z);
+        const l2 = label("stand in the water to heal", "#bff4ff", 2.4, 0.5); l2.position.set(SPRINGS.x, 2.8, SPRINGS.z); l2.maxD = 40;
+    }
+    {   // obsidian spires: black glass shards taller than trees
+        const ob = batch(new THREE.MeshLambertMaterial({ color: 0x1a1222, emissive: 0x0a0414, flatShading: true })), gl = batch(glowM(0xb07aff));
+        for (let i = 0; i < 24; i++) { const a = srand() * 6.283, d = Math.sqrt(srand()) * SPIRES.r, x = SPIRES.x + Math.cos(a) * d, z = SPIRES.z + Math.sin(a) * d, h = rand(3, 12), y = terrain4(x, z); ob.add(CONE6, x, y + h / 2, z, rand(-0.25, 0.25), srand() * 3, rand(-0.25, 0.25), h * 0.13, h, h * 0.13); if (i % 3 === 0) gl.add(ICO, x, y + 0.3, z, 0, 0, 0, 0.18); if (h > 6) circles.push({ x, z, r: h * 0.12 }); }
+        ob.build(); gl.build();
+        const c = makeChest(SPIRES.x + 3, SPIRES.z - 2, srand() * 6, true); const cy = terrain4(SPIRES.x + 3, SPIRES.z - 2); c.g.position.y = cy; c.beacon.position.y = cy + 2.7;
+        const l = label("OBSIDIAN SPIRES", "#c8a0ff", 3.2, 0.8); l.position.set(SPIRES.x, terrain4(SPIRES.x, SPIRES.z) + 14, SPIRES.z);
+    }
+    {   // basalt columns: hexagonal pillars stepping up like stairs
+        const bs = batch(lamb(0x3a3636)), top = batch(lamb(0x4a4646)), hex = new THREE.CylinderGeometry(1, 1, 1, 6);
+        for (let i = 0; i < 70; i++) { const a = srand() * 6.283, d = Math.sqrt(srand()) * BASALT.r, x = BASALT.x + Math.cos(a) * d, z = BASALT.z + Math.sin(a) * d, h = (1 - d / BASALT.r) * 7 + rand(0.4, 1.6), y = terrain4(x, z); bs.add(hex, x, y + h / 2, z, 0, 0, 0, 0.85, h, 0.85); top.add(hex, x, y + h + 0.03, z, 0, 0, 0, 0.8, 0.06, 0.8); }
+        bs.build(); top.build();
+        const l = label("BASALT COLUMNS", "#c0b8b0", 3.2, 0.8); l.position.set(BASALT.x, terrain4(BASALT.x, BASALT.z) + 11, BASALT.z);
+    }
+    {   // the Ashwood: a forest of burnt, dead trunks
+        const tr = batch(lamb(0x1e1816)), em = batch(glowM(0xff6a2a));
+        for (let i = 0; i < 40; i++) { const a = srand() * 6.283, d = Math.sqrt(srand()) * ASHWOOD4.r, x = ASHWOOD4.x + Math.cos(a) * d, z = ASHWOOD4.z + Math.sin(a) * d, h = rand(3, 9), y = terrain4(x, z); tr.add(CYL6, x, y + h / 2, z, rand(-0.12, 0.12), 0, rand(-0.12, 0.12), rand(0.18, 0.35), h, rand(0.18, 0.35)); for (let k = 0; k < 2; k++) tr.add(CYL6, x, y + h * rand(0.5, 0.9), z, 0, srand() * 3, rand(0.6, 1.2), 0.08, rand(1, 2.4), 0.08); if (i % 2) em.add(ICO, x, y + rand(0.5, h), z, 0, 0, 0, 0.08); circles.push({ x, z, r: 0.4 }); }
+        tr.build(); em.build();
+        const c = makeChest(ASHWOOD4.x - 3, ASHWOOD4.z + 2, srand() * 6, false); const cy = terrain4(ASHWOOD4.x - 3, ASHWOOD4.z + 2); c.g.position.y = cy; c.beacon.position.y = cy + 2.7;
+        const l = label("THE ASHWOOD", "#d0c0b0", 3.2, 0.8); l.position.set(ASHWOOD4.x, terrain4(ASHWOOD4.x, ASHWOOD4.z) + 9, ASHWOOD4.z);
+    }
+    // ----- scenery: rocks, scrub, steam vents, charred logs, the black beach -----
+    const okSpot4 = (x, z, m = 0) => { const d = Math.hypot(x, z); if (d < SAFE_R + 1 || d > shoreAt4(x, z) - 9 || !treeOk4(x, z)) return false; for (let k = 1; k < LM4.length; k++) { const lm = LM4[k]; if (Math.hypot(x - lm.x, z - lm.z) < lm.r + m) return false; } return true; };
+    const scatter4 = (count, fn, m = 0) => { let made = 0, guard = 0; while (made < count && guard++ < count * 40) { const a = srand() * 6.283, d = srange(SAFE_R + 1, shoreR4(a) - 9), x = Math.cos(a) * d, z = Math.sin(a) * d; if (!okSpot4(x, z, m)) continue; fn(x, z, terrain4(x, z)); made++; } };
+    {
+        const rocks = batch(lamb(0x3a3434)), bigR = batch(lamb(0x2a2424)), scrub = batch(lamb(0x5a5a2a)), dry = batch(lamb(0x7a6a3a)), vents = batch(lamb(0x4a3a30)), emb = batch(glowM(0xff7a2a));
+        scatter4(120, (x, z, y) => { const s = srange(0.4, 1.5); rocks.add(ICO, x, y + s * 0.4, z, srand() * 3, srand() * 3, 0, s, s * srange(0.6, 1), s); if (s > 1.15) circles.push({ x, z, r: s * 0.85 }); });
+        scatter4(22, (x, z, y) => { const s = srange(2.2, 4.2); bigR.add(ICO, x, y + s * 0.35, z, srand() * 3, srand() * 3, 0, s, s * srange(0.6, 0.9), s * srange(0.8, 1.2)); circles.push({ x, z, r: s * 0.85 }); }, 3);
+        scatter4(150, (x, z, y) => { for (let i = 0; i < 4; i++) (srand() < 0.5 ? scrub : dry).add(CONE6, x + srange(-0.4, 0.4), y + 0.25, z + srange(-0.4, 0.4), srange(-0.3, 0.3), 0, srange(-0.3, 0.3), 0.05, srange(0.3, 0.7), 0.05); });
+        scatter4(14, (x, z, y) => { vents.add(CYL6, x, y + 0.25, z, 0, 0, 0, 0.6, 0.5, 0.6); emb.add(CYL6, x, y + 0.51, z, 0, 0, 0, 0.35, 0.02, 0.35); isle4.emit.push({ x, y: y + 0.6, z, rate: 0.9, acc: srand(), steam: true }); circles.push({ x, z, r: 0.7 }); }, 2);
+        scatter4(70, (x, z, y) => emb.add(ICO, x, y + 0.08, z, 0, 0, 0, 0.12, 0.06, 0.12));
+        rocks.build(); bigR.build(); scrub.build(); dry.build(); vents.build(); emb.build();
+        const logsB = batch(lamb(0x1e1816)); scatter4(24, (x, z, y) => logsB.add(CYL6, x, y + 0.3, z, Math.PI / 2, srand() * 3, 0, 0.3, srange(2.2, 4.2), 0.3)); logsB.build();
+        const beachSpot = (n, min, max, fn) => { for (let i = 0; i < n; i++) { const a = srand() * 6.283, d = shoreR4(a) - srange(min, max), x = Math.cos(a) * d, z = Math.sin(a) * d; if (Math.hypot(x - ARR4B.x, z - ARR4B.z) < 12 || Math.hypot(x - D4B.x, z - D4B.z) < 12 || lavaDist(x, z) < LAVA_W + 2) continue; fn(x, z, Math.max(0, terrain4(x, z))); } };
+        const pum = batch(lamb(0x6a6460)), glass = batch(glowM(0x7a5aaa));
+        beachSpot(70, 2, 12, (x, z, y) => pum.add(ICO, x, y + 0.1, z, srand(), srand() * 3, 0, 0.25, 0.15, 0.25));
+        beachSpot(40, 2, 10, (x, z, y) => glass.add(CONE6, x, y + 0.12, z, srand(), 0, srand(), 0.06, 0.25, 0.06));
+        pum.build(); glass.build();
+    }
+    for (let i = 0; i < 9; i++) { let guard = 0; while (guard++ < 60) { const a = srand() * 6.283, d = srange(36, 115), x = Math.cos(a) * d, z = Math.sin(a) * d; if (d > shoreAt4(x, z) - 12 || !okSpot4(x, z, 2)) continue; const c = makeChest(x, z, srand() * 6, i % 4 === 0); const y = terrain4(x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; break; } }
+    isle4.emit.forEach(e => smokeEmit.push(e));
+    addTgt = prevAdd; curBuild = 1;
+}
+
+// ---- getting there: Mooncap's Rebirth 3 ferry ----
+const REBIRTH3_COST = 25000000, REBIRTH3_HEART = 5;
+const rebirth3Ready = () => (save.bossKills || 0) > 0 && (save.mats.heartwood || 0) >= REBIRTH3_HEART && save.money >= REBIRTH3_COST;
+function finishRebirth3() {
+    save.rebirths = 3; // Ashfall Isle is Rebirth 3
+    resetForRebirth();
+    enterIsle4(); newContract();
+    holdingReset();
+    player.maxHp = maxHpNow(); player.hp = player.maxHp;
+    const a = arr4Pt(ARR4LEN - 9, 0);
+    player.pos.set(a.x, 1.75, a.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(ARR4DIR.x, ARR4DIR.z); player.pitch = 0;
+    player.invuln = 6;
+    ride = null;
+    writeSave();
+    say("");
+    setTimeout(() => {
+        $("rebirthFx").classList.remove("show"); say("ASHFALL ISLE"); setTimeout(() => say(""), 3600);
+        toast("You are reborn. ★3  +150% cash, +30% damage.", "cash");
+        toast("Follow the lanterns to Ember Camp. Craft at the Crucible, brew at the Alchemist.", "good");
+        toast("Stay out of the lava. It's exactly as hot as it looks.", "bad");
+    }, 2200);
+}
+function enterIsle4() {
+    leaveWorld();
+    if (!isle4Built) { buildIsle4(); snapWorld(4); } else loadWorld(4);
+    isle = 4; save.isle = 4;
+    showWorld(4);
+    groundFn = groundY4;
+    waterMesh.geometry = isle4.waterGeo; waterMesh.material.needsUpdate = true;
+    smokeEmit.length = 0; isle4.emit.forEach(e => smokeEmit.push(e));
+    RESPAWN.x = 2; RESPAWN.z = 4;
+    save.ghosts = 0; syncGhosts();
+    resetIsleTrees(100);
+    resetChests();
+    syncKing();
+}
+function dawn4() { if (save.kingKills > 0 && save.kingDay === save.day - 1 && !fight4.on) toast("Deep in the crater, the Cinder King rekindles...", "rare"); syncKing(); }
+let lavaT = 0, rumbleT = 6;
+function updateIsle4(dt, animOnly) {
+    if (!isle4Built || isle !== 4) return;
+    updateSky4(dt);
+    updateKing(dt, animOnly);
+    if (!animOnly) updateEruption(dt);
+    updateNpcs(dt, npcs4);
+    if (isle4.foam) { isle4.foam.material.opacity = 0.32 + Math.sin(time * 0.8) * 0.12; }
+    if (isle4.fireLight) isle4.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
+    if (isle4.volcLight) isle4.volcLight.intensity = 26 + Math.sin(time * 2.1) * 6 + Math.sin(time * 5.7) * 3;
+    if (isle4.plume) isle4.plume.material.opacity = 0.04 + Math.sin(time * 0.9) * 0.015;
+    if (isle4.beam) isle4.beam.material.opacity = 0.07 + Math.sin(time * 1.2) * 0.03;
+    if (isle4.crater) isle4.crater.material.color.setHSL(0.05 + Math.sin(time * 1.7) * 0.015, 1, 0.5 + Math.sin(time * 3.1) * 0.06);
+    for (const m of isle4.lava) m.material.color.setScalar(0.85 + Math.sin(time * 2.4 + m.id) * 0.15);
+    for (const [b, ph] of [[isle4.boat, 0], [isle4.boat4, 1.3]]) if (b) { b.position.y = -0.15 + Math.sin(time * 1.1 + ph) * 0.07; b.rotation.z = Math.sin(time * 0.9 + ph) * 0.03; }
+    if (ferryman4) {
+        ferryman4.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
+        const base = Math.atan2(D4DIR.x, D4DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN4.x, player.pos.z - FERRYMAN4.z) < 14;
+        ferryman4.rotation.y += angDiff(near ? Math.atan2(player.pos.x - FERRYMAN4.x, player.pos.z - FERRYMAN4.z) : base, ferryman4.rotation.y) * Math.min(1, 3 * dt);
+    }
+    if (animOnly || state !== "playing") return;
+    // lava burns, hot springs heal
+    if (onLava() && !ride) {
+        lavaT -= dt;
+        hurtEl.style.opacity = Math.max(+hurtEl.style.opacity || 0, 0.6);
+        if (lavaT <= 0) { lavaT = 0.35; hurtPlayer(Math.round(14 * isleDm()), player.pos.x, player.pos.z); sfx(180 + Math.random() * 60, 0.2, "sawtooth", 0.08, 0.4); burst(V3(player.pos.x, player.pos.y - 1.5, player.pos.z), 4, 3, [glowM(0xff7a2a), glowM(0xffd060)]); }
+    } else lavaT = 0;
+    if (inSprings() && player.hp > 0 && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + 10 * dt);
+    // the volcano grumbles now and then
+    rumbleT -= dt;
+    if (rumbleT <= 0) { rumbleT = rand(14, 30); const dv = Math.hypot(player.pos.x - VOLC.x, player.pos.z - VOLC.z), k = clamp(1 - dv / 200, 0.15, 1); sfx(40, 2.2, "sawtooth", 0.1 * k, 0.6); sfx(55, 1.8, "sine", 0.16 * k, 0.7); shake = Math.max(shake, 0.25 * k); }
+}
+function nearest4() {
+    const px = player.pos.x, pz = player.pos.z, near = (p, r) => Math.hypot(px - p.x, pz - p.z) < r;
+    if (near(SMITH4_AT, 3.4)) return { k: "smith" };
+    if (near(DEPOT4_AT, 3.4)) return { k: "depot" };
+    if (near(WITCH4_AT, 3.4)) return { k: "witch" };
+    if (near(BED4, 3.2)) return { k: "bed" };
+    if (near(FERRYMAN4, 3.4)) return { k: "ferry4" };
+    for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
+    return null;
+}
+const SMITH4_SAY = ["Obsidian takes an edge you could shave a mountain with.", "Ember burns inside the blade forever. Don't lick it.", "Sulfur makes the rounds go bang. Bigger bang.", "Everything here is forged in the volcano's breath."];
+const DEPOT4_SAY = ["Ash by the barrel, feathers by the one. I buy it all.", "Phoenix Feathers? Careful, they're still warm.", "Obsidian sells. Sells sharp."];
+function openFerry4() { ferryConfirm = 0; $("ferrySay").textContent = "“Ash on my coat, ash in my boots. I'm building the next boat out of something that won't burn.”"; openPanel("ferry"); }
+function renderFerry4() {
+    document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
+    const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage)</span></div>
+      <div class="flist"><div class="gain"><h4>REBIRTH 4</h4>The Ferryman is building a boat that can cross whatever is out there. Coming in a future update.</div></div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    const b = $("ferryBuy"); b.disabled = true; b.classList.remove("danger"); b.textContent = "REBIRTH 4: COMING SOON";
+}
+function drawMap4() {
+    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 168;
+    if (!mapBg4) {
+        const N = 320, oc = document.createElement("canvas"); oc.width = oc.height = N;
+        const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color();
+        for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+            const x = ((px + 0.5) / N - 0.5) * 336, z = ((py + 0.5) / N - 0.5) * 336, d = Math.hypot(x, z), inside = shoreAt4(x, z) - d, i = (py * N + px) * 4;
+            let r, gg, b;
+            if (inside < 0) { r = 12; gg = 24; b = 40; } else if (inside < 5) { r = 60; gg = 110; b = 120; }
+            else {
+                const y = terrain4(x, z), sh = clamp((terrain4(x - 2, z - 2) - terrain4(x + 2, z + 2)) * 0.05, -0.5, 0.5), dv = Math.hypot(x - VOLC.x, z - VOLC.z);
+                if (lavaDist(x, z) < LAVA_W && dv > VOLC.rim) col.setRGB(1, 0.42, 0.1);
+                else if (dv < VOLC.rim - 3) col.setRGB(1, 0.35, 0.05);
+                else if (Math.hypot(x - SPRINGS.x, z - SPRINGS.z) < SPRINGS.r) col.setRGB(0.35, 0.85, 0.9);
+                else if (inside < 12 && y < 2.2) col.setRGB(0.12, 0.11, 0.11);
+                else if (dv < VOLC.r * 0.7) col.setRGB(0.35 + clamp(y / 60, 0, 1) * 0.2, 0.18, 0.14);
+                else col.setRGB(0.3, 0.28, 0.24);
+                r = clamp((col.r + sh) * 255, 0, 255); gg = clamp((col.g + sh) * 255, 0, 255); b = clamp((col.b + sh) * 255, 0, 255);
+            }
+            img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255;
+        }
+        og.putImageData(img, 0, 0); mapBg4 = oc;
+    }
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#0c1828"; g.beginPath(); g.arc(c, c, c - 6, 0, 7); g.fill(); g.strokeStyle = "rgba(255,140,60,.45)"; g.lineWidth = 3; g.stroke();
+    g.save(); g.beginPath(); g.arc(c, c, c - 8, 0, 7); g.clip(); g.imageSmoothingEnabled = false; g.drawImage(mapBg4, c - 168 * sc, c - 168 * sc, 336 * sc, 336 * sc); g.restore();
+    g.fillStyle = "rgba(255,170,60,.12)"; g.beginPath(); g.arc(c, c, SAFE_R * sc, 0, 7); g.fill();
+    g.setLineDash([6, 6]); g.strokeStyle = "rgba(255,180,90,.85)"; g.lineWidth = 2; g.beginPath(); g.arc(c, c, SAFE_R * sc, 0, 7); g.stroke(); g.setLineDash([]);
+    const X = x => c + x * sc, Z = z => c + z * sc;
+    g.font = "bold 11px Consolas"; g.textAlign = "center";
+    for (const lm of LM4) { if (lm.camp) continue; g.strokeStyle = lm.col; g.lineWidth = 1.5; g.beginPath(); g.arc(X(lm.x), Z(lm.z), lm.r * sc * 0.7, 0, 7); g.stroke(); g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4); g.fillStyle = lm.col; g.fillText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4); }
+    for (const [B, DIR, , LEN, txt, colr] of [[ARR4B, ARR4DIR, 0, ARR4LEN, "ARRIVALS", "#ffa050"], [D4B, D4DIR, 0, D4LEN, "REBIRTH 4 FERRY", "#9fe8ff"]]) { const e = V3(B.x + DIR.x * LEN, 0, B.z + DIR.z * LEN); g.strokeStyle = colr; g.lineWidth = 4; g.beginPath(); g.moveTo(X(B.x), Z(B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); g.fillStyle = colr; g.font = "bold 12px Consolas"; g.fillText(txt, X(e.x), Z(e.z) + (e.z < 0 ? -8 : 16)); }
+    { const dead = save.kingDay === save.day && save.kingKills > 0; g.font = "bold 22px Segoe UI Emoji, sans-serif"; g.fillStyle = "#ff7a3a"; g.fillText(dead ? "🪨" : "👑", X(VOLC.x), Z(VOLC.z) + 8); g.font = "bold 10px Consolas"; g.strokeStyle = "#000"; g.lineWidth = 3; const tx = dead ? "regrows at dawn" : "THE CINDER KING"; g.strokeText(tx, X(VOLC.x), Z(VOLC.z) + 24); g.fillStyle = "#ffc090"; g.fillText(tx, X(VOLC.x), Z(VOLC.z) + 24); }
+    for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); g.strokeStyle = "#000"; g.lineWidth = 1; g.strokeRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
+    for (const t of trees) { if (t.gone || t.dying || t.boss) continue; const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14; g.fillStyle = near ? "#ff4a3a" : t.type.rare ? t.type.col : "rgba(30,20,16,.95)"; g.beginPath(); g.arc(X(t.x), Z(t.z), (t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill(); }
+    g.font = "bold 12px Consolas"; g.fillStyle = "#ffc890"; g.strokeStyle = "#000"; g.lineWidth = 3;
+    for (const [t, x, z] of [["CAMP", 0, 9], ["CRUCIBLE", SMITH4.x - 8, SMITH4.z - 1], ["TRADING", DEPOT4.x + 9, DEPOT4.z - 1], ["ALCHEMIST", WITCH4.x + 6, WITCH4.z + 4]]) { g.strokeText(t, X(x), Z(z)); g.fillText(t, X(x), Z(z)); }
+    g.fillStyle = "#fff"; g.fillText("N", c, 22);
+    g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw); g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke(); g.restore();
+}
+
+// =====================================================================
+//  Ashfall Isle part 2: the Cinder King (crater boss), eruptions, lava bombs
+// =====================================================================
+const KING_H = 16, KING_R = 2.8, KARENA = () => VOLC.rim - 2.5; // the crater floor you can fight on
+const KING_T = { name: "The Cinder King", col: "#ff7a3a", hp: 1, logs: 0, dmg: 1, speed: 0, bonus: 0, rare: true, wd: 0, wn: 0 };
+HIT_COL.cinderking = [0xff7a2a, 0x1a1214];
+const PILLARS4 = [0, 1, 2, 3, 4].map(i => { const a = (i / 5) * Math.PI * 2 + 0.3; return { x: VOLC.x + Math.cos(a) * 8.2, z: VOLC.z + Math.sin(a) * 8.2, r: 1.25 }; });
+const crater = () => isle === 4 && Math.hypot(player.pos.x - VOLC.x, player.pos.z - VOLC.z) < VOLC.rim - 1;
+const fight4 = { on: false, phase: 1, cd: 3, atk: null, atkT: 0, beat: 0, lag: 1, minions: [], hitWave: new Set(), dyingT: -1, heart: 0, flood: 0, floodT: 0, seen: false, wall: 0 };
+let king = null, kingG = null, kingLabel = null, kingLight = null, kingFlames = [], kingCore = null, kingFireRing = null, kingStump = null, kingLava = null;
+const kfx = { rings: [], cols: [], rocks: [], waves: [] };
+const kingMaxHp = () => Math.ceil(160 * hpScale() * (1 + 0.25 * (save.kingKills || 0)));
+const kingDmg = (k = 1) => Math.round(30 * isleDm() * (1 + 0.04 * (save.day - 1)) * k * (buffOn("fireproof") ? 0.5 : 1));
+const floorY4 = () => terrain4(VOLC.x, VOLC.z);
+function buildCrater() {
+    const y0 = floorY4();
+    // basalt pillars to escape the lava flood on
+    const hex = new THREE.CylinderGeometry(1, 1, 1, 6), pm = lamb(0x2a2626), pt = lamb(0x3a3434);
+    for (const p of PILLARS4) { part(scene, hex, pm, p.x, y0 + 0.4, p.z, p.r, 0.8, p.r); part(scene, hex, pt, p.x, y0 + 0.82, p.z, p.r * 0.95, 0.04, p.r * 0.95); }
+    // the lava that floods the crater floor
+    kingLava = new THREE.Mesh(new THREE.CircleGeometry(KARENA() + 1.2, 32), new THREE.MeshBasicMaterial({ color: 0xff5a10, transparent: true, opacity: 0.92 }));
+    kingLava.rotation.x = -Math.PI / 2; kingLava.position.set(VOLC.x, y0 - 0.3, VOLC.z); kingLava.visible = false; scene.add(kingLava);
+    // a ring of fire round the rim while the fight is on
+    kingFireRing = new THREE.Group(); kingFireRing.position.set(VOLC.x, y0, VOLC.z); kingFireRing.visible = false; scene.add(kingFireRing);
+    for (let i = 0; i < 30; i++) { const a = (i / 30) * Math.PI * 2, f = part(kingFireRing, CONE6, glowM(i % 2 ? 0xff7a1a : 0xffc040), Math.cos(a) * (KARENA() + 0.8), 1.2, Math.sin(a) * (KARENA() + 0.8), 0.5, 2.4, 0.5); f.userData.ph = i; }
+    // the Cinder King: an obsidian tree, cracked with lava, crowned with fire
+    kingG = new THREE.Group(); kingG.position.set(VOLC.x, y0 - 0.1, VOLC.z); scene.add(kingG);
+    const body = new THREE.Group(); kingG.add(body);
+    const obs = new THREE.MeshLambertMaterial({ color: 0x1a1216, emissive: 0x100406, flatShading: true });
+    const tg = new THREE.CylinderGeometry(KING_R * 0.6, KING_R * 1.3, KING_H, 10, 6);
+    { const p = tg.attributes.position; for (let i = 0; i < p.count; i++) { const u = p.getY(i) / KING_H + 0.5, k = 1 + 0.12 * Math.sin(u * 11 + p.getX(i) * 3); p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); } tg.computeVertexNormals(); }
+    const trunk = new THREE.Mesh(tg, obs); trunk.position.y = KING_H / 2; body.add(trunk);
+    const cracks = new THREE.MeshBasicMaterial({ color: 0xff6a1a });
+    for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2, y = rand(1, KING_H * 0.85), rr = KING_R * (1.3 - 0.7 * (y / KING_H)) * 0.98; const c = part(body, BOX, cracks, Math.cos(a) * rr, y, Math.sin(a) * rr, 0.12, rand(1, 3), 0.05); c.rotation.y = -a + Math.PI / 2; c.rotation.z = rand(-0.5, 0.5); }
+    for (let i = 0; i < 7; i++) { const a = (i / 7) * Math.PI * 2; part(body, CONE6, obs, Math.cos(a) * KING_R * 1.4, KING_R * 0.4, Math.sin(a) * KING_R * 1.4, KING_R * 0.4, KING_R * 2.4, KING_R * 0.4, 0, -a, Math.PI / 2 + 0.5); }
+    const crown = new THREE.Group(); crown.position.y = KING_H; body.add(crown);
+    let crownMesh = null;
+    for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2, s = part(crown, CONE6, obs, Math.cos(a) * 2.2, 1.6, Math.sin(a) * 2.2, 0.7, rand(3, 5), 0.7, Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5); if (!crownMesh) crownMesh = s; }
+    for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2, f = part(crown, CONE6, glowM(i % 3 ? 0xff7a1a : 0xffd040), Math.cos(a) * rand(0.8, 2.6), rand(1.5, 3.5), Math.sin(a) * rand(0.8, 2.6), 0.5, 2.2, 0.5); f.userData.ph = i * 0.7; kingFlames.push(f); }
+    kingCore = part(body, new THREE.IcosahedronGeometry(1, 1), glowM(0xffa020), 0, 5.2, KING_R * 1.0, 0.8, 0.95, 0.6);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMats.calm); face.scale.setScalar(4.6); face.position.set(0, 9.6, KING_R * 0.92 + 0.1); body.add(face);
+    const arms = [], aGeo = armGeometry(7);
+    for (const s of [-1, 1]) { const pivot = new THREE.Group(); pivot.position.set(s * KING_R * 0.8, 11.5, 0.3); const arm = new THREE.Mesh(aGeo, obs); arm.scale.set(2.4, 1, 2.4); arm.rotation.z = -s * 2.2; pivot.add(arm); body.add(pivot); arms.push({ pivot, arm, s }); }
+    kingLight = new THREE.PointLight(0xff6a1a, 4, 34, 1.5); kingLight.position.set(0, 8, 4); kingG.add(kingLight);
+    king = { boss: true, key: "cinderking", type: KING_T, g: kingG, body, face, arms, h: KING_H, r: KING_R, x: VOLC.x, z: VOLC.z, gy: y0, hp: 1, maxHp: 1, solid: [trunk, crownMesh], dying: false, burn: false, gone: true, t: 0, hurt: 0, mode: "calm", armUp: 0, slam: 0 };
+    circles.push({ x: VOLC.x, z: VOLC.z, r: KING_R * 1.25 });
+    kingStump = new THREE.Group(); kingStump.position.set(VOLC.x, y0, VOLC.z); kingStump.visible = false; scene.add(kingStump);
+    part(kingStump, new THREE.CylinderGeometry(KING_R * 1.1, KING_R * 1.4, 2, 10), obs, 0, 1, 0, 1, 1, 1);
+    part(kingStump, new THREE.CircleGeometry(KING_R * 0.4, 10), glowM(0xff6a1a), 0, 2.02, 0, 1, 1, 1, -Math.PI / 2);
+    kingLabel = label("THE CINDER KING · sleeping", "#ffb080", 2.8, 0.7); kingLabel.position.set(VOLC.x, y0 + KING_H + 6, VOLC.z); kingLabel.maxD = 90;
+    // attack pieces
+    const ringM = new THREE.MeshBasicMaterial({ color: 0xff4a1a, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
+    for (let i = 0; i < 24; i++) { const g = new THREE.Group(), ring = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 28), ringM.clone()), fill = new THREE.Mesh(new THREE.CircleGeometry(1, 28), ringM.clone()); ring.rotation.x = fill.rotation.x = -Math.PI / 2; fill.material.opacity = 0.2; g.add(ring, fill); g.visible = false; scene.add(g); kfx.rings.push({ g, ring, fill, t: -1, life: 1 }); }
+    for (let i = 0; i < 10; i++) { const m = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.6, 1, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xff8a2a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })); m.visible = false; scene.add(m); kfx.cols.push({ m, t: -1, x: 0, z: 0, y: 0, hit: false }); }
+    for (let i = 0; i < 24; i++) { const g = new THREE.Group(); part(g, ICO, lamb(0x2a1a14), 0, 0, 0, 0.6, 0.6, 0.6); part(g, ICO, glowM(0xff6a1a), 0, 0, 0, 0.45, 0.45, 0.45); const tail = part(g, CONE6, new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.6, depthWrite: false }), 0, 2.2, 0, 0.45, 4, 0.45); tail.rotation.x = Math.PI; g.visible = false; scene.add(g); kfx.rocks.push({ g, on: false, t: 0, dur: 1, x: 0, z: 0, y: 0, sx: 0, sz: 0, ring: null, boss: false, drop: false }); }
+    for (let i = 0; i < 3; i++) { const m = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1.0, 56, 1, true), new THREE.MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false })); m.visible = false; scene.add(m); kfx.waves.push({ m, R: -1, id: 0 }); }
+}
+function syncKing() {
+    if (!kingG) return;
+    const dead = save.kingDay === save.day && save.kingKills > 0;
+    kingG.visible = !dead; kingStump.visible = dead;
+    kingLabel.el.textContent = dead ? "THE CINDER KING · regrows at dawn" : "THE CINDER KING · sleeping";
+    kingLabel.visible = !fight4.on;
+    if (!dead) { king.body.rotation.set(0, 0, 0); king.dying = false; }
+}
+function kRing(x, z, r, life, col = 0xff4a1a) { const o = kfx.rings.find(q => q.t < 0); if (!o) return null; o.t = 0; o.life = life; o.g.position.set(x, groundY(x, z) + 0.08, z); o.g.scale.setScalar(r); o.g.visible = true; o.ring.material.color.setHex(col); o.fill.material.color.setHex(col); return o; }
+function kRock(x, z, delay, dur, boss) { // a burning rock dropping out of the sky
+    const r = kfx.rocks.find(q => !q.on); if (!r) return;
+    r.on = true; r.t = -delay; r.dur = dur; r.x = x; r.z = z; r.y = groundY(x, z); r.sx = x + rand(-14, 14); r.sz = z + rand(-14, 14); r.ring = null; r.boss = boss; r.drop = !boss && Math.random() < 0.55;
+}
+function startFight4() {
+    const f = fight4;
+    Object.assign(f, { on: true, phase: 1, cd: 3.2, atk: null, atkT: 0, lag: 1, minions: [], dyingT: -1, heart: 0, flood: 0, floodT: 0 });
+    king.maxHp = king.hp = kingMaxHp(); king.dying = false; king.gone = false; king.hurt = 0;
+    if (!trees.includes(king)) trees.push(king);
+    kingFireRing.visible = true; kingLabel.visible = false;
+    $("bossName").textContent = "THE CINDER KING"; $("bossBar").classList.add("show"); $("bossPh").textContent = ""; $("bossBar").classList.remove("rage");
+    roar(0.85); shake = 1; flash = 0.3;
+    titleCard("THE CINDER KING", "the volcano wakes with him");
+    toast("Fire rings the crater. Win, or wake up in camp.", "bad");
+    if (!f.seen) { f.seen = true; setTimeout(() => { if (fight4.on) toast("When the crater floods with lava, get up on a basalt pillar. Jump the fire waves. Fireproof Tonic halves his fire.", "rare"); }, 3500); }
+}
+function endFight4(won, quiet) {
+    const f = fight4;
+    f.on = false; f.atk = null; f.flood = 0;
+    $("bossBar").classList.remove("show");
+    kingFireRing.visible = false; kingLava.visible = false;
+    for (const t of f.minions) if (!t.gone && !t.dying) t.burn = true;
+    f.minions = [];
+    for (const r of kfx.rings) { r.t = -1; r.g.visible = false; }
+    for (const c of kfx.cols) { c.t = -1; c.m.visible = false; }
+    for (const r of kfx.rocks) if (r.boss) { r.on = false; r.g.visible = false; }
+    for (const w of kfx.waves) { w.R = -1; w.m.visible = false; }
+    if (!won) { king.hp = king.maxHp; king.gone = true; for (const a of king.arms) a.pivot.rotation.x = 0; kingLabel.visible = true; if (!quiet) setTimeout(() => toast("The Cinder King settles back into the magma...", "rare"), 1500); }
+}
+function kingDefeated(t) {
+    fight4.dyingT = 0; t.gone = true;
+    endFight4(true);
+    save.kingKills = (save.kingKills || 0) + 1; save.kingDay = save.day;
+    save.felled++; contractProgress("fell"); contractProgress("rare");
+    roar(0.6); shake = 1.2; flash = 1; hitstop = 0.25;
+    titleCard("THE CINDER KING FALLS", "the fire will rekindle at dawn");
+    writeSave();
+}
+function kingRewards() {
+    const k = save.kingKills, first = k === 1, cash = Math.round(900000 * rebirthMult() * (1 + 0.3 * (k - 1)));
+    save.money += cash;
+    for (const [m, n] of [["molten", first ? 3 : 1 + (Math.random() < 0.5 ? 1 : 0)], ["phoenixf", 3 + Math.floor(Math.random() * 3)], ["ember", 20 + Math.floor(Math.random() * 20)], ["obsidian", 18 + Math.floor(Math.random() * 18)]]) dropMatsAt(VOLC.x, VOLC.z, m, n, KING_R + 1, KING_R + 5);
+    toast(`+${money(cash)} from the Cinder King${first ? " · FIRST KILL!" : ""}`, "cash");
+    toast("Molten Cores, Phoenix Feathers, Ember and Obsidian spill across the crater. Grab them!", "rare");
+    if (first) setTimeout(() => toast("The Crucible can now forge Volcano's Wrath, the hottest axe there is.", "good"), 2500);
+    burst(V3(VOLC.x, king.gy + 3, VOLC.z), 60, 9, [glowM(0xff7a2a), glowM(0xffe070), chipMats[2]]);
+    sfx(392, 0.6, "triangle", 0.12, 1.5); setTimeout(() => sfx(523, 0.6, "triangle", 0.12, 1.5), 160); setTimeout(() => sfx(784, 1.0, "triangle", 0.12, 1.2), 340);
+    writeSave();
+}
+function dropMatsAt(x, z, mat, n, r0 = 1, r1 = 4) {
+    const meshes = Math.min(n, 10), base = Math.floor(n / meshes), extra = n % meshes;
+    for (let i = 0; i < meshes; i++) {
+        const m = new THREE.Mesh(matGeo, matMeshMat[mat]), a = Math.random() * 6.283, d = rand(r0, r1);
+        m.position.set(x + Math.cos(a) * d, groundY(x, z) + 1.5, z + Math.sin(a) * d);
+        if (base > 1) m.scale.setScalar(Math.min(1.8, 1 + base * 0.08));
+        scene.add(m); logs.push({ m, vy: 5 + Math.random() * 4, bonus: 0, w: base + (i < extra ? 1 : 0), mat });
+    }
+}
+const kingDist = () => Math.hypot(player.pos.x - VOLC.x, player.pos.z - VOLC.z);
+const onPillar = () => PILLARS4.some(p => Math.hypot(player.pos.x - p.x, player.pos.z - p.z) < p.r);
+function kingHit(k, sx, sz) { if (player.invuln > 0) return; hurtPlayer(kingDmg(k), sx, sz); }
+function inArena(x, z, m = 1.5) { const dx = x - VOLC.x, dz = z - VOLC.z, d = Math.hypot(dx, dz), lim = KARENA() - m; return d > lim ? [VOLC.x + dx / d * lim, VOLC.z + dz / d * lim] : [x, z]; }
+function pickKingAttack() {
+    const f = fight4, d = kingDist(), alive = f.minions.filter(t => !t.gone && !t.dying && !t.burn).length, o = [];
+    if (d < KING_R + 6.5) o.push(["swipe", 3]);
+    o.push(["geysers", 3], ["meteors", 2.4]);
+    if (f.phase >= 2) o.push(["wave", 2.4], ["flood", f.floodT <= 0 ? 1.6 : 0]);
+    if (alive < (f.phase >= 2 ? 4 : 2)) o.push(["summon", 0.8]);
+    let r = Math.random() * o.reduce((a, q) => a + q[1], 0);
+    for (const [k, w] of o) { r -= w; if (r <= 0 && k !== f.last) return k; }
+    return o[0][0];
+}
+function startKingAttack(k) {
+    const f = fight4; f.atk = k; f.atkT = 0; f.last = k; f.fired = false; f.step = 0;
+    if (k === "swipe") { floatWorld(V3(VOLC.x, king.gy + 11, VOLC.z), "!", "warn"); sfx(150, 0.4, "sawtooth", 0.08, 0.5); }
+    if (k === "geysers") {
+        const n = f.phase === 1 ? 2 : f.phase === 2 ? 4 : 6; f.targets = [];
+        for (let i = 0; i < n; i++) { let x = player.pos.x, z = player.pos.z; if (i === 1) { x += player.vel.x * 0.8; z += player.vel.z * 0.8; } else if (i > 1) { const a = Math.random() * 6.283, dd = rand(3, 7); x += Math.cos(a) * dd; z += Math.sin(a) * dd; } [x, z] = inArena(x, z); f.targets.push({ x, z }); kRing(x, z, 2.3, f.phase >= 2 ? 0.9 : 1.1); }
+        sfx(90, 0.6, "sawtooth", 0.06, 0.7);
+    }
+    if (k === "meteors") { const n = f.phase === 1 ? 6 : f.phase === 2 ? 10 : 14; for (let i = 0; i < n; i++) { const lead = i ? 0.9 : 0, a = Math.random() * 6.283, dd = i ? rand(1, 7) : 0; const [x, z] = inArena(player.pos.x + player.vel.x * lead + Math.cos(a) * dd, player.pos.z + player.vel.z * lead + Math.sin(a) * dd); kRock(x, z, i * 0.13, rand(1.1, 1.4), true); } sfx(400, 0.4, "sawtooth", 0.05, 0.3); }
+    if (k === "wave") { floatScreen("JUMP!", "warn"); sfx(80, 0.9, "sawtooth", 0.1, 0.5); }
+    if (k === "flood") { toast("THE CRATER IS FLOODING! GET ON A PILLAR!", "bad"); sfx(60, 1.6, "sawtooth", 0.14, 0.5); f.floodT = 22; }
+    if (k === "summon") roar(1.3);
+}
+function spawnEmberling(x, z) { const t = makeTree(x, z, rand(1.5, 2.1), "emberling"); t.minion = true; t.cool = 0.6; fight4.minions.push(t); burst(V3(x, groundY(x, z) + 0.5, z), 16, 5, [glowM(0xff7a2a), chipMats[2]]); sfx(200, 0.3, "sawtooth", 0.07, 0.4); }
+function updateFight4(dt) {
+    const f = fight4, B = king, d = kingDist();
+    f.heart = Math.max(0, f.heart - dt * 3); f.floodT -= dt;
+    kingG.rotation.y += angDiff(Math.atan2(player.pos.x - B.x, player.pos.z - B.z), kingG.rotation.y) * Math.min(1, (f.phase >= 2 ? 1.6 : 1) * dt);
+    const frac = B.hp / B.maxHp;
+    if (f.phase === 1 && frac <= 0.5) { f.phase = 2; roar(0.7); shake = 0.9; flash = 0.3; $("bossPh").textContent = "· ENRAGED"; $("bossBar").classList.add("rage"); toast("The Cinder King is ENRAGED! The crater will flood. Find the pillars.", "bad"); for (let i = 0; i < 3; i++) { const a = Math.random() * 6.283; spawnEmberling(B.x + Math.cos(a) * 7, B.z + Math.sin(a) * 7); } f.atk = null; f.cd = 1.2; }
+    else if (f.phase === 2 && frac <= 0.2) { f.phase = 3; roar(0.5); $("bossPh").textContent = "· INFERNO"; toast("He's burning out. So are you.", "rare"); }
+    f.beat -= dt;
+    if (f.beat <= 0) { f.beat = f.phase === 1 ? 1.2 : f.phase === 2 ? 0.85 : 0.6; sfx(58, 0.2, "sine", 0.2, 0.6); setTimeout(() => sfx(50, 0.16, "sine", 0.14, 0.6), 170); f.heart = Math.max(f.heart, 0.6); }
+    if (!f.atk) { f.cd -= dt; if (f.cd <= 0) startKingAttack(pickKingAttack()); }
+    else {
+        f.atkT += dt;
+        const A = f.atk, k = f.phase >= 2 ? 0.8 : 1;
+        if (A === "swipe") { if (f.atkT < 0.8 * k) B.armUp = lerp(B.armUp, 1, Math.min(1, 8 * dt)); else if (!f.fired) { f.fired = true; B.slam = 1; sfx(120, 0.25, "sawtooth", 0.12, 0.4); if (d < KING_R + 7) kingHit(1.3, B.x, B.z); } if (f.atkT > 0.8 * k + 0.5) endKingAttack(); }
+        else if (A === "geysers") { const T = f.phase >= 2 ? 0.9 : 1.1; if (f.atkT >= T && !f.fired) { f.fired = true; for (const p of f.targets) { const c = kfx.cols.find(q => q.t < 0); if (c) { c.t = 0; c.x = p.x; c.z = p.z; c.y = groundY(p.x, p.z); c.hit = false; c.m.visible = true; } } shake = Math.max(shake, 0.4); sfx(70, 0.5, "sawtooth", 0.14, 0.5); } if (f.atkT > T + 0.8) endKingAttack(); }
+        else if (A === "meteors") { if (f.atkT > 2.6) endKingAttack(); }
+        else if (A === "wave") {
+            if (f.atkT < 1.0 * k) B.armUp = lerp(B.armUp, 1.4, Math.min(1, 6 * dt));
+            else if (f.step < (f.phase === 3 ? 2 : 1) && f.atkT > 1.0 * k + f.step * 0.7) { f.step++; B.slam = 1; shake = 0.9; const w = kfx.waves.find(q => q.R < 0); if (w) { w.R = KING_R + 1; w.m.visible = true; w.id = Math.random(); } sfx(55, 0.8, "sawtooth", 0.2, 0.4); burst(V3(B.x, B.gy + 0.5, B.z), 30, 7, [chipMats[2], glowM(0xff7a2a)]); }
+            if (f.atkT > 1.0 * k + 2.2) endKingAttack();
+        }
+        else if (A === "flood") { if (f.atkT > 7.5) endKingAttack(); }
+        else if (A === "summon") { if (f.atkT > 0.5 && !f.fired) { f.fired = true; for (let i = 0; i < (f.phase >= 2 ? 3 : 2); i++) { const a = Math.random() * 6.283, [x, z] = inArena(B.x + Math.cos(a) * rand(6, 9), B.z + Math.sin(a) * rand(6, 9)); spawnEmberling(x, z); } } if (f.atkT > 1.2) endKingAttack(); }
+    }
+    // the flood: lava rises over the crater floor, stand on a pillar or burn
+    const floodOn = f.atk === "flood" && f.atkT > 1.2 && f.atkT < 6.6;
+    f.flood = lerp(f.flood, floodOn ? 1 : 0, Math.min(1, dt * (floodOn ? 1.6 : 2.4)));
+    kingLava.visible = f.flood > 0.02; kingLava.position.y = B.gy - 0.4 + f.flood * 0.75; kingLava.material.opacity = 0.75 + f.flood * 0.2;
+    if (f.flood > 0.6 && !onPillar() && player.pos.y - (groundY(player.pos.x, player.pos.z) + 1.7) < 0.4 && !buffOn("fireproof")) { f.lavaT = (f.lavaT || 0) - dt; if (f.lavaT <= 0) { f.lavaT = 0.5; kingHit(0.35, player.pos.x, player.pos.z); burst(V3(player.pos.x, player.pos.y - 1.5, player.pos.z), 4, 3, [glowM(0xff7a2a)]); } }
+    B.armUp = lerp(B.armUp, 0, Math.min(1, 2 * dt)); B.slam = Math.max(0, B.slam - dt * 3);
+    for (const a of B.arms) { a.arm.rotation.z = -a.s * (2.2 - B.armUp) + Math.sin(time * 1.1 + a.s) * 0.08; a.pivot.rotation.x = -B.slam * 1.4 + B.armUp * 0.3; }
+    const mode = B.hurt > 0.25 || f.phase >= 3 ? "scream" : "angry"; if (B.mode !== mode) { B.mode = mode; B.face.material = faceMats[mode]; }
+    B.hurt = Math.max(0, B.hurt - dt * 4);
+    f.lag = Math.max(frac, f.lag - dt * 0.35);
+    $("bossFill").style.width = (frac * 100) + "%"; $("bossLag").style.width = (f.lag * 100) + "%";
+    $("bossHp").textContent = Math.max(0, Math.ceil(B.hp)).toLocaleString() + " / " + B.maxHp.toLocaleString();
+}
+function endKingAttack() { const f = fight4; f.atk = null; f.cd = f.phase === 1 ? rand(2.2, 3.2) : f.phase === 2 ? rand(1.5, 2.3) : rand(1.0, 1.6); }
+function updateKingFx(dt) {
+    for (const r of kfx.rings) { if (r.t < 0) continue; r.t += dt; const u = r.t / r.life; r.fill.scale.setScalar(Math.min(1, u)); r.ring.material.opacity = 0.45 + Math.sin(time * 18) * 0.25; r.fill.material.opacity = 0.18 + u * 0.25; if (u >= 1) { r.t = -1; r.g.visible = false; } }
+    for (const c of kfx.cols) {
+        if (c.t < 0) continue;
+        c.t += dt; const h = c.t < 0.15 ? c.t / 0.15 * 9 : 9, fade = c.t > 0.7 ? Math.max(0, 1 - (c.t - 0.7) / 0.4) : 1;
+        c.m.scale.set(1, h, 1); c.m.position.set(c.x, c.y + h / 2, c.z); c.m.material.opacity = 0.85 * fade;
+        if (!c.hit && c.t < 0.4 && fight4.on && Math.hypot(player.pos.x - c.x, player.pos.z - c.z) < 2.3) { c.hit = true; kingHit(1, c.x, c.z); player.vel.y = 7; }
+        if (c.t < 0.05) burst(V3(c.x, c.y + 0.4, c.z), 6, 6, [glowM(0xff7a2a), glowM(0xffd060)]);
+        if (c.t > 1.1) { c.t = -1; c.m.visible = false; }
+    }
+    for (const r of kfx.rocks) {
+        if (!r.on) continue;
+        r.t += dt; if (r.t < 0) continue;
+        if (!r.ring) { r.ring = kRing(r.x, r.z, r.boss ? 2.0 : 2.6, r.dur, 0xff7a2a); r.g.visible = true; }
+        const u = Math.min(1, r.t / r.dur);
+        r.g.position.set(lerp(r.sx, r.x, u), lerp(r.y + 70, r.y, u * u), lerp(r.sz, r.z, u)); r.g.rotation.set(Math.atan2(r.x - r.sx, 70) * 0, 0, 0);
+        if (u >= 1) {
+            r.on = false; r.g.visible = false;
+            burst(V3(r.x, r.y + 0.4, r.z), 14, 7, [glowM(0xff7a2a), glowM(0xffd060), chipMats[2]]);
+            const dd = Math.hypot(player.pos.x - r.x, player.pos.z - r.z);
+            if (dd < (r.boss ? 2.2 : 2.7) && state === "playing") { if (r.boss) { if (fight4.on) kingHit(0.75, r.x, r.z); } else hurtPlayer(Math.round(18 * isleDm() * (buffOn("fireproof") ? 0.5 : 1)), r.x, r.z); }
+            if (dd < 40) { sfx(120 + Math.random() * 40, 0.35, "sawtooth", 0.1 * (1 - dd / 40), 0.4); shake = Math.max(shake, 0.3 * (1 - dd / 40)); }
+            if (r.drop) dropMatsAt(r.x, r.z, Math.random() < 0.6 ? "ember" : "obsidian", 1 + Math.floor(Math.random() * 3), 0.2, 1);
+        }
+    }
+    for (const w of kfx.waves) {
+        if (w.R < 0) continue;
+        w.R += dt * 12; w.m.scale.set(w.R, 1, w.R); w.m.position.set(VOLC.x, king.gy + 0.5, VOLC.z); w.m.material.opacity = 0.65 * (1 - w.R / (KARENA() + 2));
+        const dd = kingDist();
+        if (fight4.on && Math.abs(dd - w.R) < 0.9 && grounded() && !fight4.hitWave.has(w.id)) { fight4.hitWave.add(w.id); kingHit(0.9, VOLC.x, VOLC.z); player.vel.y = 5; }
+        if (w.R > KARENA() + 2) { w.R = -1; w.m.visible = false; }
+    }
+}
+function updateKing(dt, animOnly) {
+    if (!kingG) return;
+    const f = fight4, B = king;
+    for (const fl of kingFlames) fl.scale.set(0.5, 2.2 * (0.8 + Math.sin(time * 9 + fl.userData.ph) * 0.25), 0.5);
+    if (kingFireRing.visible) for (const fl of kingFireRing.children) fl.scale.y = 2.4 * (0.75 + Math.sin(time * 10 + fl.userData.ph) * 0.25);
+    if (kingLight) kingLight.intensity = (f.on ? 8 + Math.sin(time * 6) * 2 : 3 + Math.sin(time * 1.5)) + f.heart * 10;
+    if (kingCore) kingCore.scale.setScalar(0.85 + Math.sin(time * (f.on ? 6 : 2)) * 0.08 + f.heart * 0.25);
+    updateKingFx(dt);
+    if (f.dyingT >= 0) {
+        f.dyingT += dt; const u = Math.min(1, f.dyingT / 3);
+        B.body.rotation.x = -Math.pow(u, 2.2) * Math.PI * 0.46;
+        if (f.dyingT < 2.5 && Math.random() < dt * 20) burst(V3(B.x + rand(-2, 2), B.gy + rand(1, 10), B.z + rand(-2, 2)), 2, 3, [glowM(0xff7a2a), chipMats[2]]);
+        if (u >= 1 && !f.landed) { f.landed = true; shake = 1.2; sfx(45, 1.2, "sawtooth", 0.25, 0.4); kingRewards(); }
+        if (f.dyingT > 4.2) { f.dyingT = -1; f.landed = false; kingG.visible = false; kingStump.visible = true; kingLabel.el.textContent = "THE CINDER KING · regrows at dawn"; kingLabel.visible = true; }
+    }
+    if (f.on) { if (!animOnly && state === "playing") updateFight4(dt); return; }
+    if (kingLava.visible) { f.flood = lerp(f.flood, 0, Math.min(1, dt * 2)); kingLava.position.y = B.gy - 0.4 + f.flood * 0.75; if (f.flood < 0.02) kingLava.visible = false; }
+    if (f.dyingT >= 0 || !kingG.visible) return;
+    B.body.rotation.z = Math.sin(time * 0.4) * 0.01;
+    for (const a of B.arms) { a.arm.rotation.z = -a.s * 2.2 + Math.sin(time * 0.5 + a.s) * 0.05; a.pivot.rotation.x = 0; }
+    if (B.mode !== "calm") { B.mode = "calm"; B.face.material = faceMats.calm; }
+    if (!animOnly && state === "playing" && !ride && kingDist() < KARENA() - 1.5 && player.hp > 0 && !(save.kingDay === save.day && save.kingKills > 0)) startFight4();
+}
+// ---- eruptions: every few minutes the volcano throws burning rocks all over the island ----
+let eruptT = rand(120, 220), eruptLeft = 0, eruptBomb = 0;
+function startEruption() {
+    eruptLeft = 24; eruptBomb = 1.5;
+    toast("THE VOLCANO IS ERUPTING! Watch for red rings: lava bombs leave Ember and Obsidian behind.", "bad");
+    sfx(35, 3, "sawtooth", 0.22, 0.5); sfx(50, 2.5, "sine", 0.24, 0.6); shake = 1; flash = 0.25;
+    burst(V3(VOLC.x, floorY4() + 4, VOLC.z), 60, 14, [glowM(0xff7a2a), glowM(0xffd060), chipMats[2]]);
+}
+function updateEruption(dt) {
+    if (eruptLeft > 0) {
+        eruptLeft -= dt; eruptBomb -= dt;
+        if (isle4.plume) isle4.plume.material.opacity = 0.14;
+        if (isle4.volcLight) isle4.volcLight.intensity = 60 + Math.sin(time * 9) * 15;
+        if (Math.random() < dt * 4) shake = Math.max(shake, 0.12);
+        if (eruptBomb <= 0) {
+            eruptBomb = rand(0.35, 0.8);
+            for (let n = 0; n < 2; n++) { const a = Math.random() * 6.283, d = rand(n ? 8 : 0, n ? 40 : 10), x = player.pos.x + Math.cos(a) * d + player.vel.x * 0.8, z = player.pos.z + Math.sin(a) * d + player.vel.z * 0.8; if (Math.hypot(x, z) < SAFE_R + 2 || Math.hypot(x, z) > shoreAt4(x, z) - 4 || crater()) continue; kRock(x, z, n * 0.4, rand(1.6, 2.2), false); }
+        }
+        if (eruptLeft <= 0) toast("The eruption dies down. Go pick up what fell.", "good");
+        return;
+    }
+    if (fight4.on || state !== "playing" || ride) return;
+    eruptT -= dt;
+    if (eruptT <= 0) { eruptT = rand(180, 320); startEruption(); }
+}
 // a save that's already on another island starts there (this must run after everything above is defined)
-if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
-if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1, Mooncap Isle = Rebirth 2
+if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
+if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1, Mooncap Isle = Rebirth 2, Ashfall Isle = Rebirth 3
 
 // ---------- HUD ----------
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
@@ -6072,7 +6876,7 @@ const PROMPTS = {
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
-    witch: () => "[F] Visit the Apothecary", ferry3: () => "[F] Talk to the Ferryman", star: () => "[F] Take the fallen star",
+    witch: () => (isle === 4 ? "[F] Visit the Alchemist" : "[F] Visit the Apothecary"), ferry3: () => "[F] Talk to the Ferryman", ferry4: () => "[F] Talk to the Ferryman", star: () => "[F] Take the fallen star",
     well: () => (save.wellDay === save.day ? "The Moonwell is still. It refills at dawn" : "[F] Drink from the Moonwell"),
     scope: () => (!isNight() ? "The Observatory: come back at night" : save.scopeDay === save.day ? "You already watched the sky tonight" : "[F] Look through the telescope"),
     fish: n => (n.spot.blocked ? "Face the water to fish" : "[F] Cast your line"),
@@ -6095,7 +6899,7 @@ function hud(dt) {
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
     if (isle >= 2) { const mh = isleMats().filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
     else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    el.zone.textContent = isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
     { // active potions and blessings, with time left
         const bh = Object.keys(BUFFS).filter(buffOn).map(k => `<span style="color:${BUFFS[k].col};border-color:${BUFFS[k].col}">${BUFFS[k].icon} ${BUFFS[k].name} ${mmss(buffLeft(k))}</span>`).join("") + (save.phoenix > 0 ? `<span style="color:#ffb060;border-color:#ffb060">🔥 PHOENIX ×${save.phoenix}</span>` : "");
         const be = $("buffs"); if (be.dataset.h !== bh) { be.innerHTML = bh; be.dataset.h = bh; }
@@ -6156,7 +6960,7 @@ function frameBody(now) {
         camera.position.set(Math.cos(orbit) * 15, 4.5, Math.sin(orbit) * 15 - 4);
         camera.lookAt(0, 2.2, -3);
         camera.fov = 70; camera.updateProjectionMatrix();
-        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateWeather(real); updateEcosystem(real);
+        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateWeather(real); updateEcosystem(real);
         applySky();
     }
     camera.updateMatrixWorld();
@@ -6192,10 +6996,10 @@ if (DEBUG) window.__ts4 = {
     respawn,
     send() { return sendLogs(); },
     setState(s) { state = s; renderMenu(); },
-    interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
+    interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, enterIsle4, startFight4, fight4, startEruption, getKing: () => king, VOLC, syncKing, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
     // the dev panel (dev.js) drives the game through these
     get panel() { return panel; }, togglePanel, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
-    FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z },
+    FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z }, FERRYMAN3: { x: FERRYMAN3.x, z: FERRYMAN3.z },
     setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
     freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
 };

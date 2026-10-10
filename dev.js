@@ -53,8 +53,8 @@ function parseAmt(s) {
     return Math.round(parseFloat(m[1]) * { "": 1, k: 1e3, m: 1e6, b: 1e9, t: 1e12 }[m[2]]);
 }
 const S = () => T.save;
-const ISLE_NAMES = { 1: "Pine Island", 2: "Highland Isle", 3: "Mooncap Isle" };
-const allMats = () => [...T.MATS_BY_ISLE[2], ...T.MATS_BY_ISLE[3]];
+const ISLE_NAMES = { 1: "Pine Island", 2: "Highland Isle", 3: "Mooncap Isle", 4: "Ashfall Isle" };
+const allMats = () => [...T.MATS_BY_ISLE[2], ...T.MATS_BY_ISLE[3], ...T.MATS_BY_ISLE[4]];
 const say = (m, k = "good") => T.toast("[dev] " + m, k);
 
 // ---------- the panel ----------
@@ -85,7 +85,7 @@ el.innerHTML = `
     </div>
     <div class="dvCard">
       <div class="dvH">WORLD <small id="dvWorld"></small></div>
-      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" data-isle="1">Pine Island</button><button class="dvB" data-isle="2">Highland Isle</button><button class="dvB" data-isle="3">Mooncap Isle</button></div>
+      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" data-isle="1">Pine Island</button><button class="dvB" data-isle="2">Highland Isle</button><button class="dvB" data-isle="3">Mooncap Isle</button><button class="dvB" data-isle="4">Ashfall Isle</button></div>
       <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" data-hour="6">Dawn</button><button class="dvB" data-hour="12">Noon</button><button class="dvB" data-hour="18.5">Dusk</button><button class="dvB" data-hour="23">Midnight</button><button class="dvB" id="dvBlood">Blood moon now</button></div>
       <div class="dvRow"><label>Day</label><input class="dvIn" id="dvDay" style="width:90px"></div>
       <div class="dvRow"><label>Weather</label><span style="display:flex;gap:5px" id="dvWx"></span></div>
@@ -100,8 +100,12 @@ el.innerHTML = `
       <div class="dvBtns"><button class="dvB" id="dvToBoss">Go fight the Elder Heart</button><button class="dvB" id="dvBoss10">Boss to 10%</button><button class="dvB warn" id="dvBossKill">Kill boss</button><button class="dvB" id="dvRegrow">Regrow boss</button><button class="dvB" id="dvStar">Drop a star near me</button></div>
     </div>
     <div class="dvCard">
+      <div class="dvH">ASHFALL ISLE <small id="dvKingTxt"></small></div>
+      <div class="dvBtns"><button class="dvB" id="dvToKing">Go fight the Cinder King</button><button class="dvB" id="dvKing10">King to 10%</button><button class="dvB warn" id="dvKingKill">Kill king</button><button class="dvB" id="dvKingRegrow">Regrow king</button><button class="dvB" id="dvErupt">Erupt now</button></div>
+    </div>
+    <div class="dvCard">
       <div class="dvH">REBIRTH RIDES <small>these really rebirth you: snapshot first!</small></div>
-      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" id="dvRide1">Ride: Pine → Highland</button><button class="dvB" id="dvRide2">Ride: Highland → Mooncap</button></div>
+      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" id="dvRide1">Ride: Pine → Highland</button><button class="dvB" id="dvRide2">Ride: Highland → Mooncap</button><button class="dvB" id="dvRide3">Ride: Mooncap → Ashfall</button></div>
       <div class="dvBtns"><button class="dvB" id="dvSnap">Snapshot save</button><button class="dvB warn" id="dvRestore">Restore snapshot</button></div>
       <div class="dvHint" id="dvSnapTxt"></div>
     </div>
@@ -173,6 +177,7 @@ function status() {
     $("dvBossTxt").textContent = T.getIsle() !== 3 ? "(go to Mooncap Isle)" : f.on ? `FIGHTING · ${fmt(B.hp)} / ${fmt(B.maxHp)} HP · phase ${f.phase}` : S().bossDay === S().day && S().bossKills ? "felled today" : `asleep · felled ${S().bossKills || 0}×`;
     // fields you're not editing follow the live game (money goes up while you play)
     for (const f2 of Object.values(fields)) if (f2.input && document.activeElement !== f2.input && !f2.input.classList.contains("dirty")) { const v = fmt(f2.read()); if (f2.input.value !== v) f2.input.value = v; }
+    { const K = T.getKing(), f4 = T.fight4; $("dvKingTxt").textContent = T.getIsle() !== 4 ? "(go to Ashfall Isle)" : f4.on && K ? `FIGHTING · ${fmt(K.hp)} / ${fmt(K.maxHp)} HP · phase ${f4.phase}` : S().kingDay === S().day && S().kingKills ? "felled today" : `asleep · felled ${S().kingKills || 0}×`; }
     const snap = localStorage.getItem("ts4_dev_snapshot");
     $("dvSnapTxt").textContent = snap ? "snapshot: " + (JSON.parse(snap).note || "saved") : "no snapshot yet";
 }
@@ -195,7 +200,7 @@ el.addEventListener("click", e => {
     if (d.add) bump("dvMoney", v => v + +d.add);
     else if (d.set !== undefined) bump("dvMoney", () => +d.set);
     else if (d.relic !== undefined) { relicDraft[+d.relic] = relicDraft[+d.relic] ? 0 : 1; drawRelic(); refreshApply(); }
-    else if (d.isle) { const n = +d.isle; if (n !== T.getIsle()) { [, T.enterIsle1, T.enterIsle2, T.enterIsle3][n](); S().rebirths = n - 1; teleport(n === 1 ? 0 : 3, n === 1 ? -0.5 : 4); T.writeSave(); say("now on " + ISLE_NAMES[n]); load(); buildGo(); } }
+    else if (d.isle) { const n = +d.isle; if (n !== T.getIsle()) { [, T.enterIsle1, T.enterIsle2, T.enterIsle3, T.enterIsle4][n](); S().rebirths = n - 1; teleport(n === 1 ? 0 : 3, n === 1 ? -0.5 : 4); T.writeSave(); say("now on " + ISLE_NAMES[n]); load(); buildGo(); } }
     else if (d.hour) { T.setClock(+d.hour); say("time set"); }
     else if (d.wx) { T.setWeather(d.wx); }
     else if (d.speed) T.setSpeed(+d.speed);
@@ -239,6 +244,22 @@ el.addEventListener("click", e => {
             if (T.getIsle() !== 2) T.enterIsle2();
             S().relic = [1, 1, 1, 1, 1, 1]; S().money = Math.max(S().money, 2500000); teleport(T.FERRYMAN2.x, T.FERRYMAN2.z - 2.5, T.FERRYMAN2.x, T.FERRYMAN2.z);
             T.togglePanel("dev"); setTimeout(() => T.startRebirthRide(2), 400); break;
+        }
+        case "dvToKing": {
+            if (T.getIsle() !== 4) { say("go to Ashfall Isle first", "bad"); return; }
+            if (S().kingDay === S().day && S().kingKills) { S().kingDay = 0; T.syncKing(); }
+            const V = T.VOLC, dd = Math.hypot(V.x, V.z); teleport(V.x - V.x / dd * 9, V.z - V.z / dd * 9, V.x, V.z);
+            T.togglePanel("dev"); break;
+        }
+        case "dvKing10": { const K = T.getKing(); if (!T.fight4.on) { say("start the fight first", "bad"); return; } K.hp = Math.ceil(K.maxHp * 0.1); break; }
+        case "dvKingKill": { const K = T.getKing(); if (!T.fight4.on) { say("start the fight first", "bad"); return; } K.hp = 1; T.hitTree(K, 1, false); break; }
+        case "dvKingRegrow": S().kingDay = 0; T.syncKing(); say("the Cinder King rekindled"); break;
+        case "dvErupt": if (T.getIsle() !== 4) { say("eruptions only happen on Ashfall Isle", "bad"); return; } T.startEruption(); T.togglePanel("dev"); break;
+        case "dvRide3": {
+            if (T.getIsle() !== 3) T.enterIsle3();
+            S().bossKills = Math.max(1, S().bossKills || 0); S().mats.heartwood = Math.max(5, S().mats.heartwood || 0); S().money = Math.max(S().money, 25000000);
+            teleport(T.FERRYMAN3.x, T.FERRYMAN3.z - 2.5, T.FERRYMAN3.x, T.FERRYMAN3.z);
+            T.togglePanel("dev"); setTimeout(() => T.startRebirthRide(3), 400); break;
         }
         case "dvSnap": T.writeSave(); localStorage.setItem("ts4_dev_snapshot", JSON.stringify({ note: `${ISLE_NAMES[T.getIsle()]}, day ${S().day}, $${fmt(S().money)} · ${new Date().toLocaleTimeString()}`, save: localStorage.getItem("ts4_save_v1") })); say("snapshot saved"); break;
         case "dvRestore": {

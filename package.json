@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.2.1\n\n- Mooncap Isle: the Ferryman and the light to the next island have moved to a new REBIRTH 3 FERRY dock on the far side of the island (south shore, past the Hollow). Arrivals is just where you land now.\n- A lantern path and a signpost at camp lead the way to the new dock, and it is on the map."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.3.0\n\n- REBIRTH 3: ASHFALL ISLE. Fell the Elder Heart, bring 5 Heartwood and $25,000,000 to the Ferryman on Mooncap Isle and sail to a living volcano island.\n- THE CINDER KING waits in the crater. Dodge lava geysers and meteors, jump his fire waves, and climb the basalt pillars when the crater floods with lava. He drops Molten Cores and rekindles every dawn.\n- ERUPTIONS: every few minutes the volcano throws lava bombs across the island. Watch for the red rings, then grab the Ember and Obsidian they leave behind.\n- Rivers of lava (don't step in them), hot springs that heal you, the Obsidian Spires, the Basalt Columns and the burnt Ashwood.\n- 7 new trees and 7 new materials: Ash, Cinder, Sulfur, Obsidian, Ember, Phoenix Feathers and Molten Cores.\n- New gear at the Crucible: Cinderbrand, Volcano's Wrath and the Magma Launcher, which scorches every tree near where it lands. The Alchemist sells a Fireproof Tonic.\n- Mooncap Isle: the Rebirth 3 ferry now sails, and you can see Ashfall's volcano on the horizon.\n- FIXED: trees on Mooncap Isle could grow inside landmarks."
     }
   }
 }

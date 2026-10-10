@@ -180,6 +180,7 @@
   #resetBtn:hover { background: rgba(255,90,70,.15); } #resetBtn.armed { background: linear-gradient(#ff6a5a, #d02a2a); color: #fff; border-color: #ff6a5a; animation: pulse .4s infinite alternate; }
   #buffs { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; max-width: 290px; }
   #buffs span { font: 700 11px Consolas; letter-spacing: 1px; background: var(--bg); border: 1px solid; border-radius: 10px; padding: 2px 8px; }
+  #rebirthFx.ember { background: radial-gradient(circle, #fff0d0, #ff9a3a 60%, #a02a0a); }
   #rebirthFx.violet { background: radial-gradient(circle, #f4eaff, #b88aff 60%, #6a3ad8); }
   #bossBar { position: fixed; top: 18px; left: 50%; transform: translate(-50%, -20px); width: min(640px, 60vw); z-index: 4; opacity: 0; pointer-events: none; transition: opacity .4s, transform .4s; text-align: center; text-shadow: 0 2px 0 #000; }
   #bossBar.show { opacity: 1; transform: translate(-50%, 0); }
@@ -360,7 +361,7 @@
   <div id="relicGrid"></div>
   <div class="foot">bring all 6 pieces and $2,500,000 to the Ferryman for Rebirth 2 · K or Esc to close</div>
 </div>
-<div id="bossBar"><div class="bn">THE ELDER HEART <span id="bossPh"></span></div><div class="bb"><u id="bossLag"></u><i id="bossFill"></i></div><div id="bossHp"></div></div>
+<div id="bossBar"><div class="bn"><span id="bossName">THE ELDER HEART</span> <span id="bossPh"></span></div><div class="bb"><u id="bossLag"></u><i id="bossFill"></i></div><div id="bossHp"></div></div>
 <div id="titleCard"><b id="tcBig"></b><small id="tcSmall"></small></div>
 <div id="fadeBlk"></div>
 <div id="rideCap"></div>
