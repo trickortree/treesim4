@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.3.0\n\n- REBIRTH 3: ASHFALL ISLE. Fell the Elder Heart, bring 5 Heartwood and $25,000,000 to the Ferryman on Mooncap Isle and sail to a living volcano island.\n- THE CINDER KING waits in the crater. Dodge lava geysers and meteors, jump his fire waves, and climb the basalt pillars when the crater floods with lava. He drops Molten Cores and rekindles every dawn.\n- ERUPTIONS: every few minutes the volcano throws lava bombs across the island. Watch for the red rings, then grab the Ember and Obsidian they leave behind.\n- Rivers of lava (don't step in them), hot springs that heal you, the Obsidian Spires, the Basalt Columns and the burnt Ashwood.\n- 7 new trees and 7 new materials: Ash, Cinder, Sulfur, Obsidian, Ember, Phoenix Feathers and Molten Cores.\n- New gear at the Crucible: Cinderbrand, Volcano's Wrath and the Magma Launcher, which scorches every tree near where it lands. The Alchemist sells a Fireproof Tonic.\n- Mooncap Isle: the Rebirth 3 ferry now sails, and you can see Ashfall's volcano on the horizon.\n- FIXED: trees on Mooncap Isle could grow inside landmarks."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.4.0\n\n- ENCHANTING TABLE in every camp: Sharpness, Swiftness, Fortune, Lifesteal and Bossbane for the axe you are holding. Enchanted axes shimmer purple.\n- SELL AXES: sell old axes back for half what they cost (Reaper, Forge, Moonforge and Crucible).\n- GHOST LUMBERJACKS now work on every island. Past Pine Island they haul back materials.\n- CHRISTMAS TREES on every island: Christmas Pine, Frosted Christmas Fir, Starlight Spruce and Yule Ember Tree. Fell one and a present falls out.\n- +50 MAX HEALTH for every rebirth.\n- WILDLIFE everywhere: mountain goats, marmots and hunting eagles on the Highland Isle; moon foxes, shroomlings, glowing snails and lantern moths on Mooncap; salamanders, ember beetles, ash crows and bats on Ashfall; squirrels on Pine Island. Fireflies at night.\n- DECORATIONS on every island: mushrooms, fallen logs, berry bushes, cairns, fairy rings, crystals, obsidian, lava cracks and more."
     }
   }
 }

@@ -102,7 +102,7 @@ const save = {
     contract: null, chestsDay: 0, altarDay: 0, chestsOpened: 0,
     rodLvl: 0, fishBag: [], fishDex: {}, fishSold: 0, ghostCash: 0, ghostFelled: 0, bmSurvived: 0, rebirths: 0,
     isle: 1, gunOwned: [], gunEq: -1, gunAmmo: {}, vestLvl: 0, magLvl: 0, whetLvl: 0, powderLvl: 0, magnetLvl: 0, ferryTalks: 0, ferry2Talk: 0, mats: {}, hotbar: null, relic: [0, 0, 0, 0, 0, 0], caveFound: 0,
-    ferry3Talk: 0, bossKills: 0, bossDay: 0, buffs: {}, phoenix: 0, wellDay: 0, scopeDay: 0, starsCaught: 0
+    ferry3Talk: 0, bossKills: 0, bossDay: 0, buffs: {}, phoenix: 0, wellDay: 0, scopeDay: 0, starsCaught: 0, ench: {}, giftsOpened: 0
 };
 try { Object.assign(save, JSON.parse(localStorage.getItem(SAVE_KEY) || localStorage.getItem("ts4_test3_save") || "{}")); } catch (e) { /* fresh save */ }
 if (!Array.isArray(save.owned)) save.owned = [1, 0, 0, 0, 0, 0, 0, 0];
@@ -116,6 +116,9 @@ if (typeof save.gunEq !== "number" || !save.gunOwned[save.gunEq]) save.gunEq = -
 if (!save.mats || typeof save.mats !== "object") save.mats = {};
 if (!Array.isArray(save.relic) || save.relic.length !== 6) save.relic = [0, 0, 0, 0, 0, 0];
 if (!save.buffs || typeof save.buffs !== "object") save.buffs = {};
+if (!save.ench || typeof save.ench !== "object") save.ench = {};
+// enchantments live on each axe: save.ench[axeIndex] = { sharp, fortune, vamp, swift, bane }
+const enchLv = (k, i = save.equipped) => (save.ench[i] && save.ench[i][k]) || 0;
 let savesFrozen = false; // the dev panel sets this right before it swaps the save and reloads
 function writeSave() { if (savesFrozen) return; save.clock = hourNow(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
 // difficulty follows your best axe, so a strong axe never one-shots everything
@@ -142,7 +145,7 @@ const rebirthCost = () => Math.round(250000 * Math.pow(3, save.rebirths || 0));
 const rebirthMult = () => 1 + 0.5 * (save.rebirths || 0);
 const logValue = () => Math.round((4 + save.priceLvl * 2) * rebirthMult() * (isle === 3 ? 4 : isle === 2 ? 2.5 : 1));
 const ghostIncome = () => 0; // ghosts now earn by really chopping trees
-const maxHpNow = () => 100 + save.hpLvl * 20;
+const maxHpNow = () => 100 + save.hpLvl * 20 + 50 * (save.rebirths || 0); // every rebirth makes you +50 HP tougher, forever
 
 // ---------- time of day ----------
 let clockT = (clamp(save.clock, 0, 24) / 24) * DAY_LEN;
@@ -1235,6 +1238,11 @@ const TYPES = {
     phoenixtree:{ name: "Phoenix Tree",   leaf: [0xffa02a, 0xffd060],           trunk: 0x6a2a10, hp: 2,   logs: 0.3, dmg: 0,    speed: 1,   bonus: 50, wd: 0.02, wn: 0.07, col: "#ffc060", glow: 0xa04000, isl: [4], rare: true, flee: true, night: true, mat: "phoenixf" },
     basalt:    { name: "Basalt Colossus", leaf: [0x2a2626, 0x3a3030],           trunk: 0x1e1a1a, hp: 9,   logs: 7,   dmg: 2.8,  speed: 0.6, bonus: 100, wd: 0.05, wn: 0.05, col: "#d8a080", isl: [4], minTier: 9, titan: true, mat: "obsidian" },
     emberling: { name: "Emberling",       leaf: [0xff5a1a, 0xff8a2a],           trunk: 0x2a0a04, hp: 0.6, logs: 0.6, dmg: 0.85, speed: 2.5, bonus: 0,  wd: 0,    wn: 0,    col: "#ffa040", glow: 0x6a1a00, isl: [], rush: true, mat: "ash" },
+    // Christmas trees: one on every island. Rare, harmless-ish, and a present falls out when they go down
+    xmaspine: { name: "Christmas Pine",       leaf: [0x1e5a34, 0x1a4e2e],           trunk: 0x4a3024, hp: 1.8, logs: 2.2, dmg: 1.05, speed: 0.9, bonus: 18, wd: 0.06, wn: 0.07, col: "#ff5a5a", rare: true, xmas: true, isl: [1] },
+    xmasfir:  { name: "Frosted Christmas Fir", leaf: [0x1e4e3e, 0x24584a],          trunk: 0x4a3a30, hp: 2.0, logs: 2.4, dmg: 1.1,  speed: 0.9, bonus: 24, wd: 0.06, wn: 0.07, col: "#ff6a6a", rare: true, xmas: true, isl: [2], mat: "wood" },
+    xmasmoon: { name: "Starlight Spruce",      leaf: [0x1a2a5a, 0x22306a],          trunk: 0x3a3048, hp: 2.2, logs: 2.4, dmg: 1.15, speed: 0.9, bonus: 30, wd: 0.06, wn: 0.08, col: "#bfe0ff", glow: 0x0a1030, rare: true, xmas: true, isl: [3], mat: "silver" },
+    xmasash:  { name: "Yule Ember Tree",       leaf: [0x2a2624, 0x342a26],          trunk: 0x1a1210, hp: 2.4, logs: 2.4, dmg: 1.2,  speed: 0.9, bonus: 36, wd: 0.06, wn: 0.08, col: "#ffb040", glow: 0x1a0800, rare: true, xmas: true, isl: [4], mat: "cinder" },
     // the Elder Heart's children: they never spawn on their own, and they don't care if you're looking
     thornling:   { name: "Thornling",       leaf: [0x6a1a3a, 0x8a2a4a],           trunk: 0x2a0a18, hp: 0.6, logs: 0.6, dmg: 0.8,  speed: 2.4, bonus: 0,  wd: 0,    wn: 0,    col: "#ff5a8a", glow: 0x3a0018, isl: [], rush: true, mat: "spore" }
 };
@@ -1257,13 +1265,17 @@ const TREE_STYLE = {
     gloomwood: { s: "dead", dots: 0xb07aff }, voidspire: { s: "crystal", dots: 0xd8b0ff }, starwisp: { s: "round", dots: 0xffffff }, mooncap: { s: "shroom", dots: 0xfff0ff },
     thornling: { s: "spiky", dots: 0xff4a8a },
     ashwood: { s: "dead", dots: 0xff6a2a }, cinderpine: { s: "conifer", dots: 0xff7a2a }, sulfurspire: { s: "crystal", dots: 0xfff4a0 }, obsidianoak: { s: "round", dots: 0xb07aff },
-    emberwillow: { s: "round", dots: 0xffe070 }, phoenixtree: { s: "round", dots: 0xffffff }, basalt: { s: "conifer", dots: 0xff6a2a }, emberling: { s: "spiky", dots: 0xffd040 }
+    emberwillow: { s: "round", dots: 0xffe070 }, phoenixtree: { s: "round", dots: 0xffffff }, basalt: { s: "conifer", dots: 0xff6a2a }, emberling: { s: "spiky", dots: 0xffd040 },
+    xmaspine: { s: "xmas", dots: 0xffe9a0, orn: [0xff3a3a, 0xffd040, 0x3a8aff], star: 0xffe060 }, xmasfir: { s: "xmas", dots: 0xffffff, snow: true, orn: [0xff3a3a, 0xf4f8ff, 0xffd040], star: 0xffe060 },
+    xmasmoon: { s: "xmas", dots: 0xbfe0ff, orn: [0xd8e8ff, 0xb07aff, 0x7affef], star: 0xffffff }, xmasash: { s: "xmas", dots: 0xffd040, orn: [0xff6a1a, 0xffd040, 0xff2a2a], star: 0xffa020 }
 };
+const ornMats = {};
+const ornMat = c => ornMats[c] || (ornMats[c] = new THREE.MeshBasicMaterial({ color: c }));
 const snowMat = new THREE.MeshLambertMaterial({ color: 0xf2f6ff, flatShading: true }), rockMat = new THREE.MeshLambertMaterial({ color: 0x7a7a84, flatShading: true });
 const dotMats = {};
 const ni = g => (g.index ? g.toNonIndexed() : g);
 function treeShape(key, r, h) {
-    const st = TREE_STYLE[key] || { s: "conifer" }, leaf = [], deco = [], snow = [], dots = [], rocks = [];
+    const st = TREE_STYLE[key] || { s: "conifer" }, leaf = [], deco = [], snow = [], dots = [], rocks = [], orns = [], starG = [];
     const R = Math.random, rot = g => { g.rotateY(R() * 6.28); return g; };
     // roots splaying out from the base
     for (let i = 0; i < 5; i++) {
@@ -1310,13 +1322,27 @@ function treeShape(key, r, h) {
         const gill = new THREE.CylinderGeometry(R2 * 0.97, r * 0.9, R2 * 0.22, 12, 1, true); gill.rotateZ(tilt); gill.translate(0, top - R2 * 0.1, 0); deco.push(ni(gill));
         const skirt = new THREE.CylinderGeometry(r * 1.05, r * 1.35, r * 0.5, 10, 1, true); skirt.translate(0, h * 0.72, 0); deco.push(ni(skirt));
         for (let d = 0; d < 9; d++) { const a = R() * 6.283, e = 0.25 + R() * 1.1; dot(Math.cos(a) * Math.cos(e) * R2 * 0.98, top + Math.sin(e) * R2 * 0.5, Math.sin(a) * Math.cos(e) * R2 * 0.98, 0.16 + R() * 0.1); }
+    } else if (st.s === "xmas") {
+        // a proper Christmas tree: stacked tiers, baubles in three colours, a garland and a star on top
+        const tiers = 5;
+        st.orn.forEach(() => orns.push([]));
+        for (let i = 0; i < tiers; i++) {
+            const k = i / tiers, rad = r * 3.3 * (1 - k * 0.8), ht = h * 0.34, y = h * 0.38 + i * (h * 0.6 / tiers);
+            const c = rot(new THREE.ConeGeometry(rad, ht, 9)); c.translate(0, y, 0); leaf.push(ni(c));
+            if (st.snow) { const sc = rot(new THREE.ConeGeometry(rad * 0.6, ht * 0.4, 9)); sc.translate(0, y + ht * 0.32, 0); snow.push(ni(sc)); }
+            const nb = 6 - i;
+            for (let b = 0; b < nb; b++) { const a = (b / nb) * 6.283 + i * 0.7 + R() * 0.3, rr = rad * 0.86, o = new THREE.IcosahedronGeometry(r * 0.3, 0); o.translate(Math.cos(a) * rr, y - ht * 0.38, Math.sin(a) * rr); orns[(b + i) % orns.length].push(o); }
+            for (let g = 0; g < 10; g++) { const a = (g / 10) * 6.283 + i, rr = rad * (0.62 + 0.3 * (g / 10)), d = new THREE.BoxGeometry(r * 0.12, r * 0.12, r * 0.12); d.translate(Math.cos(a) * rr, y - ht * 0.1 - (g / 10) * ht * 0.3, Math.sin(a) * rr); dots.push(d); }
+        }
+        const top = h * 0.38 + (tiers - 1) * (h * 0.6 / tiers) + h * 0.2;
+        for (const ry of [0, Math.PI / 2]) { const p = new THREE.OctahedronGeometry(r * 0.55, 0); p.scale(0.8, 1.35, 0.35); p.rotateY(ry); p.translate(0, top, 0); starG.push(p); }
     } else if (st.s === "birch") {
         // tall pale trunk with dark bark marks and small airy leaf clumps up high
         for (let i = 0; i < 7; i++) { const a = (i / 7) * 6.283 + R(), y = h * (0.62 + R() * 0.42), d = r * (0.6 + R() * 1.4), b = new THREE.IcosahedronGeometry(r * (1.2 + R() * 0.7), 0); b.scale(1, 1.25, 1); b.translate(Math.cos(a) * d, y, Math.sin(a) * d); leaf.push(b); }
         for (let i = 0; i < 10; i++) { const a = R() * 6.283, y = h * (0.08 + R() * 0.62), rr = r * (1.0 - 0.32 * (y / h)) * 0.97, m = new THREE.BoxGeometry(r * 0.5, r * 0.12, r * 0.08); m.rotateY(-a + Math.PI / 2); m.translate(Math.cos(a) * rr, y, Math.sin(a) * rr); dots.push(m); }
     }
     const merge = a => (a.length ? mergeGeometries(a) : null);
-    return { leaf: merge(leaf), deco: merge(deco), snow: merge(snow), dots: merge(dots), rocks: merge(rocks), dotCol: st.dots };
+    return { leaf: merge(leaf), deco: merge(deco), snow: merge(snow), dots: merge(dots), rocks: merge(rocks), dotCol: st.dots, orns: orns.map((a, i) => a.length ? { geo: mergeGeometries(a), col: st.orn[i] } : null).filter(Boolean), star: merge(starG), starCol: st.star };
 }
 
 
@@ -1413,6 +1439,8 @@ function makeTree(x, z, h, key = "pine") {
     if (shp.snow) body.add(new THREE.Mesh(shp.snow, snowMat));
     if (shp.rocks) body.add(new THREE.Mesh(shp.rocks, rockMat));
     if (shp.dots) body.add(new THREE.Mesh(shp.dots, dotMats[shp.dotCol] || (dotMats[shp.dotCol] = new THREE.MeshBasicMaterial({ color: shp.dotCol }))));
+    for (const o of shp.orns) body.add(new THREE.Mesh(o.geo, ornMat(o.col)));
+    if (shp.star) body.add(new THREE.Mesh(shp.star, ornMat(shp.starCol)));
     const faceY = Math.min(h * 0.3, 2.0);
     const rAt = r * (1 - 0.3 * (faceY / h));
     const face = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMats.calm);
@@ -1466,7 +1494,7 @@ function spawnTree(announce = true) {
         if (bad) continue;
         const key = pickType(x, z), T = TYPES[key];
         const t = makeTree(x, z, T.titan ? 10 + Math.random() * 2 : T.tall ? 8 + Math.random() * 5 : 3 + Math.random() * 7, key);
-        if (announce && (T.night || T.titan) && time - lastRareToast > 25) { lastRareToast = time; toast(T.titan ? `A ${T.name} towers somewhere in the woods...` : `A ${T.name} stirs somewhere in the woods...`, "rare"); }
+        if (announce && (T.night || T.titan || T.xmas) && time - lastRareToast > 25) { lastRareToast = time; toast(T.xmas ? `Jingle bells... a ${T.name} sprouted somewhere in the woods!` : T.titan ? `A ${T.name} towers somewhere in the woods...` : `A ${T.name} stirs somewhere in the woods...`, "rare"); }
         return t;
     }
 }
@@ -1678,9 +1706,11 @@ function tryHit() {
         if (d < bestD) { bestD = d; best = t; }
     }
     if (!best) { sfx(160, 0.12, "sawtooth", 0.05, 0.6); return; }
-    hitTree(best, axeDmg(), true);
+    hitTree(best, Math.round(axeDmg() * (best.boss ? 1 + 0.25 * enchLv("bane") : 1)), true);
+    const vamp = enchLv("vamp"); // Lifesteal: every swing that lands heals you a little
+    if (vamp && player.hp > 0 && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + Math.max(1, Math.round(player.maxHp * 0.012 * vamp)));
 }
-const HIT_COL = { ghost: [0x9fe8ff, 0xffffff], blood: [0xaa1818, 0xff5a5a], gold: [0xffd040, 0xfff0a0], elder: [0x7a4aa0, 0xc8a0ff], ironwood: [0xa9bcd4, 0x6a7a8a], frostbark: [0x8fe0ff, 0xffffff], emberwood: [0xff9a3a, 0xffe070], titan: [0xd8a860, 0xfff0c0],
+const HIT_COL = { xmaspine: [0x1e5a34, 0xff3a3a, 0xffd040], xmasfir: [0x1e4e3e, 0xffffff, 0xff3a3a], xmasmoon: [0x1a2a5a, 0xd8e8ff, 0xb07aff], xmasash: [0x2a2624, 0xff6a1a, 0xffd040], ghost: [0x9fe8ff, 0xffffff], blood: [0xaa1818, 0xff5a5a], gold: [0xffd040, 0xfff0a0], elder: [0x7a4aa0, 0xc8a0ff], ironwood: [0xa9bcd4, 0x6a7a8a], frostbark: [0x8fe0ff, 0xffffff], emberwood: [0xff9a3a, 0xffe070], titan: [0xd8a860, 0xfff0c0],
     larch: [0x8a9a3a, 0xb07a45], stonebark: [0x8a8a96, 0x5a5a62], copperleaf: [0xd0763a, 0xffb070], ironbark: [0xa9c0dc, 0x4a5a6a], powderwood: [0x2a2228, 0xff4a3a], goldleaf: [0xffd040, 0xfff0a0], redwood: [0x7a3a22, 0xd08a5a], snowpine: [0xe8f4ff, 0xffffff], crystal: [0x7affef, 0xff7ad8], magma: [0xff5a1a, 0xffd060], colossus: [0xd8a860, 0xfff0c0] };
 function hitTree(best, dmg, melee) {
     best.hp -= dmg;
@@ -1700,10 +1730,22 @@ function fellTree(t) {
     save.felled++;
     if (isBlood()) bmFelled++;
     contractProgress("fell");
-    if (t.type.rare) { save.rareFelled++; contractProgress("rare"); toast(`You felled a ${t.type.name}!`, "rare"); }
+    if (t.type.rare) { save.rareFelled++; contractProgress("rare"); if (!t.type.xmas) toast(`You felled a ${t.type.name}!`, "rare"); }
+    if (t.type.xmas) openGift(t);
     sfx(90, 0.4, "sawtooth", 0.15, 0.4);
 }
 
+// a present falls out of every Christmas tree: cash that fits the island, a bandage, and (past Pine Island) a pile of materials
+function openGift(t, byGhost) {
+    const sc = [1, 1, 4, 30, 300][isle], cash = Math.round(rand(100, 240) * sc * rebirthMult() * (1 + 0.1 * (save.day - 1)));
+    save.money += cash; save.bandages++; save.giftsOpened = (save.giftsOpened || 0) + 1;
+    let extra = "";
+    if (isle >= 2) { const ks = isleMats().filter(k => !["heartwood", "molten", "star", "phoenixf"].includes(k)).slice(0, 4), k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(5, 10)); save.mats[k] = (save.mats[k] || 0) + n; extra = ` and ${n} ${MATS[k].name}`; }
+    toast(`${byGhost ? "Your ghost found a present" : "A present tumbled out of the " + t.type.name}: +${money(cash)}, a bandage${extra}!`, "cash");
+    const p = V3(t.x, t.gy + 1, t.z);
+    burst(p, 22, 6, [ornMat(0xff3a3a), ornMat(0x2aa04a), ornMat(0xffd040), ornMat(0xffffff)]);
+    sfx(1046, 0.12, "triangle", 0.08, 1); setTimeout(() => sfx(1318, 0.12, "triangle", 0.08, 1), 110); setTimeout(() => sfx(1568, 0.25, "triangle", 0.08, 1), 220);
+}
 function hurtPlayer(dmg, sx, sz) {
     if (player.invuln > 0 || state !== "playing") return;
     if (godMode) return;
@@ -1831,12 +1873,42 @@ function openChest(c) {
 let shopMode = "reaper", shopPage = 0;
 const PER_PAGE = 4;
 const SHOP_TABS = {
-    reaper: [["axes", "AXES"], ["gear", "GEAR"], ["sell", "SELL FISH"]],
-    forge: [["axes", "CRAFT AXES"], ["guns", "CRAFT GUNS"], ["ammo", "AMMO"], ["gear", "GEAR"]],
+    reaper: [["axes", "AXES"], ["gear", "GEAR"], ["sellaxe", "SELL AXES"], ["sell", "SELL FISH"]],
+    forge: [["axes", "CRAFT AXES"], ["guns", "CRAFT GUNS"], ["ammo", "AMMO"], ["gear", "GEAR"], ["sellaxe", "SELL AXES"]],
     trade: [["trade", "SELL MATERIALS"]],
-    brew: [["brew", "BREWS"]]
+    brew: [["brew", "BREWS"]],
+    ench: [["ench", "ENCHANT"]]
 };
-const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST", brew: "THE APOTHECARY" };
+const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST", brew: "THE APOTHECARY", ench: "THE ENCHANTING TABLE" };
+// what an axe is worth back: half its price, or half the value of the materials it was forged from
+function axeSellValue(i) {
+    const r = isle >= 2 ? axeRecipe(i) : null;
+    const paid = r ? Object.entries(r).reduce((a, [k, n]) => a + n * matPrice(k), 0) : AXES[i].cost;
+    return Math.max(1, Math.round(paid / 2));
+}
+let sellArm = -1, sellArmT = 0;
+function sellAxeItems() {
+    const out = [];
+    AXES.forEach((a, i) => {
+        if (i === 0 || !save.owned[i]) return;
+        const v = axeSellValue(i), armed = sellArm === i && time - sellArmT < 3, en = save.ench[i] && Object.keys(save.ench[i]).length;
+        out.push({ name: armed ? "CLICK AGAIN TO SELL " + a.name.toUpperCase() : a.name, icon: "a" + i, col: armed ? "#ff6a5a" : a.rarity, sell: true, value: v,
+            desc: `Sell it back for half what it cost${en ? " · its enchantments are lost" : ""}${save.equipped === i ? " · you're holding it" : ""}`,
+            buy() {
+                if (!(sellArm === i && time - sellArmT < 3)) { sellArm = i; sellArmT = time; sfx(300, 0.08, "square", 0.06, 1); return; }
+                sellArm = -1;
+                save.owned[i] = 0; delete save.ench[i];
+                if (save.equipped === i) { save.equipped = bestIdx(); applyAxeLook(); }
+                ensureHotbar();
+                save.money += v;
+                toast(`Sold ${a.name} for +${money(v)}`, "cash");
+                sfx(900, 0.1, "triangle", 0.09, 1.4); setTimeout(() => sfx(600, 0.16, "triangle", 0.08, 0.8), 90);
+                writeSave();
+            } });
+    });
+    if (!out.length) out.push({ name: "Nothing to sell", desc: "You only have the Rusty Axe, and nobody wants that.", sell: true, value: 0, buy() {} });
+    return out;
+}
 function reaperAxeItems() {
     const out = [];
     AXES.forEach((a, i) => {
@@ -1865,6 +1937,8 @@ function reaperGear() {
 }
 function shopItems() {
     if (shopTab === "brew") return brewItems();
+    if (shopTab === "ench") return enchItems();
+    if (shopTab === "sellaxe") return sellAxeItems();
     if (shopTab === "sell") return sellItems();
     if (shopTab === "trade") return tradeItems();
     if (shopTab === "guns") return gunCraftItems();
@@ -1957,7 +2031,7 @@ function setHotSlot(k, id) {
 }
 function weaponStat(id) {
     const i = +id.slice(1);
-    if (id[0] === "a") return axeDmgFor(i) + " dmg";
+    if (id[0] === "a") return axeDmgFor(i) + " dmg" + (save.ench[i] && Object.keys(save.ench[i]).length ? " ✦" : "");
     const G = GUNS[i], am = gunAm(i);
     return `${gunDmg(i)}${G.pel > 1 ? "×" + G.pel : ""} dmg · ${am.mag}+${am.res}`;
 }
@@ -2370,6 +2444,7 @@ addEventListener("mousemove", e => {
 });
 
 function nearest() {
+    if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
     if (isle === 4) return nearest4();
     if (isle === 3) return nearest3();
     if (isle === 2) return nearest2();
@@ -2391,6 +2466,7 @@ function interact() {
     const n = nearest();
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
+    if (n.k === "ench") { openShop("ench", pick(ENCH_SAY) + "  ·  Enchanting: " + AXES[save.equipped].name); return; }
     if (n.k === "smith") {
         openShop("forge", pick(isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
     } else if (n.k === "depot") openShop("trade", isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
@@ -2484,7 +2560,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
             if (t.t >= 1) {
                 if (t.byGhost) { burst(V3(t.x, 0.6, t.z), 14, 4, [chipMats[1], new THREE.MeshBasicMaterial({ color: 0x9fe8ff })]); sfx(120, 0.2, "square", 0.08, 0.5); scene.remove(t.g); t.gone = true; continue; }
     const bx = -Math.sin(t.g.rotation.y), bz = -Math.cos(t.g.rotation.y);
-                dropLogs(t.x, t.z, treeLogs(t), { x: bx, z: bz }, t.key);
+                dropLogs(t.x, t.z, Math.round(treeLogs(t) * (1 + 0.2 * enchLv("fortune"))), { x: bx, z: bz }, t.key);
                 burst(V3(t.x + bx * t.h * 0.5, t.gy + 0.3, t.z + bz * t.h * 0.5), 18, 5);
                 sfx(70, 0.35, "square", 0.2, 0.3);
                 shake = Math.min(0.6, shake + 0.2);
@@ -2642,7 +2718,7 @@ function update(dt) {
     // swing / shoot
     if (holdingGun()) updateGun(dt);
     if (swing.t < 1) {
-        swing.t = Math.min(1, swing.t + dt / 0.36);
+        swing.t = Math.min(1, swing.t + dt / (0.36 / (1 + 0.12 * enchLv("swift"))));
         if (!swing.hit && swing.t >= 0.46) { swing.hit = true; tryHit(); }
     } else if (mouseDown && !panel && !fishing.on && !holdingGun() && !ride) {
         swing.t = 0; swing.hit = false;
@@ -2653,7 +2729,7 @@ function update(dt) {
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
     updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt);
-    updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
+    updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateEnchTable(dt); updateWild(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
     for (let i = chips.length - 1; i >= 0; i--) {
@@ -3114,7 +3190,7 @@ function updateGhosts(dt) {
             o.tgt = null;
             let best = null, bd = 70;
             for (const t of trees) {
-                if (t.gone || t.dying || t.burn || t.type.flee || claimed.has(t)) continue;
+                if (t.gone || t.dying || t.burn || t.boss || t.type.flee || claimed.has(t)) continue;
                 if (Math.hypot(t.x, t.z) < SAFE_R + 2) continue;
                 const d = Math.hypot(t.x - o.g.position.x, t.z - o.g.position.z);
                 if (d < bd) { bd = d; best = t; }
@@ -3139,21 +3215,97 @@ function updateGhosts(dt) {
             o.cd -= dt;
             if (o.cd <= 0) {
                 o.cd = 1.15; o.swing = 0.35;
-                const t = o.tgt, dmg = Math.max(1, Math.round(bestDmg() * 0.5 * mult));
+                const t = o.tgt, dmg = Math.max(1, Math.round(bestDmg() * 0.5 * mult * isleHp() * (1 + 0.1 * (save.rebirths || 0)))); // keeps pace with each island's tougher trees
                 t.hp -= dmg; t.hurt = 1;
                 burst(V3(t.x, Math.min(t.h * 0.3, 1.8), t.z), 4, 3, [new THREE.MeshBasicMaterial({ color: 0x9fe8ff }), chipMats[0]]);
                 if (Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 30) sfx(210, 0.08, "square", 0.04, 0.5);
                 if (t.hp <= 0) {
                     t.dying = true; t.t = 0; t.byGhost = true;
-                    const pay = Math.round(treeLogs(t) * (logValue() + t.type.bonus * 0.8) * 0.65);
-                    save.money += pay; save.ghostCash = (save.ghostCash || 0) + pay; save.ghostFelled = (save.ghostFelled || 0) + 1;
-                    floatWorld(V3(t.x, Math.min(t.h * 0.7, 4), t.z), "+$" + pay, "cash");
+                    save.ghostFelled = (save.ghostFelled || 0) + 1;
+                    if (isle >= 2) { // past Pine Island they haul the tree's materials back to you
+                        const k = t.type.mat || isleMats()[0], n = Math.max(1, Math.round(treeLogs(t) * 0.55));
+                        save.mats[k] = (save.mats[k] || 0) + n;
+                        floatWorld(V3(t.x, Math.min(t.h * 0.7, 4), t.z), "+" + n + " " + MATS[k].name, "cash");
+                    } else {
+                        const pay = Math.round(treeLogs(t) * (logValue() + t.type.bonus * 0.8) * 0.65);
+                        save.money += pay; save.ghostCash = (save.ghostCash || 0) + pay;
+                        floatWorld(V3(t.x, Math.min(t.h * 0.7, 4), t.z), "+$" + pay, "cash");
+                    }
+                    if (t.type.xmas) openGift(t, true);
                     o.tgt = null;
                 }
             }
         }
         if (o.swing > 0) { o.swing -= dt; o.arm.rotation.x = Math.sin((1 - Math.max(0, o.swing) / 0.35) * Math.PI) * -2.0; } else o.arm.rotation.x = -0.2 + Math.sin(o.ph * 2) * 0.08;
     }
+}
+
+// ---------- the Enchanting Table: one in every camp. Pour cash into the axe you're holding ----------
+const ENCH = {
+    sharp:   { name: "Sharpness", max: 5, k: 1,   desc: l => `+${12 * l}% axe damage` },
+    swift:   { name: "Swiftness", max: 3, k: 1.3, desc: l => `Swing ${12 * l}% faster` },
+    fortune: { name: "Fortune",   max: 3, k: 1.5, desc: l => `+${20 * l}% logs and materials from trees you fell` },
+    vamp:    { name: "Lifesteal", max: 3, k: 1.6, desc: l => `Every hit heals ${(1.2 * l).toFixed(1)}% of your max health` },
+    bane:    { name: "Bossbane",  max: 3, k: 1.8, desc: l => `+${25 * l}% damage to the Elder Heart and the Cinder King` }
+};
+const ROMAN = ["", "I", "II", "III", "IV", "V"];
+const ENCH_SAY = ["The runes are hungry. Feed them gold.", "Every blade remembers what you pour into it.", "The book turns its own pages. Don't read them out loud.", "Pick a rune. Any rune."];
+// placed beside each camp, clear of the buildings
+const ENCH_AT = { 1: { x: -8.5, z: 1.5 }, 2: { x: 0, z: -10.5 }, 3: { x: 0, z: -10.5 }, 4: { x: 0, z: -10.5 } };
+const enchCost = (k, lvl) => Math.round([0, 120, 1500, 15000, 150000][isle] * ENCH[k].k * Math.pow(2.1, lvl) * (1 + save.equipped * 0.12));
+function enchItems() {
+    const i = save.equipped, a = AXES[i];
+    if (holdingGun()) return [{ name: "Put the gun away", desc: "Only axes take enchantments. Switch to an axe, then come back.", sell: true, value: 0, buy() {} }];
+    return Object.entries(ENCH).map(([k, E]) => {
+        const lv = enchLv(k, i), max = lv >= E.max;
+        return { name: `${E.name} ${ROMAN[Math.min(E.max, lv + 1)]}`, col: max ? "#c8a0ff" : "#b07aff", desc: max ? `${a.name}: ${E.name} ${ROMAN[lv]} (maxed) · ${E.desc(lv)}` : `${a.name}: ${lv ? E.name + " " + ROMAN[lv] + " → " : ""}${E.desc(lv + 1)}`,
+            craft: {}, cost: max ? 0 : enchCost(k, lv), maxed: max, verb: "Enchant", quiet: true,
+            buy() { save.ench[i] = save.ench[i] || {}; save.ench[i][k] = lv + 1; enchFx(); toast(`${a.name} is enchanted with ${E.name} ${ROMAN[lv + 1]}!`, "rare"); } };
+    });
+}
+const enchTable = (() => {
+    const g = new THREE.Group(), stoneE = lamb(0x2a1e3a), clothE = lamb(0x8a1a2a), goldE = new THREE.MeshBasicMaterial({ color: 0xffc040 });
+    const runeE = new THREE.MeshBasicMaterial({ color: 0xb07aff, transparent: true, opacity: 0.9 }), pageE = new THREE.MeshBasicMaterial({ color: 0xf0e6c8 }), coverE = lamb(0x5a1a1a);
+    part(g, BOX, stoneE, 0, 0.45, 0, 1.5, 0.9, 1.5); part(g, BOX, lamb(0x1a1226), 0, 0.06, 0, 1.7, 0.12, 1.7);
+    part(g, BOX, clothE, 0, 0.93, 0, 1.56, 0.08, 1.56);
+    for (const [cx, cz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) part(g, BOX, goldE, cx * 0.72, 0.93, cz * 0.72, 0.16, 0.1, 0.16);
+    for (let s = 0; s < 4; s++) { const a = s * Math.PI / 2; part(g, BOX, runeE, Math.sin(a) * 0.76, 0.5, Math.cos(a) * 0.76, Math.abs(Math.cos(a)) * 0.9 + 0.04, 0.1, Math.abs(Math.sin(a)) * 0.9 + 0.04); }
+    const book = new THREE.Group(); book.position.y = 1.25; book.scale.setScalar(1.25);
+    for (const s of [-1, 1]) { const half = new THREE.Group(); half.rotation.z = s * 0.28; part(half, BOX, coverE, s * 0.27, 0, 0, 0.56, 0.04, 0.72); part(half, BOX, pageE, s * 0.25, 0.04, 0, 0.5, 0.05, 0.66); book.add(half); }
+    g.add(book);
+    const runes = [];
+    for (let k = 0; k < 10; k++) { const m = new THREE.Mesh(BOX, runeE); m.scale.set(0.09, 0.12, 0.02); g.add(m); runes.push({ m, a: k * 0.628, r: 1.0 + (k % 3) * 0.25, y: 0.9 + (k % 4) * 0.25, sp: 0.5 + (k % 5) * 0.12 }); }
+    g.visible = false; scene.add(g);
+    const lb = label("ENCHANTING TABLE", "#c8a0ff", 3.4, 0.8);
+    return { g, book, runes, runeE, lb, x: 0, z: 0, pulse: 0 };
+})();
+function placeEnchTable() {
+    const p = ENCH_AT[isle]; if (!p) return;
+    enchTable.x = p.x; enchTable.z = p.z;
+    const y = groundY(p.x, p.z);
+    enchTable.g.position.set(p.x, y, p.z); enchTable.g.rotation.y = Math.atan2(-p.x, -p.z); enchTable.g.visible = true;
+    enchTable.lb.isle = isle; enchTable.lb.position.set(p.x, y + 2.6, p.z);
+}
+function enchFx() {
+    enchTable.pulse = 1; flash = Math.max(flash, 0.35);
+    burst(V3(enchTable.x, enchTable.g.position.y + 1.4, enchTable.z), 26, 4, [enchTable.runeE, ornMat(0xffffff), ornMat(0xffc040)]);
+    sfx(440, 0.4, "triangle", 0.1, 2.2); setTimeout(() => sfx(660, 0.4, "sine", 0.1, 1.8), 120); setTimeout(() => sfx(990, 0.6, "triangle", 0.08, 1.4), 260);
+}
+const enchCol = new THREE.Color(), enchBase = new THREE.Color(), ENCH_PURPLE = new THREE.Color(0x9a4aff);
+function updateEnchTable(dt) {
+    const T = enchTable;
+    if (T.g.visible) {
+        const d = Math.hypot(player.pos.x - T.x, player.pos.z - T.z), near = d < 6;
+        T.book.position.y = 1.25 + Math.sin(time * 1.8) * 0.06 + (near ? 0.12 : 0);
+        T.book.rotation.y += angDiff(near ? Math.atan2(player.pos.x - T.x, player.pos.z - T.z) - T.g.rotation.y : time * 0.3, T.book.rotation.y) * Math.min(1, 3 * dt);
+        T.pulse = Math.max(0, T.pulse - dt * 0.7);
+        for (const r of T.runes) { r.a += dt * r.sp * (1 + T.pulse * 4); const rr = near ? r.r * 0.75 : r.r; r.m.position.set(Math.cos(r.a) * rr, r.y + Math.sin(r.a * 2 + r.r) * 0.15 + T.pulse * 0.5, Math.sin(r.a) * rr); r.m.rotation.y = -r.a; }
+        T.runeE.opacity = 0.55 + 0.35 * Math.sin(time * 3) + T.pulse * 0.3;
+        if (d < 0.95 + 0.45) { const ux = (player.pos.x - T.x) / (d || 1), uz = (player.pos.z - T.z) / (d || 1); player.pos.x = T.x + ux * 1.4; player.pos.z = T.z + uz * 1.4; }
+    }
+    // an enchanted axe shimmers purple
+    const en = save.ench[save.equipped] && Object.keys(save.ench[save.equipped]).length;
+    if (en) { enchBase.setHex(AXES[save.equipped].glow); edgeM.emissive.copy(enchBase).lerp(ENCH_PURPLE, 0.35 + 0.3 * Math.sin(time * 3.2)); }
 }
 
 // ---------- ambience: surf, rain, birdsong, crickets, frogs, footsteps ----------
@@ -3384,7 +3536,7 @@ function renderFerry() {
       <div class="flist">
         <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and logs · every axe except the Rusty one · all shop upgrades · ghost lumberjacks · fish bag · the day count. You can't come back to Pine Island.</div>
         <div class="keep"><h4>YOU KEEP</h4>your Fish Journal · stats and trophies · all your rebirths</div>
-        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash from logs and fish · ★ +10% axe damage · ★ a huge new island with mountains, new trees, GUNS and new upgrades</div>
+        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash from logs and fish · ★ +10% axe damage · ★ +50 max health · ★ a huge new island with mountains, new trees, GUNS and new upgrades</div>
       </div>`;
     if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
     const b = $("ferryBuy");
@@ -4385,6 +4537,7 @@ function gunItems() {
 function gearItems2() {
     const k3 = isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
     return [
+        { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees for you and brings back their materials. Owned: ${save.ghosts}`, cost: ghostCost() * 25, buy() { save.ghosts++; syncGhosts(); } },
         { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
         { name: "Better Prices", desc: `Materials sell for +15% more each level (now +${15 * (save.priceLvl || 0)}%)`, cost: priceCost(), buy() { save.priceLvl++; } },
         { name: "Vitality", desc: `+20 max health (${save.hpLvl}/5)`, cost: hpCost(), maxed: save.hpLvl >= 5, buy() { save.hpLvl++; player.maxHp = maxHpNow(); player.hp = player.maxHp; } },
@@ -4539,7 +4692,7 @@ function resetForRebirth() {
     save.vestLvl = 0; save.magLvl = 0; save.whetLvl = 0; save.powderLvl = 0; save.magnetLvl = 0;
     save.fishBag = []; save.day = 1; save.altarDay = 0; save.contract = null; save.ghosts = 0;
     save.mats = {}; save.hotbar = ["a0", null, null, null, null]; save.relic = [0, 0, 0, 0, 0, 0];
-    save.buffs = {}; save.wellDay = 0; save.scopeDay = 0; save.veins = [];
+    save.buffs = {}; save.wellDay = 0; save.scopeDay = 0; save.veins = []; save.ench = {};
     applyAxeLook(); syncGhosts();
     clockT = (8 / 24) * DAY_LEN; bmFelled = 0; setWeather("clear", false);
 }
@@ -4555,7 +4708,7 @@ function finishRebirth() {
     ride = null;
     writeSave();
     say("");
-    setTimeout(() => { $("rebirthFx").classList.remove("show"); say("THE HIGHLAND ISLE"); setTimeout(() => say(""), 3600); toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage.", "cash"); toast("Walk inland to Basecamp. Trees here drop materials: sell them at the Trading Post, craft axes and guns at the Forge.", "good"); toast("The Rebirth Ferry docks on the far side of the island (north shore).", "rare"); }, 2200);
+    setTimeout(() => { $("rebirthFx").classList.remove("show"); say("THE HIGHLAND ISLE"); setTimeout(() => say(""), 3600); toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage, +" + save.rebirths * 50 + " max HP.", "cash"); toast("Walk inland to Basecamp. Trees here drop materials: sell them at the Trading Post, craft axes and guns at the Forge.", "good"); toast("The Rebirth Ferry docks on the far side of the island (north shore).", "rare"); }, 2200);
 }
 function holdingReset() { reloading = false; reloadT = 0; gun.visible = false; axe.visible = true; }
 
@@ -4754,7 +4907,7 @@ function renderFerry2() {
         <div class="${cashOk ? "keep" : "lose"}"><h4>${cashOk ? "✔" : "✘"} CASH</h4>${money(save.money)} of ${money(REBIRTH2_COST)}</div>
         <div class="${relicOk ? "keep" : "lose"}"><h4>${relicOk ? "✔" : "✘"} RELIC PIECES</h4>${n} / ${RELIC_N} found · press K to see them</div>
         <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and materials · every axe and gun · all upgrades · the relic (it pays for the crossing) · the day count</div>
-        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ MOONCAP ISLE: two moons, glowing forests, falling stars, potions, three new axes, a beam gun... and the Elder Heart</div>
+        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ +50 max health · ★ MOONCAP ISLE: two moons, glowing forests, falling stars, potions, three new axes, a beam gun... and the Elder Heart</div>
       </div>`;
     if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
     const b = $("ferryBuy"), ok = relicOk && cashOk;
@@ -4911,6 +5064,8 @@ function showWorld(n) {
     isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3; isle4G.visible = n === 4;
     moon2.visible = false; for (const a of aurora) a.visible = false; spores3.visible = n === 3; ash4.visible = n === 4;
     wisps.material.color.setHex(n === 4 ? 0xffa060 : n === 3 ? 0xffb0f0 : 0x9dffd0);
+    ghostMat.color.setHex(n === 4 ? 0xffb080 : n === 3 ? 0xd0b0ff : 0x9fe8ff); // the ghosts take on each island's glow
+    placeEnchTable();
 }
 function resetIsleTrees(n) {
     for (const t of trees) { if (!t.boss) scene.remove(t.g); t.gone = true; if (t.bar) { t.bar.remove(); t.bar = null; } }
@@ -5991,7 +6146,7 @@ function renderFerry3() {
         <div class="${hw >= REBIRTH3_HEART ? "keep" : "lose"}"><h4>${hw >= REBIRTH3_HEART ? "✔" : "✘"} HEARTWOOD</h4>${hw} / ${REBIRTH3_HEART} (it falls from the Elder Heart)</div>
         <div class="${cashOk ? "keep" : "lose"}"><h4>${cashOk ? "✔" : "✘"} CASH</h4>${money(save.money)} of ${money(REBIRTH3_COST)}</div>
         <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and materials · every axe and gun · all upgrades and potions · the day count</div>
-        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ ASHFALL ISLE: a living volcano, rivers of lava, hot springs, obsidian, and trees that burn</div>
+        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ +50 max health · ★ ASHFALL ISLE: a living volcano, rivers of lava, hot springs, obsidian, and trees that burn</div>
       </div>`;
     if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
     const b = $("ferryBuy"); b.disabled = !ok; b.classList.toggle("danger", ok && !!ferryConfirm);
@@ -6014,7 +6169,7 @@ function finishRebirth2() {
     say("");
     setTimeout(() => {
         $("rebirthFx").classList.remove("show"); say("MOONCAP ISLE"); setTimeout(() => say(""), 3600);
-        toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage.", "cash");
+        toast("You are reborn. ★" + save.rebirths + "  +" + save.rebirths * 50 + "% cash, +" + save.rebirths * 10 + "% damage, +" + save.rebirths * 50 + " max HP.", "cash");
         toast("Follow the lanterns to camp. New trees, new materials: craft at the Moonforge, brew at the Apothecary.", "good");
         toast("The Ferryman waits at the Rebirth 3 dock on the far side of the island. He knows what sleeps in the Hollow.", "rare");
     }, 2200);
@@ -6480,7 +6635,7 @@ function finishRebirth3() {
     say("");
     setTimeout(() => {
         $("rebirthFx").classList.remove("show"); say("ASHFALL ISLE"); setTimeout(() => say(""), 3600);
-        toast("You are reborn. ★3  +150% cash, +30% damage.", "cash");
+        toast("You are reborn. ★3  +150% cash, +30% damage, +150 max HP.", "cash");
         toast("Follow the lanterns to Ember Camp. Craft at the Crucible, brew at the Alchemist.", "good");
         toast("Stay out of the lava. It's exactly as hot as it looks.", "bad");
     }, 2200);
@@ -6547,7 +6702,7 @@ const DEPOT4_SAY = ["Ash by the barrel, feathers by the one. I buy it all.", "Ph
 function openFerry4() { ferryConfirm = 0; $("ferrySay").textContent = "“Ash on my coat, ash in my boots. I'm building the next boat out of something that won't burn.”"; openPanel("ferry"); }
 function renderFerry4() {
     document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
-    const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage)</span></div>
+    const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage, +${(save.rebirths || 0) * 50} max HP)</span></div>
       <div class="flist"><div class="gain"><h4>REBIRTH 4</h4>The Ferryman is building a boat that can cross whatever is out there. Coming in a future update.</div></div>`;
     if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
     const b = $("ferryBuy"); b.disabled = true; b.classList.remove("danger"); b.textContent = "REBIRTH 4: COMING SOON";
@@ -6864,15 +7019,375 @@ function updateEruption(dt) {
     eruptT -= dt;
     if (eruptT <= 0) { eruptT = rand(180, 320); startEruption(); }
 }
+// =====================================================================
+//  1.4.0: wildlife, a little ecosystem, and decorations on every island
+// =====================================================================
+const wildDone = {}, wildBy = { 1: [], 2: [], 3: [], 4: [] };
+const isleGroup = n => [null, isle1, isle2G, isle3G, isle4G][n];
+// where wildlife may stand or walk: on land, out of camp, clear of landmarks, lakes, lava and the docks
+function wildOk(x, z, walk) {
+    const d = Math.hypot(x, z);
+    if (d > curShoreAt(x, z) - (walk ? 7 : 9) || d < SAFE_R + (walk ? 1 : 4)) return false;
+    for (const lm of curLM()) if (!lm.camp && Math.hypot(x - lm.x, z - lm.z) < lm.r + (walk ? 0.5 : 3)) return false;
+    if (isle === 2 && Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 3) return false;
+    if (isle === 3 && !treeOk3(x, z)) return false;
+    if (isle === 4 && !treeOk4(x, z)) return false;
+    return true;
+}
+function wildSpot() {
+    for (let i = 0; i < 80; i++) {
+        const a = Math.random() * 6.283, d = rand(SAFE_R + 5, curShoreR(a) - 10), x = Math.cos(a) * d, z = Math.sin(a) * d;
+        if (wildOk(x, z)) return { x, z, y: groundY(x, z) };
+    }
+    return null;
+}
+const glowB = c => new THREE.MeshBasicMaterial({ color: c });
+const glowL = (c, e) => new THREE.MeshLambertMaterial({ color: c, emissive: e, flatShading: true });
+
+// ---------- decorations (each kind is one merged mesh per island) ----------
+function decorate(n) {
+    const S = (count, fn) => { for (let i = 0; i < count; i++) { const p = wildSpot(); if (p) fn(p.x, p.y, p.z); } };
+    const B = {}, b = (k, mat) => B[k] || (B[k] = batch(mat));
+    const mush = (x, y, z, cap, stem, spot, big = 1) => {
+        const n2 = 3 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < n2; i++) {
+            const mx = x + rand(-0.7, 0.7), mz = z + rand(-0.7, 0.7), my = groundY(mx, mz) - 0.05, h = rand(0.18, 0.5) * big, w = rand(0.14, 0.26) * big;
+            stem.add(CYL6, mx, my + h / 2, mz, 0, 0, 0, w * 0.32, h, w * 0.32);
+            cap.add(ICO, mx, my + h, mz, 0, Math.random() * 3, 0, w, w * 0.5, w);
+            if (spot) spot.add(ICO, mx + w * 0.4, my + h + w * 0.3, mz, 0, 0, 0, w * 0.18);
+        }
+    };
+    const log = (x, y, z, bark, top, moss) => {
+        const ry = Math.random() * 3.14, len = rand(2.4, 4), r = rand(0.22, 0.34);
+        bark.add(CYL8, x, y + r * 0.8, z, 0, ry, Math.PI / 2, r, len, r);
+        for (const s of [-1, 1]) top.add(CYL8, x + Math.cos(ry) * s * len / 2, y + r * 0.8, z - Math.sin(ry) * s * len / 2, 0, ry, Math.PI / 2, r * 0.85, 0.04, r * 0.85);
+        if (moss) moss.add(BOX, x, y + r * 1.75, z, 0, ry, 0, len * 0.55, 0.06, r * 1.1);
+    };
+    const stump = (x, y, z, bark, top) => { const r = rand(0.3, 0.5), h = rand(0.3, 0.7); bark.add(CYL8, x, y + h / 2 - 0.05, z, 0, Math.random(), 0, r, h, r); top.add(CYL8, x, y + h - 0.03, z, 0, 0, 0, r * 0.88, 0.06, r * 0.88); };
+    const bush = (x, y, z, leaf, berry) => {
+        for (let i = 0; i < 3; i++) { const s = rand(0.45, 0.75); leaf.add(ICO, x + rand(-0.5, 0.5), y + s * 0.6, z + rand(-0.5, 0.5), 0, Math.random() * 3, 0, s, s * 0.8, s); }
+        if (berry) for (let i = 0; i < 7; i++) { const a = Math.random() * 6.28; berry.add(ICO, x + Math.cos(a) * 0.6, y + rand(0.4, 1.0), z + Math.sin(a) * 0.6, 0, 0, 0, 0.07); }
+    };
+    const flowers = (x, y, z, heads, stems) => {
+        for (let i = 0; i < 12; i++) { const fx = x + rand(-2.2, 2.2), fz = z + rand(-2.2, 2.2), fy = groundY(fx, fz); stems.add(CYL6, fx, fy + 0.2, fz, 0, 0, 0, 0.02, 0.4, 0.02); heads[Math.floor(Math.random() * heads.length)].add(ICO, fx, fy + 0.44, fz, 0, 0, 0, 0.11, 0.09, 0.11); }
+    };
+    const tufts = (x, y, z, grass, n2 = 5, hgt = 0.7) => { for (let i = 0; i < n2; i++) { const gx = x + rand(-0.35, 0.35), gz = z + rand(-0.35, 0.35); grass.add(CONE6, gx, groundY(gx, gz) + hgt * 0.4, gz, rand(-0.3, 0.3), 0, rand(-0.3, 0.3), 0.05, rand(0.6, 1) * hgt, 0.05); } };
+    const crystals = (x, y, z, mat, sc = 1) => { for (let i = 0; i < 5; i++) { const h = rand(0.5, 1.4) * sc; mat.add(CONE6, x + rand(-0.4, 0.4), y + h * 0.4, z + rand(-0.4, 0.4), rand(-0.45, 0.45), Math.random() * 3, rand(-0.45, 0.45), 0.13 * sc, h, 0.13 * sc); } };
+    const cairn = (x, y, z, stone) => { let yy = y; for (let i = 0; i < 4; i++) { const s = 0.7 - i * 0.14; stone.add(BOX, x + rand(-0.05, 0.05), yy + s * 0.3, z, 0, Math.random() * 3, rand(-0.1, 0.1), s, s * 0.55, s * 0.8); yy += s * 0.55; } };
+    const ring = (x, y, z, cap, stem, glow) => { // a fairy ring: a circle of little mushrooms round a soft glow
+        for (let i = 0; i < 12; i++) { const a = (i / 12) * 6.283, mx = x + Math.cos(a) * 2.2, mz = z + Math.sin(a) * 2.2, my = groundY(mx, mz) - 0.04, h = rand(0.2, 0.35); stem.add(CYL6, mx, my + h / 2, mz, 0, 0, 0, 0.05, h, 0.05); cap.add(ICO, mx, my + h, mz, 0, 0, 0, 0.16, 0.08, 0.16); }
+        glow.add(CYL8, x, y + 0.03, z, 0, 0, 0, 1.7, 0.03, 1.7);
+    };
+    const cracks = (x, y, z, glow) => { let cx = x, cz = z, a = Math.random() * 6.28; for (let i = 0; i < 6; i++) { a += rand(-0.8, 0.8); const l = rand(0.6, 1.2), nx = cx + Math.cos(a) * l, nz = cz + Math.sin(a) * l, mx = (cx + nx) / 2, mz = (cz + nz) / 2; glow.add(BOX, mx, groundY(mx, mz) + 0.03, mz, 0, -a, 0, l, 0.05, 0.1); cx = nx; cz = nz; } };
+    const bones = (x, y, z, bone, dark) => {
+        const ry = Math.random() * 6.28;
+        for (let i = 0; i < 5; i++) { const o = (i - 2) * 0.35; bone.add(BOX, x + Math.cos(ry) * o, y + 0.25, z - Math.sin(ry) * o, 0, ry, 0.7, 0.07, 0.7, 0.07); }
+        bone.add(BOX, x, y + 0.08, z, 0, ry, 0, 1.8, 0.1, 0.1);
+        const sx = x + Math.cos(ry) * 1.3, sz = z - Math.sin(ry) * 1.3; bone.add(ICO, sx, y + 0.22, sz, 0, ry, 0, 0.28, 0.24, 0.32);
+        for (const s of [-1, 1]) dark.add(BOX, sx + Math.sin(ry) * s * 0.1 + Math.cos(ry) * 0.18, y + 0.28, sz + Math.cos(ry) * s * 0.1 - Math.sin(ry) * 0.18, 0, ry, 0, 0.1, 0.08, 0.06);
+    };
+    if (n === 1) {
+        S(26, (x, y, z) => mush(x, y, z, b("cap", lamb(0x9a1a12)), b("stem", lamb(0xf0e8d8)), b("spot", glowB(0xffffff))));
+        S(16, (x, y, z) => log(x, y, z, b("bark", lamb(0x5a3a24)), b("ring", lamb(0xc8a070)), b("moss", lamb(0x4a8a3a))));
+        S(14, (x, y, z) => stump(x, y, z, b("bark", lamb(0x5a3a24)), b("ring", lamb(0xc8a070))));
+        S(22, (x, y, z) => bush(x, y, z, b("bush", lamb(0x2f6a34)), b("berry", glowB(0xd02a4a))));
+    } else if (n === 2) {
+        const heads = [0xf4f4ff, 0xb07aff, 0xffe060, 0x7fb8ff].map(c => b("fl" + c, lamb(c)));
+        S(34, (x, y, z) => flowers(x, y, z, heads, b("stem", lamb(0x4a7a3a))));
+        S(18, (x, y, z) => log(x, y, z, b("bark", lamb(0x5a4030)), b("ring", lamb(0xc8a070)), b("moss", lamb(0x5a9a42))));
+        S(12, (x, y, z) => cairn(x, y, z, b("stone", lamb(0x8a8a94))));
+        S(26, (x, y, z) => bush(x, y, z, b("bush", lamb(0x3a6a2a)), b("berry", glowB(0x4a6aff))));
+        S(16, (x, y, z) => mush(x, y, z, b("cap", lamb(0xb06a2a)), b("stem", lamb(0xe8dcc0))));
+        S(140, (x, y, z) => tufts(x, y, z, b("grass", lamb(0x7a9a42))));
+    } else if (n === 3) {
+        for (const [k, c] of [["c1", 0x7affef], ["c2", 0xd07aff], ["c3", 0xff8ad8]]) S(16, (x, y, z) => mush(x, y, z, b(k, glowB(c)), b("stem", lamb(0xe0d4c0)), null, 1.4));
+        S(9, (x, y, z) => ring(x, y, z, b("rcap", glowB(0xb8f4ff)), b("stem", lamb(0xe0d4c0)), b("rglow", new THREE.MeshBasicMaterial({ color: 0x8a6aff, transparent: true, opacity: 0.25, depthWrite: false }))));
+        S(18, (x, y, z) => crystals(x, y, z, b("cry", glowL(0x9a7aff, 0x3a1a8a))));
+        S(12, (x, y, z) => log(x, y, z, b("bark", lamb(0x3a3048)), b("ring", lamb(0xb8a8c8)), b("moss", glowL(0x3a8a8a, 0x0a3a3a))));
+        S(150, (x, y, z) => tufts(x, y, z, b("grass", glowL(0x3a7a8a, 0x0a2a3a)), 4, 0.6));
+    } else if (n === 4) {
+        S(30, (x, y, z) => crystals(x, y, z, b("obs", glowL(0x14101c, 0x0a0414)), 1.3));
+        S(16, (x, y, z) => crystals(x, y, z, b("sul", glowL(0xd8c83a, 0x3a3000)), 0.8));
+        S(44, (x, y, z) => cracks(x, y, z, b("crack", glowB(0xff6a1a))));
+        S(18, (x, y, z) => stump(x, y, z, b("char", lamb(0x1a1412)), b("charTop", glowB(0xff5a1a))));
+        S(9, (x, y, z) => bones(x, y, z, b("bone", lamb(0xe8e0cc)), b("boneDk", glowB(0x100808))));
+        S(90, (x, y, z) => tufts(x, y, z, b("ash", lamb(0x6a625c)), 4, 0.5));
+    }
+    for (const k in B) B[k].build();
+}
+
+// ---------- the animals ----------
+function makeGoat() {
+    const g = new THREE.Group(), w = lamb(0xeeeae0), dk = lamb(0x3a3430), horn = lamb(0x8a8070);
+    bx(g, w, 0, 0.75, 0, 0.5, 0.5, 0.95); bx(g, w, 0, 1.05, 0.5, 0.3, 0.32, 0.36); bx(g, dk, 0, 0.98, 0.72, 0.16, 0.14, 0.12);
+    bx(g, w, 0, 0.86, 0.66, 0.08, 0.2, 0.06); // beard
+    for (const s of [-1, 1]) bx(g, horn, s * 0.1, 1.32, 0.42, 0.06, 0.3, 0.06, -0.7, 0, s * 0.2);
+    for (const [x, z] of [[-0.15, 0.32], [0.15, 0.32], [-0.15, -0.32], [0.15, -0.32]]) bx(g, dk, x, 0.27, z, 0.09, 0.55, 0.09);
+    return g;
+}
+function makeMarmot() {
+    const g = new THREE.Group(), fur = lamb(0x8a6a44), pale = lamb(0xd8c4a0);
+    const body = new THREE.Group(); g.add(body);
+    part(body, ICO, fur, 0, 0.28, 0, 0.26, 0.3, 0.26); part(body, ICO, pale, 0, 0.26, 0.12, 0.17, 0.22, 0.14); part(body, ICO, fur, 0, 0.6, 0.04, 0.16, 0.15, 0.16);
+    bx(body, lamb(0x1a1410), 0, 0.62, 0.19, 0.05, 0.04, 0.03);
+    g.userData.body = body;
+    return g;
+}
+function makeEagle() {
+    const g = new THREE.Group(), br = lamb(0x4a3020), wh = lamb(0xf4f0e8), ye = lamb(0xffc030);
+    part(g, ICO, br, 0, 0, 0, 0.3, 0.26, 0.7); part(g, ICO, wh, 0, 0.08, 0.6, 0.2, 0.2, 0.22); bx(g, ye, 0, 0.04, 0.82, 0.07, 0.07, 0.14); bx(g, wh, 0, 0, -0.7, 0.36, 0.05, 0.3);
+    const wl = bx(g, br, -0.9, 0.05, 0, 1.5, 0.05, 0.5), wr = bx(g, br, 0.9, 0.05, 0, 1.5, 0.05, 0.5);
+    g.userData.wings = [wl, wr];
+    return g;
+}
+function makeFox() {
+    const g = new THREE.Group(), fur = lamb(0x9ab0d8), pale = lamb(0xeef4ff), dk = lamb(0x2a2a3a), tip = glowB(0x9fffff);
+    bx(g, fur, 0, 0.5, 0, 0.36, 0.34, 0.85); bx(g, pale, 0, 0.38, 0.1, 0.3, 0.12, 0.6);
+    bx(g, fur, 0, 0.72, 0.5, 0.32, 0.3, 0.32); bx(g, pale, 0, 0.66, 0.72, 0.16, 0.14, 0.2); bx(g, dk, 0, 0.7, 0.82, 0.06, 0.06, 0.05);
+    for (const s of [-1, 1]) bx(g, fur, s * 0.1, 0.94, 0.48, 0.08, 0.18, 0.05);
+    bx(g, fur, 0, 0.62, -0.62, 0.2, 0.2, 0.5, 0.5); part(g, ICO, tip, 0, 0.82, -0.84, 0.13, 0.13, 0.16);
+    for (const [x, z] of [[-0.11, 0.3], [0.11, 0.3], [-0.11, -0.3], [0.11, -0.3]]) bx(g, dk, x, 0.17, z, 0.07, 0.34, 0.07);
+    return g;
+}
+function makeShroomling() {
+    const g = new THREE.Group(), cap = glowL([0xc06ad8, 0x6a8aff, 0xff7ad8][Math.floor(Math.random() * 3)], 0x200a30), stem = lamb(0xf0e6d4), eye = glowB(0x1a0a20);
+    const body = new THREE.Group(); g.add(body);
+    part(body, CYL6, stem, 0, 0.18, 0, 0.12, 0.34, 0.12); part(body, ICO, cap, 0, 0.4, 0, 0.3, 0.17, 0.3);
+    for (const s of [-1, 1]) bx(body, eye, s * 0.05, 0.24, 0.115, 0.03, 0.05, 0.02);
+    for (let i = 0; i < 3; i++) part(body, ICO, glowB(0xffffff), Math.cos(i * 2.1) * 0.16, 0.5, Math.sin(i * 2.1) * 0.16, 0.04, 0.04, 0.04);
+    g.userData.body = body;
+    return g;
+}
+function makeSnail() {
+    const g = new THREE.Group(), skin = lamb(0xc8b8a0), shell = glowL(0x7a4ad8, 0x2a0a6a);
+    bx(g, skin, 0, 0.06, 0.05, 0.12, 0.08, 0.42); part(g, ICO, shell, 0, 0.2, -0.04, 0.17, 0.18, 0.14);
+    for (const s of [-1, 1]) { bx(g, skin, s * 0.04, 0.16, 0.24, 0.02, 0.14, 0.02, 0.3); part(g, ICO, glowB(0x9fffff), s * 0.04, 0.24, 0.27, 0.025, 0.025, 0.025); }
+    return g;
+}
+function makeMoth() {
+    const g = new THREE.Group(), m = new THREE.MeshBasicMaterial({ color: [0xcff4ff, 0xe8d0ff, 0xb8fff0][Math.floor(Math.random() * 3)], side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+    part(g, ICO, glowB(0x6a5a8a), 0, 0, 0, 0.04, 0.04, 0.12);
+    const wl = part(g, BOX, m, -0.13, 0, 0, 0.24, 0.01, 0.2), wr = part(g, BOX, m, 0.13, 0, 0, 0.24, 0.01, 0.2);
+    g.userData.wings = [wl, wr]; g.scale.setScalar(1.5);
+    return g;
+}
+function makeSalamander() {
+    const g = new THREE.Group(), sk = lamb(0x1a1412), sp = glowB(0xff7a1a);
+    bx(g, sk, 0, 0.08, 0, 0.16, 0.1, 0.5); bx(g, sk, 0, 0.09, 0.32, 0.13, 0.08, 0.16); bx(g, sk, 0, 0.06, -0.42, 0.07, 0.05, 0.4, 0, 0.15);
+    for (let i = 0; i < 4; i++) bx(g, sp, (i % 2 ? 0.05 : -0.05), 0.14, 0.2 - i * 0.14, 0.05, 0.02, 0.05);
+    for (const [x, z] of [[-0.11, 0.14], [0.11, 0.14], [-0.11, -0.14], [0.11, -0.14]]) bx(g, sk, x, 0.04, z, 0.1, 0.04, 0.04);
+    return g;
+}
+function makeBeetle() {
+    const g = new THREE.Group(), sh = glowL(0xff5a1a, 0x5a1a00), dk = lamb(0x140c0a);
+    part(g, ICO, sh, 0, 0.1, -0.02, 0.15, 0.09, 0.2); part(g, ICO, dk, 0, 0.08, 0.18, 0.08, 0.06, 0.07);
+    for (const z of [-0.08, 0.02, 0.12]) for (const s of [-1, 1]) bx(g, dk, s * 0.15, 0.04, z, 0.12, 0.02, 0.02, 0, 0, s * 0.4);
+    return g;
+}
+const crowMat = lamb(0x14121a);
+function makeCrow() {
+    const g = new THREE.Group();
+    part(g, ICO, crowMat, 0, 0.25, 0, 0.14, 0.15, 0.28); part(g, ICO, crowMat, 0, 0.42, 0.2, 0.1, 0.1, 0.1); bx(g, lamb(0x3a3438), 0, 0.4, 0.32, 0.04, 0.04, 0.1);
+    bx(g, glowB(0xff9a3a), 0.06, 0.45, 0.25, 0.02, 0.02, 0.02); bx(g, glowB(0xff9a3a), -0.06, 0.45, 0.25, 0.02, 0.02, 0.02);
+    const wl = bx(g, crowMat, -0.28, 0.3, 0, 0.45, 0.03, 0.2), wr = bx(g, crowMat, 0.28, 0.3, 0, 0.45, 0.03, 0.2);
+    for (const w of [wl, wr]) w.visible = false;
+    g.userData.wings = [wl, wr];
+    return g;
+}
+function makeSquirrel() {
+    const g = new THREE.Group(), fur = lamb(0xa0582a), pale = lamb(0xe8d0b0);
+    part(g, ICO, fur, 0, 0.2, 0, 0.13, 0.15, 0.2); part(g, ICO, pale, 0, 0.18, 0.08, 0.09, 0.1, 0.1); part(g, ICO, fur, 0, 0.34, 0.14, 0.1, 0.1, 0.1);
+    for (const s of [-1, 1]) bx(g, fur, s * 0.05, 0.45, 0.13, 0.03, 0.07, 0.02);
+    part(g, ICO, fur, 0, 0.42, -0.2, 0.12, 0.26, 0.1, -0.4);
+    return g;
+}
+function addWild(n, kind, g, x, z, extra = {}) {
+    g.position.set(x, groundY(x, z), z); scene.add(g);
+    const c = Object.assign({ kind, g, x, z, hx: x, hz: z, ph: Math.random() * 6, t: Math.random() * 3, state: "idle", tx: x, tz: z, hide: 0 }, extra);
+    wildBy[n].push(c); return c;
+}
+function populate(n) {
+    const P = (count, fn) => { for (let i = 0; i < count; i++) { const p = wildSpot(); if (p) fn(p.x, p.z); } };
+    const sky = (k, mk, count, alt) => { for (let i = 0; i < count; i++) addWild(n, k, mk(), 0, 0, { cx: rand(-60, 60), cz: rand(-60, 60), rad: rand(25, 70), spd: rand(0.05, 0.11) * (Math.random() < 0.5 ? 1 : -1), alt: rand(alt[0], alt[1]) }); };
+    if (n === 1) {
+        P(10, (x, z) => addWild(n, "hopper", makeSquirrel(), x, z, { sp: 6, flee: 6 }));
+    } else if (n === 2) {
+        P(9, (x, z) => addWild(n, "grazer", makeGoat(), x, z, { flee: 9, run: 6.5, roam: 14, bleat: true }));
+        P(12, (x, z) => { const c = addWild(n, "marmot", makeMarmot(), x, z); const mound = new THREE.Mesh(ICO, lamb(0x6a5236)); mound.scale.set(0.55, 0.18, 0.55); mound.position.set(x, groundY(x, z), z); scene.add(mound); return c; });
+        P(10, (x, z) => addWild(n, "butterfly", makeButterfly(), x, z));
+        P(8, (x, z) => addWild(n, "hopper", makeRabbit(), x, z, { sp: 8, flee: 7 }));
+        sky("eagle", makeEagle, 4, [34, 46]);
+    } else if (n === 3) {
+        P(7, (x, z) => addWild(n, "grazer", makeFox(), x, z, { flee: 11, run: 8, roam: 18 }));
+        P(14, (x, z) => addWild(n, "shroom", makeShroomling(), x, z));
+        P(16, (x, z) => addWild(n, "crawler", makeSnail(), x, z, { sp: 0.25 }));
+        P(22, (x, z) => addWild(n, "moth", makeMoth(), x, z));
+    } else if (n === 4) {
+        P(14, (x, z) => addWild(n, "scurry", makeSalamander(), x, z));
+        P(18, (x, z) => addWild(n, "crawler", makeBeetle(), x, z, { sp: 0.5 }));
+        P(10, (x, z) => addWild(n, "crow", makeCrow(), x, z));
+        sky("bat", () => { const g = makeCrow(); g.userData.wings.forEach(v => (v.visible = true)); return g; }, 8, [18, 30]);
+    }
+}
+function buildWild(n) {
+    wildDone[n] = true;
+    const prev = addTgt; addTgt = isleGroup(n);
+    decorate(n); populate(n);
+    addTgt = prev;
+}
+// a step that refuses to walk into water, lava, camp or landmarks
+function wStep(c, tx, tz, sp, dt) {
+    const dx = tx - c.x, dz = tz - c.z, d = Math.hypot(dx, dz) || 1, m = Math.min(d, sp * dt), nx = c.x + dx / d * m, nz = c.z + dz / d * m;
+    if (wildOk(nx, nz, true)) { c.x = nx; c.z = nz; } else { c.t = 0; c.blocked = true; }
+    c.g.rotation.y += angDiff(Math.atan2(dx, dz), c.g.rotation.y) * Math.min(1, 8 * dt);
+    return d;
+}
+const flap = (c, k, amp) => c.g.userData.wings.forEach((w, i) => { w.rotation.z = Math.sin(c.ph * k) * amp * (i ? -1 : 1); });
+function updateWild(dt) {
+    if (!wildDone[isle]) buildWild(isle);
+    const list = wildBy[isle], px = player.pos.x, pz = player.pos.z, night = dayAmt() < 0.25, live = state === "playing", panic = isle === 4 && eruptLeft > 0;
+    crowMat.color.setHex(night ? 0x2a1a2a : 0x14121a);
+    for (const c of list) {
+        const dp = Math.hypot(px - c.x, pz - c.z), far = dp > 90;
+        if (c.kind !== "eagle" && c.kind !== "bat") { c.g.visible = !far && !c.hidden; if (far) continue; }
+        c.t -= dt; c.ph += dt;
+        let yOff = 0;
+        switch (c.kind) {
+            case "grazer": { // goats and moon foxes: wander, graze, bolt when you get close
+                const scared = (dp < c.flee || panic) && live;
+                if (scared) { const ax = c.x - px, az = c.z - pz, al = Math.hypot(ax, az) || 1; wStep(c, c.x + ax / al * 8, c.z + az / al * 8, c.run * (panic ? 1.3 : 1), dt); yOff = Math.abs(Math.sin(c.ph * 9)) * 0.15; if (c.bleat && !c.said && dp < 14) { c.said = true; sfx(520, 0.35, "sawtooth", 0.03, 0.8); } }
+                else {
+                    c.said = false;
+                    if (c.t <= 0) { c.t = rand(2, 6); c.walking = Math.random() < 0.6; const a = Math.random() * 6.283, r = rand(3, c.roam); c.tx = c.hx + Math.cos(a) * r; c.tz = c.hz + Math.sin(a) * r; }
+                    if (c.walking) { if (wStep(c, c.tx, c.tz, 1.4, dt) < 0.5) c.walking = false; yOff = Math.sin(c.ph * 4) * 0.03; }
+                }
+                break;
+            }
+            case "hopper": { // rabbits and squirrels
+                const fleeing = dp < c.flee && live;
+                if (c.t <= 0) { c.t = fleeing ? 0.25 : rand(1, 3.5); const a = fleeing ? Math.atan2(c.x - px, c.z - pz) + rand(-0.6, 0.6) : Math.random() * 6.283, r = fleeing ? 4 : rand(1, 3); c.tx = c.x + Math.sin(a) * r; c.tz = c.z + Math.cos(a) * r; c.hop = 0.35; }
+                if (c.hop > 0) { c.hop -= dt; wStep(c, c.tx, c.tz, fleeing ? c.sp : 3, dt); yOff = Math.sin((1 - Math.max(0, c.hop) / 0.35) * Math.PI) * 0.4; }
+                break;
+            }
+            case "marmot": { // pops up, stands watch, whistles and dives into its burrow when you (or an eagle) come near
+                const eagleNear = list.some(e => e.kind === "eagle" && e.state === "dive" && Math.hypot(e.g.position.x - c.x, e.g.position.z - c.z) < 18);
+                if (c.hide > 0) { c.hide -= dt; c.sink = Math.min(1, (c.sink || 0) + dt * 4); }
+                else { c.sink = Math.max(0, (c.sink || 0) - dt * 1.5); if ((dp < 10 && live) || eagleNear) { c.hide = rand(5, 9); if (dp < 20) sfx(1900, 0.18, "sine", 0.04, 1.3); } }
+                const body = c.g.userData.body;
+                body.rotation.x = c.hide > 0 ? 0 : (Math.sin(c.ph * 0.4) > 0.3 ? -0.05 : 0.5); // stands up to look around, then hunches to nibble
+                yOff = -c.sink * 0.75; c.g.rotation.y += dt * (Math.sin(c.ph * 0.3) > 0.8 ? 1.5 : 0);
+                break;
+            }
+            case "eagle": { // circles high, and every so often dives at a marmot (it always hides in time)
+                if (!c.state || c.state === "idle") c.state = "circle";
+                if (c.state === "circle") {
+                    c.ang = (c.ang || c.ph) + c.spd * dt;
+                    c.g.position.set(c.cx + Math.cos(c.ang) * c.rad, c.alt + Math.sin(c.ph * 0.5) * 2, c.cz + Math.sin(c.ang) * c.rad);
+                    c.g.rotation.set(0, -c.ang + (c.spd > 0 ? 0 : Math.PI), c.spd > 0 ? 0.3 : -0.3);
+                    flap(c, 2.5, 0.15);
+                    if (c.t <= 0) { c.t = rand(25, 50); const prey = list.filter(m => m.kind === "marmot" && !(m.hide > 0)); if (prey.length) { c.prey = prey[Math.floor(Math.random() * prey.length)]; c.state = "dive"; if (Math.hypot(c.g.position.x - px, c.g.position.z - pz) < 60) sfx(1500, 0.5, "sawtooth", 0.03, 0.6); } }
+                } else {
+                    const tgt = c.state === "dive" ? V3(c.prey.x, groundY(c.prey.x, c.prey.z) + 0.8, c.prey.z) : V3(c.cx + Math.cos(c.ang) * c.rad, c.alt, c.cz + Math.sin(c.ang) * c.rad);
+                    const d = tgt.clone().sub(c.g.position), l = d.length();
+                    c.g.position.addScaledVector(d, Math.min(1, (c.state === "dive" ? 24 : 12) * dt / (l || 1)));
+                    c.g.rotation.set(c.state === "dive" ? 0.6 : -0.3, Math.atan2(d.x, d.z), 0);
+                    flap(c, c.state === "dive" ? 0 : 8, 0.5);
+                    if (c.state === "dive" && l < 1.6) { c.state = "climb"; burst(c.g.position.clone(), 6, 3, [lamb(0x4a3020)]); }
+                    else if (c.state === "climb" && l < 2) c.state = "circle";
+                }
+                c.g.visible = Math.hypot(c.g.position.x - px, c.g.position.z - pz) < 140;
+                continue;
+            }
+            case "butterfly": {
+                c.g.visible = !far && dayAmt() > 0.5 && wx.rain < 0.3;
+                const t = c.ph * 0.6;
+                c.g.position.set(c.hx + Math.sin(t * 1.3) * 2.6, groundY(c.hx, c.hz) + 1 + Math.sin(t * 2.1) * 0.35, c.hz + Math.sin(t * 0.9 + 1) * 2.6);
+                c.g.rotation.y = t; flap(c, 16, 0.9);
+                continue;
+            }
+            case "shroom": { // shroomlings hop about, and freeze (pretending to be mushrooms) when you look their way
+                const body = c.g.userData.body;
+                if (dp < 7 && live) { c.freeze = 2.5; }
+                if (c.freeze > 0) { c.freeze -= dt; body.scale.set(1.15, 0.8, 1.15); c.hop = 0; break; }
+                body.scale.set(1, 1, 1);
+                if (c.t <= 0) { c.t = rand(0.8, 2.5); const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 1.5; c.tz = c.z + Math.cos(a) * 1.5; c.hop = 0.3; }
+                if (c.hop > 0) { c.hop -= dt; wStep(c, c.tx, c.tz, 3, dt); yOff = Math.sin((1 - Math.max(0, c.hop) / 0.3) * Math.PI) * 0.35; body.scale.set(0.9, 1.15, 0.9); }
+                break;
+            }
+            case "crawler": { // snails and ember beetles
+                if (c.t <= 0) { c.t = rand(3, 8); const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 3; c.tz = c.z + Math.cos(a) * 3; c.go = Math.random() < 0.7; }
+                if (c.go && wStep(c, c.tx, c.tz, c.sp, dt) < 0.2) c.go = false;
+                break;
+            }
+            case "scurry": { // salamanders dart in bursts and flee into the rocks
+                const fleeing = (dp < 6 && live) || panic;
+                if (c.t <= 0) { c.t = fleeing ? rand(0.2, 0.4) : rand(1, 3); const a = fleeing ? Math.atan2(c.x - px, c.z - pz) + rand(-0.7, 0.7) : Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 3; c.tz = c.z + Math.cos(a) * 3; c.dash = fleeing ? 0.4 : rand(0.2, 0.5); }
+                if (c.dash > 0) { c.dash -= dt; wStep(c, c.tx, c.tz, fleeing ? 8 : 4, dt); c.g.rotation.z = Math.sin(c.ph * 30) * 0.1; }
+                break;
+            }
+            case "moth": { // glowing moths flutter over the ground, and at night they gather round your lantern
+                const lamp = night && player.lantern && dp < 14;
+                const cx = lamp ? px : c.hx, cz = lamp ? pz : c.hz, cy = lamp ? player.pos.y + 0.2 : groundY(c.hx, c.hz) + 1.4;
+                const t = c.ph * (lamp ? 1.1 : 0.5), r = lamp ? 1.6 + Math.sin(c.ph) * 0.5 : 2.4;
+                const tx = cx + Math.cos(t + c.hx) * r, tz = cz + Math.sin(t * 1.3 + c.hz) * r, ty = cy + Math.sin(t * 2.3) * 0.5;
+                c.g.position.x += (tx - c.g.position.x) * Math.min(1, 2 * dt); c.g.position.z += (tz - c.g.position.z) * Math.min(1, 2 * dt); c.g.position.y += (ty - c.g.position.y) * Math.min(1, 2 * dt);
+                c.x = c.g.position.x; c.z = c.g.position.z; c.g.rotation.y = t; flap(c, 20, 0.9);
+                continue;
+            }
+            case "crow": { // ash crows peck at the ground, and burst into the air when you come close
+                if (c.state === "fly") {
+                    c.fly -= dt; c.ang += dt * 0.6;
+                    c.g.position.set(c.cx + Math.cos(c.ang) * 12, groundY(c.cx, c.cz) + 9 + Math.sin(c.ph) * 1.2, c.cz + Math.sin(c.ang) * 12);
+                    c.g.rotation.set(0, -c.ang + Math.PI, 0); flap(c, 9, 0.6);
+                    if (c.fly <= 0) { c.state = "idle"; const p = wildSpot(); if (p) { c.x = p.x; c.z = p.z; } c.g.userData.wings.forEach(w => { w.visible = false; w.rotation.z = 0; }); }
+                    continue;
+                }
+                if ((dp < 8 && live) || panic) { c.state = "fly"; c.fly = rand(6, 11); c.ang = Math.random() * 6.283; c.cx = c.x - Math.cos(c.ang) * 12; c.cz = c.z - Math.sin(c.ang) * 12; c.g.userData.wings.forEach(w => (w.visible = true)); if (dp < 20) sfx(420, 0.2, "sawtooth", 0.04, 0.6); continue; }
+                c.g.rotation.x = Math.sin(c.ph * 3) > 0.7 ? 0.5 : 0; // pecking
+                break;
+            }
+            case "bat": { // circling crows by day, bats by night
+                c.g.visible = true;
+                c.ang = (c.ang || c.ph) + c.spd * dt * (night ? 2 : 1);
+                c.g.position.set(c.cx + Math.cos(c.ang) * c.rad, c.alt + Math.sin(c.ph * 0.7) * 2, c.cz + Math.sin(c.ang) * c.rad);
+                c.g.rotation.y = -c.ang + (c.spd > 0 ? 0 : Math.PI); flap(c, night ? 18 : 9, 0.7);
+                continue;
+            }
+        }
+        if (!c.hidden) c.g.position.set(c.x, groundY(c.x, c.z) + yOff, c.z);
+    }
+    updateFireflies(dt, night);
+}
+
+// ---------- fireflies by night (glowing spores on Mooncap, drifting embers on Ashfall) ----------
+const flyMat = new THREE.MeshBasicMaterial({ color: 0xd8ff6a, transparent: true, opacity: 0.9, depthWrite: false });
+const fireflies = [];
+for (let i = 0; i < 40; i++) { const m = new THREE.Mesh(BOX, flyMat); m.scale.setScalar(0.1); m.visible = false; scene.add(m); fireflies.push({ m, x: 0, z: 0, y: 0, ph: Math.random() * 6, life: 0 }); }
+function updateFireflies(dt, night) {
+    const embers = isle === 4, on = embers || isle === 3 || night;
+    flyMat.color.setHex(embers ? 0xff8a2a : isle === 3 ? 0x9ffff0 : 0xd8ff6a);
+    flyMat.opacity = 0.55 + 0.4 * Math.sin(time * 4);
+    for (const f of fireflies) {
+        if (!on || insideBuilding()) { f.m.visible = false; f.life = 0; continue; }
+        f.life -= dt; f.ph += dt;
+        if (f.life <= 0) { const a = Math.random() * 6.283, r = rand(4, 24); f.x = player.pos.x + Math.cos(a) * r; f.z = player.pos.z + Math.sin(a) * r; f.y = groundY(f.x, f.z) + rand(0.4, 2.2); f.life = rand(4, 9); }
+        if (embers) f.y += dt * 0.6; // embers drift upward
+        f.m.visible = true;
+        f.m.position.set(f.x + Math.sin(f.ph * 0.9) * 0.6, f.y + Math.sin(f.ph * 1.7) * 0.25, f.z + Math.cos(f.ph * 0.7) * 0.6);
+        f.m.scale.setScalar(0.1 * Math.min(1, f.life));
+    }
+}
+
 // a save that's already on another island starts there (this must run after everything above is defined)
 if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
+placeEnchTable();
 if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1, Mooncap Isle = Rebirth 2, Ashfall Isle = Rebirth 3
 
 // ---------- HUD ----------
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
-    shop: () => "[F] Talk to the Reaper", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
+    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
@@ -6928,7 +7443,7 @@ function hud(dt) {
     if (panel === "map") drawMap();
     if (panel === "ferry") renderFerry();
 }
-const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0)) * dmgBuff()); };
+const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0)) * (1 + 0.12 * enchLv("sharp", i)) * dmgBuff()); };
 
 // ---------- loop ----------
 let last = performance.now();
@@ -6998,7 +7513,7 @@ if (DEBUG) window.__ts4 = {
     setState(s) { state = s; renderMenu(); },
     interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, enterIsle4, startFight4, fight4, startEruption, getKing: () => king, VOLC, syncKing, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
     // the dev panel (dev.js) drives the game through these
-    get panel() { return panel; }, togglePanel, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
+    get panel() { return panel; }, togglePanel, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
     FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z }, FERRYMAN3: { x: FERRYMAN3.x, z: FERRYMAN3.z },
     setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
     freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
