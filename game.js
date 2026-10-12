@@ -126,13 +126,13 @@ const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; 
 const gunPow = () => { let p = 0; (save.gunOwned || []).forEach((o, i) => { if (o) p = Math.max(p, GUNS[i].pow); }); return p; };
 const gunTier = () => (save.gunOwned || []).filter(Boolean).length * 2;
 const bestDmg = () => Math.max(AXES[bestIdx()].dmg, gunPow());
-const isleHp = () => [1, 1, 2.2, 3, 4][isle], isleRw = () => [1, 1, 1.6, 2.1, 2.8][isle], isleDm = () => [1, 1, 1.5, 1.9, 2.4][isle];
+const isleHp = () => [1, 1, 1.7, 2.2, 2.8][isle], isleRw = () => [1, 1, 1.6, 2.1, 2.8][isle], isleDm = () => [1, 1, 1.5, 1.9, 2.4][isle];
 // timed buffs from the Apothecary and the Moonwell (they tick on play time, so pausing doesn't waste them)
 const buffOn = k => (save.buffs[k] || 0) > save.seconds;
 const dmgBuff = () => (buffOn("fury") ? 1.4 : 1) * (buffOn("blessed") ? 1.25 : 1);
 let godMode = false, devSpeed = 1; // dev panel only
-const hpScale = () => 1 + (bestDmg() - 1) * 0.7;
-const rewardScale = () => 1 + (bestDmg() - 1) * 0.14;
+const hpScale = () => Math.pow(bestDmg(), 0.6); // grows much slower than your damage, so every upgrade really chops faster
+const rewardScale = () => 1.5 * (1 + (bestDmg() - 1) * 0.14);
 const dmgScale = () => 1 + bestIdx() * 0.1;
 const ghostCost = () => Math.floor(80 * Math.pow(1.65, save.ghosts));
 const priceCost = () => Math.floor(120 * Math.pow(1.8, save.priceLvl));
@@ -1507,7 +1507,7 @@ function makeTree(x, z, h, key = "pine") {
         arms.push({ pivot, arm, s });
     }
     scene.add(g);
-    const hp = Math.ceil(h * 0.7 * T.hp * (1 + 0.12 * (save.day - 1)) * hpScale() * isleHp());
+    const hp = Math.ceil(h * 0.7 * T.hp * (1 + 0.05 * (save.day - 1)) * hpScale() * isleHp());
     const t = {
         g, body, face, arms, h, r, x, z, gy: gy0, key, type: T, hp, maxHp: hp, solid: [trunk, foliage],
         dying: false, burn: false, t: 0, hurt: 0, phase: Math.random() * 6, gone: false,
@@ -3993,6 +3993,7 @@ const AXE_RECIPES4 = [null, { ash: 8 }, { ash: 12, cinder: 4 }, { ash: 16, cinde
     { obsidian: 18, ember: 4 }, { sulfur: 20, obsidian: 26, ember: 10 }, { obsidian: 30, ember: 22, phoenixf: 2 }, { cinder: 60, ember: 34, phoenixf: 5 }, { obsidian: 50, ember: 60, phoenixf: 10 }, { obsidian: 60, ember: 80, phoenixf: 16 }, { obsidian: 80, ember: 100, phoenixf: 20 }, { molten: 3, ember: 120, phoenixf: 30 }];
 const GUN_RECIPES4 = [{ ash: 10, cinder: 6 }, { ash: 20, cinder: 12, sulfur: 4 }, { cinder: 26, sulfur: 12 }, { cinder: 30, sulfur: 18, obsidian: 6 }, { sulfur: 40, obsidian: 40, ember: 18 }, { obsidian: 30, ember: 40, phoenixf: 8 }, { obsidian: 60, ember: 60, phoenixf: 12 }];
 const AMMO_RECIPES4 = [{ ash: 2, sulfur: 1 }, { ash: 3, sulfur: 3 }, { cinder: 4, sulfur: 2 }, { cinder: 3, sulfur: 3 }, { sulfur: 10, obsidian: 4 }, { obsidian: 3, ember: 2 }, { sulfur: 8, ember: 3 }];
+for (const list of [AXE_RECIPES, GUN_RECIPES, AXE_RECIPES3, GUN_RECIPES3, AXE_RECIPES4, GUN_RECIPES4]) for (const rc of list) if (rc) for (const k in rc) rc[k] = Math.max(1, Math.round(rc[k] * 0.6));
 const RECIPES = { 3: [AXE_RECIPES3, GUN_RECIPES3, AMMO_RECIPES3], 4: [AXE_RECIPES4, GUN_RECIPES4, AMMO_RECIPES4] };
 const axeRecipe = i => (RECIPES[isle] ? RECIPES[isle][0] : AXE_RECIPES)[i];
 const gunRecipe = i => (RECIPES[isle] ? RECIPES[isle][1] : GUN_RECIPES)[i];
@@ -4647,7 +4648,7 @@ const FERRY2_LINES = [
     "There is another light out there, past the horizon. A third life. But I won't sail there for cash alone.",
     "Bring me the Hypergamous Relic. It shattered into six pieces, and every one of them is somewhere on this island.",
     "One sleeps at the bottom of a cave nobody is supposed to find. Look for a dark mouth in the eastern hills.",
-    "Six pieces and $2,500,000. Then I'll take you to Mooncap Isle, where the trees glow and the sky has two moons."
+    "Six pieces and $1,250,000. Then I'll take you to Mooncap Isle, where the trees glow and the sky has two moons."
 ];
 const FERRY2_QUIPS = ["Six pieces. No fewer.", "The cave is in the east. Bring a lantern.", "Not yet, woodcutter. Not yet.", "Mooncap Isle is waiting. So is what sleeps there.", "See that violet light? Two moons rise over it.", "Chop. Save. Sail. That's the whole job."];
 const SMITH_SAY = ["Bring me the trees' insides and I'll make you something that hurts.", "Iron from Ironbark, powder from Powderwood. Copper makes bullets.", "Nothing here is for sale. Everything here is earned.", "Hammer's hot. What are we making?", "Gold makes it pretty. Magma makes it scary."];
@@ -4847,7 +4848,7 @@ function holdingReset() { reloading = false; reloadT = 0; gun.visible = false; a
 // =====================================================================
 //  1.1.1: the secret cave and the Hypergamous Relic (6 pieces = the ticket to Rebirth 2)
 // =====================================================================
-const REBIRTH2_COST = 2500000;
+const REBIRTH2_COST = 1250000;
 const RELIC_N = 6;
 const RELIC_HINTS = ["Somewhere deep underground...", "Beside the Golden Tree", "Among the crystals", "Inside the Ruined Temple", "Deep inside the Old Mine", "Behind the Hunter's Lodge"];
 const relicCount = () => save.relic.filter(Boolean).length;
@@ -6280,7 +6281,7 @@ const FERRY3_LINES = [
     "South of camp there's a sunken clearing called the Hollow. The oldest tree in the world sleeps there: the Elder Heart.",
     "Step inside and it wakes. Fell it and its Heartwood is yours. It always grows back by dawn.",
     "At night, watch the sky. Stars fall here, and they don't wait around to be picked up.",
-    "Fell the Elder Heart, bring me five pieces of its Heartwood and $25,000,000, and I'll take you to Ashfall Isle. It's on fire. You'll love it."
+    "Fell the Elder Heart, bring me five pieces of its Heartwood and $2,500,000, and I'll take you to Ashfall Isle. It's on fire. You'll love it."
 ];
 const FERRY3_QUIPS = ["The Hollow is south. Your nerve is your own business.", "Two moons. Twice the werewolves. Kidding. Probably.", "Stars fall on clear nights. Fast feet catch them.", "See the smoke past the ??? light? That's Ashfall Isle. Rebirth 3.", "The Elder Heart has felled more woodcutters than you've felled trees."];
 function openFerry3() {
@@ -6770,7 +6771,7 @@ function buildIsle4() {
 }
 
 // ---- getting there: Mooncap's Rebirth 3 ferry ----
-const REBIRTH3_COST = 25000000, REBIRTH3_HEART = 5;
+const REBIRTH3_COST = 2500000, REBIRTH3_HEART = 5;
 const rebirth3Ready = () => (save.bossKills || 0) > 0 && (save.mats.heartwood || 0) >= REBIRTH3_HEART && save.money >= REBIRTH3_COST;
 function finishRebirth3() {
     save.rebirths = 3; // Ashfall Isle is Rebirth 3

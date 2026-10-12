@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.5.0\n\n- TREE MUTATIONS: Golden, Frozen, Shocked, Giant, Molten, Bloodlit, Rainbow and Celestial trees, each with its own look and effects, and up to x6 drops. Collect all 8.\n- ENCHANTING TABLE window: pick any axe, see its runes, and enchant it. Enchanted axes now show on the hotbar, the inventory and in your hands.\n- THE CASINO: a tower on Ashfall Isle. Coming soon.\n- ANIMALS REBUILT: walking legs, heads that look around, tails, ears and blinking eyes. They graze, sit, sleep, stare and run away. None of them attack.\n- OLD MINE FIX: you can now walk into the deep room and the west tunnel, so relic piece 5 can be collected. The mine rails are one connected track now.\n- Trunks no longer poke out of the top of pine and Christmas trees.\n- Ghost Lumberjacks bought on later islands no longer vanish when you restart the game."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.5.1 (faster progression)\n\n- Better axes now REALLY chop faster: tree health grows much slower than your weapon damage, so a top axe fells most trees in 1-3 hits.\n- Trees drop 50% more logs and materials.\n- Trees no longer get much tougher every day (5% per day instead of 12%), and later islands are less tanky.\n- Crafting axes and guns costs 40% fewer materials.\n- Rebirth 2 now costs $1,250,000 (was $2,500,000). Rebirth 3 now costs $2,500,000 (was $25,000,000)."
     }
   }
 }
