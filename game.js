@@ -134,7 +134,9 @@ let godMode = false, devSpeed = 1; // dev panel only
 const hpScale = () => Math.pow(bestDmg(), 0.6); // grows much slower than your damage, so every upgrade really chops faster
 const rewardScale = () => 1.5 * (1 + (bestDmg() - 1) * 0.14);
 const dmgScale = () => 1 + bestIdx() * 0.1;
-const ghostCost = () => Math.floor(80 * Math.pow(1.65, save.ghosts));
+const ghostCost = () => Math.floor(60 * Math.pow(1.5, save.ghosts));
+// each ghost swings with 80% of your axe (the one you hold or your best, whichever is stronger), with every bonus on it
+const ghostHit = () => Math.max(1, Math.round(Math.max(axeDmg(), bestDmg()) * 0.8));
 const priceCost = () => Math.floor(120 * Math.pow(1.8, save.priceLvl));
 const hpCost = () => Math.floor(120 * Math.pow(1.7, save.hpLvl));
 const bootCost = () => Math.floor(150 * Math.pow(1.9, save.bootLvl));
@@ -1980,7 +1982,7 @@ function gainAxe(i) {
 }
 function reaperGear() {
     return [
-        { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees in the woods and pays you for each one. Owned: ${save.ghosts}`, cost: ghostCost(), buy() { save.ghosts++; syncGhosts(); } },
+        { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees and pays you for each one. Hits for ${ghostHit()} (80% of your axe). Owned: ${save.ghosts}`, cost: ghostCost(), buy() { save.ghosts++; syncGhosts(); } },
         { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST, buy() { save.bandages++; } },
         { name: "Better Log Price", icon: "logs", desc: `Each log sells for $${logValue()} → $${logValue() + 2}`, cost: priceCost(), buy() { save.priceLvl++; } },
         { name: "Vitality", desc: `+20 max health (${save.hpLvl}/5)`, cost: hpCost(), maxed: save.hpLvl >= 5, buy() { save.hpLvl++; player.maxHp = maxHpNow(); player.hp = player.maxHp; } },
@@ -3317,7 +3319,7 @@ function updateGhosts(dt) {
         o.ph += dt;
         if (!o.tgt || o.tgt.gone || o.tgt.dying || o.tgt.burn) {
             o.tgt = null;
-            let best = null, bd = 70;
+            let best = null, bd = 95;
             for (const t of trees) {
                 if (t.gone || t.dying || t.burn || t.boss || t.type.flee || claimed.has(t)) continue;
                 if (Math.hypot(t.x, t.z) < SAFE_R + 2) continue;
@@ -3326,7 +3328,7 @@ function updateGhosts(dt) {
             }
             if (best) { o.tgt = best; claimed.add(best); }
         }
-        let tx, tz, ty = 1.5 + Math.sin(o.ph * 1.6) * 0.18, speed = 7;
+        let tx, tz, ty = 1.5 + Math.sin(o.ph * 1.6) * 0.18, speed = 10;
         if (o.tgt) {
             const t = o.tgt, dx = o.g.position.x - t.x, dz = o.g.position.z - t.z, dl = Math.hypot(dx, dz) || 1, off = t.r + 1.7;
             tx = t.x + dx / dl * off; tz = t.z + dz / dl * off;
@@ -3343,8 +3345,8 @@ function updateGhosts(dt) {
         if (o.tgt && gd < 0.9) {
             o.cd -= dt;
             if (o.cd <= 0) {
-                o.cd = 1.15; o.swing = 0.35;
-                const t = o.tgt, dmg = Math.max(1, Math.round(bestDmg() * 0.5 * mult * isleHp() * (1 + 0.1 * (save.rebirths || 0)))); // keeps pace with each island's tougher trees
+                o.cd = 0.8; o.swing = 0.3;
+                const t = o.tgt, dmg = Math.max(1, Math.round(ghostHit() * mult * isleHp())); // your axe, scaled to each island's tougher trees
                 t.hp -= dmg; t.hurt = 1;
                 burst(V3(t.x, Math.min(t.h * 0.3, 1.8), t.z), 4, 3, [new THREE.MeshBasicMaterial({ color: 0x9fe8ff }), chipMats[0]]);
                 if (Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 30) sfx(210, 0.08, "square", 0.04, 0.5);
@@ -3352,11 +3354,11 @@ function updateGhosts(dt) {
                     t.dying = true; t.t = 0; t.byGhost = true;
                     save.ghostFelled = (save.ghostFelled || 0) + 1;
                     if (isle >= 2) { // past Pine Island they haul the tree's materials back to you
-                        const k = t.type.mat || isleMats()[0], n = Math.max(1, Math.round(treeLogs(t) * 0.55));
+                        const k = t.type.mat || isleMats()[0], n = Math.max(1, Math.round(treeLogs(t) * 0.8));
                         save.mats[k] = (save.mats[k] || 0) + n;
                         floatWorld(V3(t.x, Math.min(t.h * 0.7, 4), t.z), "+" + n + " " + MATS[k].name, "cash");
                     } else {
-                        const pay = Math.round(treeLogs(t) * (logValue() + t.type.bonus * 0.8) * 0.65);
+                        const pay = Math.round(treeLogs(t) * (logValue() + t.type.bonus * 0.8) * 0.85);
                         save.money += pay; save.ghostCash = (save.ghostCash || 0) + pay;
                         floatWorld(V3(t.x, Math.min(t.h * 0.7, 4), t.z), "+$" + pay, "cash");
                     }
@@ -3365,7 +3367,7 @@ function updateGhosts(dt) {
                 }
             }
         }
-        if (o.swing > 0) { o.swing -= dt; o.arm.rotation.x = Math.sin((1 - Math.max(0, o.swing) / 0.35) * Math.PI) * -2.0; } else o.arm.rotation.x = -0.2 + Math.sin(o.ph * 2) * 0.08;
+        if (o.swing > 0) { o.swing -= dt; o.arm.rotation.x = Math.sin((1 - Math.max(0, o.swing) / 0.3) * Math.PI) * -2.0; } else o.arm.rotation.x = -0.2 + Math.sin(o.ph * 2) * 0.08;
     }
 }
 
@@ -4668,7 +4670,7 @@ function gunItems() {
 function gearItems2() {
     const k3 = isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
     return [
-        { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees for you and brings back their materials. Owned: ${save.ghosts}`, cost: ghostCost() * 25, buy() { save.ghosts++; syncGhosts(); } },
+        { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees and brings back their materials. Hits for ${ghostHit()} (80% of your axe). Owned: ${save.ghosts}`, cost: ghostCost() * 15, buy() { save.ghosts++; syncGhosts(); } },
         { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
         { name: "Better Prices", desc: `Materials sell for +15% more each level (now +${15 * (save.priceLvl || 0)}%)`, cost: priceCost(), buy() { save.priceLvl++; } },
         { name: "Vitality", desc: `+20 max health (${save.hpLvl}/5)`, cost: hpCost(), maxed: save.hpLvl >= 5, buy() { save.hpLvl++; player.maxHp = maxHpNow(); player.hp = player.maxHp; } },
