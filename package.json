@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.5.2 (better ghosts)\n\n- Ghost Lumberjacks now hit with 80% of YOUR axe damage, including every upgrade and enchantment on it. A better axe means much stronger ghosts.\n- Ghosts swing faster, fly faster, search further for trees, and bring back more cash and materials.\n- Ghost Lumberjacks are cheaper, and much cheaper on the later islands."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.6.0 (THE CASINO IS OPEN)\n\n- The Casino on Ashfall Isle is open! Walk through the glowing doors into a huge golden hall with chandeliers, red carpet, neon signs, dealers and regulars. It is a SAFE ZONE: nothing can hurt you inside.\n- SLOTS: six machines along the wall. Line up three 7s for 100x your bet. Auto-spin included.\n- BLACKJACK: hit, stand or double down against the dealer. Blackjack pays 3 to 2.\n- ROULETTE: bet on a number (36x), red/black, odd/even, high/low or a dozen, and watch the wheel spin.\n- WHEEL OF FORTUNE: one FREE spin every in-game day. Win cash, buffs, materials, or the JACKPOT.\n- THE BAR: drinks that give you buffs (luck, damage, speed, defence, fireproof). Water is on the house.\n- Bet with chips from $100 up to $10M, or go MAX."
     }
   }
 }

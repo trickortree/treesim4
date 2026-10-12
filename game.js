@@ -46,7 +46,7 @@ let addTgt = null; // while set, scene.add puts new objects in this group
 { const _add = scene.add.bind(scene); scene.add = function (...o) { if (addTgt) { for (const x of o) addTgt.add(x); return this; } return _add(...o); }; }
 let isle = 1; // 1 = Pine Island, 2 = the Highland Isle, 3 = Mooncap Isle
 let groundFn = null;
-const groundY = (x, z) => (groundFn ? groundFn(x, z) : 0);
+const groundY = (x, z) => (x > 4500 ? 0 : groundFn ? groundFn(x, z) : 0); // x > 4500 is the casino's hall
 const curShoreAt = (x, z) => (isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
 const curShoreR = a => (isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
 
@@ -114,6 +114,7 @@ if (!Array.isArray(save.gunOwned)) save.gunOwned = [];
 if (!save.gunAmmo || typeof save.gunAmmo !== "object") save.gunAmmo = {};
 if (typeof save.gunEq !== "number" || !save.gunOwned[save.gunEq]) save.gunEq = -1;
 if (!save.mats || typeof save.mats !== "object") save.mats = {};
+if (!save.casino || typeof save.casino !== "object") save.casino = { net: 0, big: 0, plays: 0, jack: 0, wheelDay: -1, visits: 0 };
 if (!Array.isArray(save.relic) || save.relic.length !== 6) save.relic = [0, 0, 0, 0, 0, 0];
 if (!save.buffs || typeof save.buffs !== "object") save.buffs = {};
 if (!save.ench || typeof save.ench !== "object") save.ench = {};
@@ -269,7 +270,7 @@ function applySky() {
     lantern.distance = 24 + save.oilLvl * 6;
     if (m3) sky3(d);
     if (m4) { scene.fog.near *= 1.6; scene.fog.far *= 2.4; sky4(d); } // the volcano should always loom over the island
-    if (inCave()) caveSky();
+    if (inCasino()) casinoSky(); else if (inCave()) caveSky();
 }
 
 addTgt = isle1;
@@ -880,6 +881,7 @@ function ferrymanTex() {
     farGlow = canopyM;
 }
 function clampToIsland(p) {
+    if (p.x > 4500) { clampCasino(p); return; }
     if (isle === 4) { clampIsle4(p); return; }
     if (isle === 3) { clampIsle3(p); return; }
     if (isle === 2) { clampIsle2(p); return; }
@@ -1560,7 +1562,7 @@ const player = {
 };
 const keys = {};
 let mouseDown = false;
-const inSafe = () => Math.hypot(player.pos.x, player.pos.z) < SAFE_R;
+const inSafe = () => Math.hypot(player.pos.x, player.pos.z) < SAFE_R || player.pos.x > 4500; // the casino is a safe zone
 
 
 // ---------- axe viewmodel ----------
@@ -2173,6 +2175,7 @@ function showPanels() {
     $("panelFish").classList.toggle("show", panel === "fish");
     $("panelFerry").classList.toggle("show", panel === "ferry");
     $("panelRelic").classList.toggle("show", panel === "relic");
+    $("panelCasino").classList.toggle("show", panel === "casino");
     if (panel === "relic") renderRelic();
     $("panelTalk").classList.toggle("show", panel === "talk");
     $("panelBack").classList.toggle("show", panel !== null && panel !== "talk" && panel !== "dev");
@@ -2463,6 +2466,7 @@ addEventListener("keydown", e => {
     if (DEBUG && e.code === "F8") { save.money += 250000; toast("[debug] +$250,000", "cash"); return; }
     if (DEBUG && e.code === "F9") { save.owned.fill(1); GUNS.forEach((g, i) => { save.gunOwned[i] = 1; const am = gunAm(i); am.mag = magSize(i); am.res = resCap(i); }); save.bandages += 5; for (const k of Object.keys(MATS)) save.mats[k] = (save.mats[k] || 0) + 300; toast("[debug] every axe and gun + 300 of each material", "cash"); return; }
     if (ride) return;
+    if (panel === "casino") { if (e.code === "Escape") { closePanel(); return; } if (casinoKey(e.code)) e.preventDefault(); return; }
     if (panel === "talk") { if (e.code === "KeyF" || e.code === "Space" || e.code === "Enter") advanceTalk(); else if (e.code === "Escape") closePanel(); return; }
     if (e.code === "Escape") { if (panel) closePanel(); return; }
     if (e.code === "Tab") { e.preventDefault(); if (panel === "shop") { const tl = SHOP_TABS[shopMode].map(t => t[0]); shopPage = 0; shopTab = tl[(tl.indexOf(shopTab) + 1) % tl.length]; renderShop(); } return; }
@@ -2505,6 +2509,7 @@ addEventListener("mousemove", e => {
 });
 
 function nearest() {
+    if (inCasino()) return nearestCasino();
     if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
     if (casino && casino.isle === isle && Math.hypot(player.pos.x - casino.door.x, player.pos.z - casino.door.z) < 3.4) return { k: "casino" };
     if (isle === 4) return nearest4();
@@ -2529,7 +2534,8 @@ function interact() {
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
     if (n.k === "ench") { openEnch(pick(ENCH_SAY)); return; }
-    if (n.k === "casino") { toast("The doors are boarded shut. A sign on them says: COMING SOON.", "rare"); sfx(300, 0.08, "square", 0.06, 1.2); setTimeout(() => sfx(420, 0.08, "square", 0.06, 1.2), 90); setTimeout(() => sfx(520, 0.12, "square", 0.05, 1.2), 180); return; }
+    if (n.k === "casino") { enterCasino(); return; }
+    if (CS_PROMPTS[n.k]) { casinoInteract(n); return; }
     if (n.k === "smith") {
         openShop("forge", pick(isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
     } else if (n.k === "depot") openShop("trade", isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
@@ -3424,7 +3430,8 @@ function enchFx() {
 }
 const enchCol = new THREE.Color(), enchBase = new THREE.Color(), ENCH_PURPLE = new THREE.Color(0x9a4aff);
 function updateEnchTable(dt) {
-    updateAxeRunes(); updateMutFx(dt); updateCasino();
+    updateAxeRunes(); updateMutFx(dt); updateCasino(); updateCasinoInside(dt);
+    if (typeof ash4 !== "undefined") ash4.visible = isle === 4 && !inCasino();
     const T = enchTable;
     if (T.g.visible) {
         const d = Math.hypot(player.pos.x - T.x, player.pos.z - T.z), near = d < 6;
@@ -5057,7 +5064,7 @@ const MINE_UP = 2.75; // the direction the hillside rises (the mouth faces the o
 const MINE_F = { x: -Math.cos(MINE_UP), z: -Math.sin(MINE_UP) };
 const MINE_MOUTH = { x: -80.9, z: -28.6 };
 const MINE_OUT = { x: MINE_MOUTH.x + MINE_F.x * 4, z: MINE_MOUTH.z + MINE_F.z * 4 };
-function inMine() { return player.pos.x > 2500; }
+function inMine() { return player.pos.x > 2500 && player.pos.x < 4500; }
 // the tunnels, as rectangles [x0, x1, z0, z1] relative to (MX, 0)
 const MINE_R = [[-1.8, 1.8, -5, 41.2], [-24, 24, 18, 21.6], [-24, -20.4, 20.4, 45.2], [20.4, 24, -4, 21.6], [-7.5, 7.5, 40, 54], [-24, -12, 44, 47.6], [12.4, 24, -4, -0.4]];
 const MINE_H = 3.4;
@@ -7157,6 +7164,7 @@ function startEruption() {
     burst(V3(VOLC.x, floorY4() + 4, VOLC.z), 60, 14, [glowM(0xff7a2a), glowM(0xffd060), chipMats[2]]);
 }
 function updateEruption(dt) {
+    if (inCasino()) return; // nothing falls on you indoors
     if (eruptLeft > 0) {
         eruptLeft -= dt; eruptBomb -= dt;
         if (isle4.plume) isle4.plume.material.opacity = 0.14;
@@ -8054,7 +8062,7 @@ function updateAxeRunes() {
     axeRunes.mat.color.setHSL(0.76 + 0.06 * Math.sin(time * 2), 0.9, 0.72);
 }
 
-// ---------- the Casino: a tower on the newest island. Its doors open in a future update ----------
+// ---------- the Casino: a tower on the newest island. Walk through its doors (1.6.0) ----------
 // it always lives on the latest island: when a new island ships, point CASINO_ISLE at it and give it a style here
 const CASINO_ISLE = 4;
 const CASINO_STYLE = {
@@ -8094,10 +8102,10 @@ function buildCasino(n) {
     part(g, OCTA, glow, 0, y + 7.9, 0, 0.45, 0.65, 0.45);
     // the boarded-up door, with a COMING SOON banner across it
     const fz = 7 * 0.866;
-    part(g, BOX, lamb(0x140c08), 0, 1.9 + 2.2, fz + 0.02, 3, 4.4, 0.25);
+    part(g, BOX, new THREE.MeshBasicMaterial({ color: 0xffd890 }), 0, 1.9 + 2.2, fz + 0.02, 3, 4.4, 0.25); // open doors, warm light pouring out
+    { const L = new THREE.PointLight(0xffc070, 16, 14, 1.6); L.position.set(0, 3.4, fz + 2); g.add(L); }
     part(g, BOX, trim, 0, 1.9 + 4.55, fz + 0.1, 3.6, 0.3, 0.3);
-    for (const [py, rz] of [[2.8, 0.5], [3.4, -0.5], [4.6, 0.12]]) part(g, BOX, plank, 0, py, fz + 0.2, 3.4, 0.28, 0.08, 0, 0, rz);
-    const banner = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.1), new THREE.MeshBasicMaterial({ map: casinoTex([["COMING SOON", 64, "#ffd060", 64]], 512, 128, "#2a0e06") })); banner.position.set(0, 7.0, fz + 0.12); g.add(banner);
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.1), new THREE.MeshBasicMaterial({ map: casinoTex([["OPEN 24/7", 64, "#ffd060", 64]], 512, 128, "#2a0e06") })); banner.position.set(0, 7.0, fz + 0.12); g.add(banner);
     const signMat = new THREE.MeshBasicMaterial({ map: casinoTex([["CASINO", 120, S.sign, 96]], 512, 192), transparent: true, depthWrite: false, color: 0xd8b8a8 });
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 2.1), signMat); sign.position.set(0, 1.9 + 9 + 3.8, 6 * 0.866 + 0.12); g.add(sign);
     for (const s of [-1, 1]) part(g, OCTA, trim, s * 3.4, 1.9 + 9 + 3.8, 6 * 0.866 + 0.15, 0.4, 0.6, 0.12); // diamond emblems either side of the sign
@@ -8115,7 +8123,7 @@ function buildCasino(n) {
     // easel sign by the path in
     const easel = new THREE.Group(); easel.position.set(3.5, 0, 13); easel.rotation.y = -0.25; g.add(easel);
     for (const s of [-1, 1]) part(easel, BOX, plank, s * 0.6, 0.9, 0, 0.1, 1.8, 0.1, 0.15);
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.1), new THREE.MeshBasicMaterial({ map: casinoTex([["CASINO", 56, S.sign, 44], ["COMING SOON", 34, "#ffe0b0", 96]], 256, 140, "#1a0c08") })); board.position.set(0, 1.3, 0.1); board.rotation.x = -0.15; easel.add(board);
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.1), new THREE.MeshBasicMaterial({ map: casinoTex([["CASINO", 56, S.sign, 44], ["NOW OPEN", 34, "#ffe0b0", 96]], 256, 140, "#1a0c08") })); board.position.set(0, 1.3, 0.1); board.rotation.x = -0.15; easel.add(board);
     // collisions and a spot on the map
     const toW = (lx, lz) => ({ x: x + Math.cos(face) * lx + Math.sin(face) * lz, z: z - Math.sin(face) * lx + Math.cos(face) * lz });
     circles.push({ x, z, r: 10.2 });
@@ -8131,6 +8139,619 @@ function updateCasino() {
     casino.signMat.opacity = Math.random() < 0.015 ? 0.35 : 0.92; // an old neon sign, flickering
 }
 
+
+// =====================================================================
+//  1.6.0: THE CASINO OPENS. Walk through the tower's doors into a safe, glittering hall:
+//  slot machines, blackjack, roulette, the Wheel of Fortune and a bar. Nothing can hurt you in here.
+// =====================================================================
+const CSX = 5000;                                   // the hall lives far away from every island
+const CS_X0 = CSX - 19, CS_X1 = CSX + 19, CS_Z0 = -16, CS_Z1 = 18, CS_H = 7.2;
+function inCasino() { return player.pos.x > 4500; }
+const SLOT_Z = [-6, -2.4, 1.2, 4.8, 8.4, 12];
+const ROUL = { x: CSX, z: 4 }, BJ = { x: CSX + 11, z: 3 }, WHEEL_AT = { x: CSX, z: 17.5 }, BAR = { x0: CSX + 14, z0: 8.5, z1: 16.5 };
+const csCircles = [{ x: ROUL.x, z: ROUL.z, r: 3.4 }, { x: BJ.x + 0.6, z: BJ.z, r: 3.1 }, { x: WHEEL_AT.x, z: 17, r: 2.4 }];
+for (const sx of [-1, 1]) for (const z of [-8, 13]) csCircles.push({ x: CSX + sx * 7, z, r: 0.75 });
+const casinoNpcs = [];
+let casinoBuilt = false, csIn = null, csMusicT = 0, csChord = 0;
+const slotMachines = [];
+let roul3D = null, wheel3D = null, csSigns = [], csLights = [];
+
+// ---- the symbols on the reels (plain text glyphs, drawn the same in 3D and in the panel) ----
+const SYMS = ["7", "BAR", "★", "♦", "♥", "♣"];
+const SYM_COL = { "7": "#ff3a3a", "BAR": "#ffffff", "★": "#ffd040", "♦": "#5ad8ff", "♥": "#ff6ab0", "♣": "#6aff8a" };
+function drawSym(g, s, cx, cy, size) {
+    g.save(); g.textAlign = "center"; g.textBaseline = "middle";
+    if (s === "BAR") { g.fillStyle = "#111"; g.fillRect(cx - size * 0.55, cy - size * 0.24, size * 1.1, size * 0.48); g.strokeStyle = "#fff"; g.lineWidth = size * 0.05; g.strokeRect(cx - size * 0.55, cy - size * 0.24, size * 1.1, size * 0.48); g.fillStyle = "#fff"; g.font = `900 ${size * 0.34}px Consolas, monospace`; g.fillText("BAR", cx, cy + 1); }
+    else { g.fillStyle = SYM_COL[s]; g.shadowColor = SYM_COL[s]; g.shadowBlur = size * 0.25; g.font = `900 ${size * 0.8}px "Segoe UI Symbol", Consolas, sans-serif`; g.fillText(s, cx, cy + size * 0.04); }
+    g.restore();
+}
+
+// ---- textures ----
+function csCanvas(w, h, fn) { const cv = document.createElement("canvas"); cv.width = w; cv.height = h; fn(cv.getContext("2d"), w, h); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t; }
+const carpetTex = () => { const t = csCanvas(128, 128, (g, w) => { g.fillStyle = "#5a0c18"; g.fillRect(0, 0, w, w); g.strokeStyle = "#b8862a"; g.lineWidth = 3; g.beginPath(); g.moveTo(64, 4); g.lineTo(124, 64); g.lineTo(64, 124); g.lineTo(4, 64); g.closePath(); g.stroke(); g.fillStyle = "#3a0610"; g.beginPath(); g.moveTo(64, 30); g.lineTo(98, 64); g.lineTo(64, 98); g.lineTo(30, 64); g.closePath(); g.fill(); g.fillStyle = "#d8a840"; for (const [x, y] of [[64, 64], [0, 0], [128, 0], [0, 128], [128, 128]]) { g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); } }); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(11, 10); t.magFilter = THREE.NearestFilter; return t; };
+const wallTex = () => { const t = csCanvas(64, 128, (g, w, h) => { g.fillStyle = "#3a0e16"; g.fillRect(0, 0, w, h); g.fillStyle = "#4a141c"; g.fillRect(0, 0, 32, h); g.fillStyle = "rgba(216,168,64,.55)"; for (let y = 12; y < h; y += 32) { g.beginPath(); g.moveTo(16, y - 8); g.lineTo(24, y); g.lineTo(16, y + 8); g.lineTo(8, y); g.closePath(); g.fill(); } }); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 1); t.magFilter = THREE.NearestFilter; return t; };
+const RED_N = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+const WHEEL_ORDER = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
+const numCol = n => (n === 0 ? "#1a9a4a" : RED_N.has(n) ? "#c8202a" : "#141418");
+function drawRoulette(g, S, ang, ball, ballR) {
+    const c = S / 2, R = S / 2 - 6, seg = (Math.PI * 2) / 37;
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#3a1e0e"; g.beginPath(); g.arc(c, c, R, 0, 7); g.fill();
+    g.fillStyle = "#c89a3a"; g.beginPath(); g.arc(c, c, R - 4, 0, 7); g.fill();
+    for (let i = 0; i < 37; i++) {
+        const a0 = ang + i * seg, n = WHEEL_ORDER[i];
+        g.fillStyle = numCol(n); g.beginPath(); g.moveTo(c, c); g.arc(c, c, R - 8, a0, a0 + seg); g.closePath(); g.fill();
+        g.save(); g.translate(c, c); g.rotate(a0 + seg / 2); g.fillStyle = "#fff"; g.font = `700 ${S * 0.04}px Consolas`; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(String(n), R - 20, 0); g.restore();
+    }
+    g.fillStyle = "#2a160a"; g.beginPath(); g.arc(c, c, R * 0.62, 0, 7); g.fill();
+    g.fillStyle = "#c89a3a"; g.beginPath(); g.arc(c, c, R * 0.2, 0, 7); g.fill();
+    for (let k = 0; k < 4; k++) { const a = ang * 1 + k * Math.PI / 2; g.strokeStyle = "#e8c060"; g.lineWidth = 5; g.beginPath(); g.moveTo(c, c); g.lineTo(c + Math.cos(a) * R * 0.5, c + Math.sin(a) * R * 0.5); g.stroke(); }
+    if (ball !== undefined) { g.fillStyle = "#fff"; g.shadowColor = "#000"; g.shadowBlur = 4; g.beginPath(); g.arc(c + Math.cos(ball) * ballR, c + Math.sin(ball) * ballR, S * 0.022, 0, 7); g.fill(); g.shadowBlur = 0; }
+    g.fillStyle = "#ffd040"; g.beginPath(); g.moveTo(c - 8, 2); g.lineTo(c + 8, 2); g.lineTo(c, 16); g.closePath(); g.fill();
+}
+// the Wheel of Fortune: twelve wedges
+const WHEEL = [
+    { t: "x0.3", k: 0.3, col: "#3a6aff" }, { t: "LUCKY", buff: "lucky", col: "#d8a820" }, { t: "x0.6", k: 0.6, col: "#e83a5a" }, { t: "BUST", k: 0, col: "#2a2a34" },
+    { t: "x1", k: 1, col: "#2ab06a" }, { t: "MATS", mats: true, col: "#9a5ae8" }, { t: "x1.5", k: 1.5, col: "#ff8a2a" }, { t: "BUST", k: 0, col: "#2a2a34" },
+    { t: "x2.5", k: 2.5, col: "#2aa8e8" }, { t: "SWIFT", buff: "swift", col: "#3ac08a" }, { t: "x0.4", k: 0.4, col: "#e85aa0" }, { t: "JACKPOT", k: 8, col: "#ffd040", jack: true }
+];
+const wheelBase = () => Math.round(20000 * Math.pow(2, save.rebirths || 0));
+const wheelPrice = () => Math.round(wheelBase() * 1.4);
+function drawWheel(g, S, ang) {
+    const c = S / 2, R = S / 2 - 8, seg = (Math.PI * 2) / WHEEL.length;
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#c89a3a"; g.beginPath(); g.arc(c, c, R + 6, 0, 7); g.fill();
+    WHEEL.forEach((w, i) => {
+        const a0 = ang + i * seg;
+        g.fillStyle = w.col; g.beginPath(); g.moveTo(c, c); g.arc(c, c, R, a0, a0 + seg); g.closePath(); g.fill();
+        g.strokeStyle = "rgba(255,230,160,.7)"; g.lineWidth = 2; g.stroke();
+        g.save(); g.translate(c, c); g.rotate(a0 + seg / 2); g.fillStyle = w.jack ? "#3a2000" : "#fff"; g.font = `900 ${S * (w.t.length > 5 ? 0.045 : 0.06)}px Consolas`; g.textAlign = "right"; g.textBaseline = "middle"; g.fillText(w.t, R - 10, 0); g.restore();
+    });
+    for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; g.fillStyle = i % 2 ? "#fff6c0" : "#ffb020"; g.beginPath(); g.arc(c + Math.cos(a) * (R + 1), c + Math.sin(a) * (R + 1), 4, 0, 7); g.fill(); }
+    g.fillStyle = "#3a1e0e"; g.beginPath(); g.arc(c, c, R * 0.16, 0, 7); g.fill(); g.fillStyle = "#ffd040"; g.beginPath(); g.arc(c, c, R * 0.1, 0, 7); g.fill();
+}
+
+// ---- the hall ----
+function buildCasinoHall() {
+    casinoBuilt = true;
+    const prev = addTgt, prevB = curBuild; addTgt = null; curBuild = CASINO_ISLE;
+    const W = CS_X1 - CS_X0, D = CS_Z1 - CS_Z0, cz = (CS_Z0 + CS_Z1) / 2;
+    const gold = new THREE.MeshLambertMaterial({ color: 0xd8a840, emissive: 0x3a2a08, flatShading: true }), darkWood = lamb(0x2a140c), marble = lamb(0xe8e0d8);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ map: carpetTex() })); floor.rotation.x = -Math.PI / 2; floor.position.set(CSX, 0.01, cz); scene.add(floor);
+    const wt = wallTex(), wallM = new THREE.MeshLambertMaterial({ map: wt });
+    for (const [x, z, w, d, ry] of [[CSX, CS_Z0, W, 0, 0], [CSX, CS_Z1, W, 0, Math.PI], [CS_X0, cz, D, 0, Math.PI / 2], [CS_X1, cz, D, 0, -Math.PI / 2]]) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, CS_H), wallM); m.position.set(x, CS_H / 2, z); m.rotation.y = ry; scene.add(m);
+    }
+    const wain = batch(darkWood), trimB = batch(gold);
+    for (const [x, z, sx, sz] of [[CSX, CS_Z0 + 0.15, W, 0.3], [CSX, CS_Z1 - 0.15, W, 0.3], [CS_X0 + 0.15, cz, 0.3, D], [CS_X1 - 0.15, cz, 0.3, D]]) {
+        wain.add(BOX, x, 0.6, z, 0, 0, 0, sx, 1.2, sz);
+        trimB.add(BOX, x, 1.22, z, 0, 0, 0, sx + 0.02, 0.08, sz + 0.06);
+        trimB.add(BOX, x, CS_H - 0.5, z, 0, 0, 0, sx + 0.02, 0.12, sz + 0.06);
+    }
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, D), lamb(0x1a0a10)); ceil.rotation.x = Math.PI / 2; ceil.position.set(CSX, CS_H, cz); scene.add(ceil);
+    for (let x = CS_X0 + 4; x < CS_X1; x += 6) trimB.add(BOX, x, CS_H - 0.1, cz, 0, 0, 0, 0.16, 0.16, D);
+    for (let z = CS_Z0 + 4; z < CS_Z1; z += 6) trimB.add(BOX, CSX, CS_H - 0.1, z, 0, 0, 0, W, 0.16, 0.16);
+    // marble pillars
+    for (const c of csCircles.slice(3)) { trimB.add(CYL8, c.x, 0.2, c.z, 0, 0, 0, 0.9, 0.4, 0.9); trimB.add(CYL8, c.x, CS_H - 0.3, c.z, 0, 0, 0, 0.85, 0.5, 0.85); const p = new THREE.Mesh(CYL8, marble); p.scale.set(0.6, CS_H, 0.6); p.position.set(c.x, CS_H / 2, c.z); scene.add(p); }
+    // the doors you came in through, with a velvet rope path
+    trimB.add(BOX, CSX, 2.2, CS_Z0 + 0.1, 0, 0, 0, 4.4, 4.4, 0.2);
+    const doorM = new THREE.MeshBasicMaterial({ color: 0xffe0a0 });
+    for (const s of [-1, 1]) { const d = new THREE.Mesh(BOX, doorM); d.scale.set(1.9, 4, 0.1); d.position.set(CSX + s * 1, 2, CS_Z0 + 0.22); scene.add(d); }
+    const rope = new THREE.MeshLambertMaterial({ color: 0xa01020, flatShading: true });
+    for (const s of [-1, 1]) for (let k = 0; k < 3; k++) { const z = CS_Z0 + 3 + k * 2.6; trimB.add(CYL6, CSX + s * 2.4, 0.5, z, 0, 0, 0, 0.07, 1, 0.07); trimB.add(ICO, CSX + s * 2.4, 1.02, z, 0, 0, 0, 0.12); if (k < 2) { const r = new THREE.Mesh(CYL6, rope); r.scale.set(0.05, 2.6, 0.05); r.rotation.x = Math.PI / 2; r.position.set(CSX + s * 2.4, 0.85, z + 1.3); scene.add(r); } }
+    // chandeliers
+    const crystal = new THREE.MeshBasicMaterial({ color: 0xfff4d8 });
+    for (const z of [-6, 4, 13]) {
+        const ch = new THREE.Group(); ch.position.set(CSX, CS_H - 1.6, z); scene.add(ch);
+        part(ch, CYL6, gold, 0, 1.2, 0, 0.04, 1.6, 0.04);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.07, 6, 16), gold); ring.rotation.x = Math.PI / 2; ch.add(ring);
+        const ring2 = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.06, 6, 12), gold); ring2.rotation.x = Math.PI / 2; ring2.position.y = -0.35; ch.add(ring2);
+        for (let k = 0; k < 12; k++) { const a = (k / 12) * Math.PI * 2; part(ch, CONE6, crystal, Math.cos(a) * 1.2, -0.25, Math.sin(a) * 1.2, 0.07, 0.4, 0.07, Math.PI); }
+        for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; part(ch, CONE6, crystal, Math.cos(a) * 0.7, -0.6, Math.sin(a) * 0.7, 0.06, 0.32, 0.06, Math.PI); }
+        part(ch, ICO, crystal, 0, -0.75, 0, 0.22);
+        const L = new THREE.PointLight(0xffd8a0, 34, 24, 1.5); L.position.set(0, -0.6, 0); ch.add(L); L.userData.b = 34; csLights.push(L);
+    }
+    // neon signs
+    const sign = (txt, col, x, y, z, ry, w = 6, h = 1.5) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: casinoTex([[txt, 92, col, 96]], 768, 192), transparent: true, depthWrite: false })); m.position.set(x, y, z); m.rotation.y = ry; scene.add(m); csSigns.push(m); return m; };
+    sign("SLOTS", "#ff5ad8", CS_X0 + 0.12, 5.4, 3, Math.PI / 2, 5);
+    sign("BLACKJACK", "#5ad8ff", CS_X1 - 0.12, 5.4, 2, -Math.PI / 2, 6.5);
+    sign("BAR", "#ffb040", CS_X1 - 0.12, 5.4, 12.5, -Math.PI / 2, 3.2);
+    sign("EXIT", "#6aff8a", CSX, 5.1, CS_Z0 + 0.14, 0, 3, 1.1);
+    sign("★ WELCOME TO THE CASINO ★", "#ffd040", CSX, 6.1, CS_Z0 + 0.14, 0, 12, 1.2);
+
+    // slot machines along the west wall, each with its own screen
+    const cabCols = [0x6a1aa0, 0xa01a3a, 0x1a6aa0, 0xa07a1a, 0x1aa06a, 0xa01a8a];
+    SLOT_Z.forEach((z, i) => {
+        const m = new THREE.Group(); m.position.set(CS_X0 + 1.6, 0, z); m.rotation.y = Math.PI / 2; scene.add(m);
+        const body = lamb(cabCols[i]);
+        part(m, BOX, body, 0, 0.55, 0, 1.4, 1.1, 1.0); part(m, BOX, body, 0, 1.55, -0.12, 1.4, 1.0, 0.76); part(m, BOX, gold, 0, 1.06, 0.38, 1.44, 0.06, 0.3);
+        part(m, BOX, lamb(0x14080a), 0, 2.25, -0.08, 1.3, 0.45, 0.8);
+        const topM = new THREE.MeshBasicMaterial({ color: 0xffd040 }); part(m, BOX, topM, 0, 2.62, -0.1, 1.2, 0.26, 0.7);
+        const cv = document.createElement("canvas"); cv.width = 192; cv.height = 96; const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+        const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.55), new THREE.MeshBasicMaterial({ map: tex })); scr.position.set(0, 1.62, 0.27); m.add(scr);
+        part(m, CYL6, gold, 0.78, 1.5, 0.1, 0.04, 0.8, 0.04); const knob = part(m, ICO, new THREE.MeshBasicMaterial({ color: 0xff3a3a }), 0.78, 1.95, 0.1, 0.11);
+        part(m, CYL8, gold, 0, 0.45, 1.25, 0.32, 0.06, 0.32); part(m, CYL6, darkWood, 0, 0.22, 1.25, 0.05, 0.45, 0.05); // a stool
+        const sm = { i, g: m, cv, tex, topM, knob, syms: [0, 1, 2].map(() => SYMS[Math.floor(Math.random() * 6)]), t: Math.random() * 3, spin: 0, result: null, win: 0 };
+        drawSlotScreen(sm); slotMachines.push(sm);
+    });
+    // roulette table in the middle, with a real spinning wheel
+    {
+        const t = new THREE.Group(); t.position.set(ROUL.x, 0, ROUL.z); scene.add(t);
+        part(t, CYL8, darkWood, 0, 0.45, 0, 0.6, 0.9, 0.6);
+        const felt = csCanvas(512, 256, (g, w, h) => {
+            g.fillStyle = "#0e5a2a"; g.fillRect(0, 0, w, h); g.strokeStyle = "#e8d8a0"; g.lineWidth = 2;
+            const cw = 30, ch = 52, x0 = 70, y0 = 30;
+            g.fillStyle = numCol(0); g.fillRect(x0 - 34, y0, 32, ch * 3); g.strokeRect(x0 - 34, y0, 32, ch * 3);
+            for (let c = 0; c < 12; c++) for (let r = 0; r < 3; r++) { const n = c * 3 + 3 - r; g.fillStyle = numCol(n); g.fillRect(x0 + c * cw, y0 + r * ch, cw - 2, ch - 2); }
+            g.fillStyle = "#fff"; g.font = "700 14px Consolas"; g.textAlign = "center"; g.textBaseline = "middle";
+            g.fillText("0", x0 - 18, y0 + ch * 1.5); for (let c = 0; c < 12; c++) for (let r = 0; r < 3; r++) g.fillText(String(c * 3 + 3 - r), x0 + c * cw + cw / 2 - 1, y0 + r * ch + ch / 2);
+            g.font = "700 16px Consolas"; ["1st 12", "2nd 12", "3rd 12"].forEach((s, k) => { g.strokeRect(x0 + k * cw * 4, y0 + ch * 3 + 4, cw * 4 - 2, 30); g.fillText(s, x0 + k * cw * 4 + cw * 2, y0 + ch * 3 + 20); });
+        });
+        const top = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.2, 3.4), [lamb(0x2a140c), lamb(0x2a140c), new THREE.MeshLambertMaterial({ map: felt }), lamb(0x2a140c), lamb(0x2a140c), lamb(0x2a140c)]);
+        top.position.set(0.6, 1.0, 0); t.add(top);
+        part(t, BOX, gold, 0.6, 1.12, 1.72, 6.6, 0.08, 0.12); part(t, BOX, gold, 0.6, 1.12, -1.72, 6.6, 0.08, 0.12); part(t, BOX, gold, 3.92, 1.12, 0, 0.12, 0.08, 3.5); part(t, BOX, gold, -2.72, 1.12, 0, 0.12, 0.08, 3.5);
+        const bowl = new THREE.Group(); bowl.position.set(-2.4, 1.15, 0); t.add(bowl);
+        part(bowl, CYL8, lamb(0x3a1e0e), 0, 0.05, 0, 1.1, 0.22, 1.1);
+        const wcv = document.createElement("canvas"); wcv.width = wcv.height = 256; drawRoulette(wcv.getContext("2d"), 256, 0);
+        const wtex = new THREE.CanvasTexture(wcv); wtex.colorSpace = THREE.SRGBColorSpace;
+        const disc = new THREE.Mesh(new THREE.CircleGeometry(1.0, 37), new THREE.MeshBasicMaterial({ map: wtex })); disc.rotation.x = -Math.PI / 2; disc.position.y = 0.17; bowl.add(disc);
+        part(bowl, CYL6, gold, 0, 0.32, 0, 0.06, 0.3, 0.06);
+        const chips = batch(lamb(0xc8202a)), chips2 = batch(lamb(0x1a4ac8)), chips3 = batch(lamb(0xe8e0d0));
+        for (let k = 0; k < 7; k++) { const b = [chips, chips2, chips3][k % 3], h = 1 + (k % 4); for (let j = 0; j < h; j++) b.add(CYL8, ROUL.x + 0.6 + (k - 3) * 0.55, 1.15 + j * 0.06, ROUL.z + ((k * 7) % 3 - 1) * 0.6, 0, 0, 0, 0.16, 0.05, 0.16); }
+        chips.build(); chips2.build(); chips3.build();
+        roul3D = { disc, ang: 0, speed: 0.3 };
+        const croupier = makeHumanoid({ face: "clerk", skin: 0xe8c0a0, shirt: 0xf2f2f2, vest: 0x141414, pants: 0x141414, hair: 0x2a1a10 });
+        croupier.g.position.set(ROUL.x + 0.6, 0, ROUL.z + 2.5); croupier.g.rotation.y = Math.PI; scene.add(croupier.g); croupier.yaw = Math.PI; casinoNpcs.push(croupier);
+    }
+    // blackjack: a half-moon table, the dealer on the flat side
+    {
+        const felt = csCanvas(512, 256, (g, w, h) => { g.fillStyle = "#0e5a2a"; g.fillRect(0, 0, w, h); g.fillStyle = "#e8d8a0"; g.font = "900 26px Consolas"; g.textAlign = "center"; g.fillText("BLACKJACK PAYS 3 TO 2", w / 2, h * 0.42); g.font = "700 18px Consolas"; g.fillText("DEALER STANDS ON 17", w / 2, h * 0.58); });
+        const topG = new THREE.CylinderGeometry(3, 3, 0.2, 24, 1, false, Math.PI, Math.PI);
+        const top = new THREE.Mesh(topG, [lamb(0x2a140c), new THREE.MeshLambertMaterial({ map: felt }), lamb(0x2a140c)]); top.position.set(BJ.x + 1.4, 1.0, BJ.z); scene.add(top);
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(3, 0.1, 6, 24, Math.PI), gold); rim.rotation.set(Math.PI / 2, 0, Math.PI / 2); rim.position.set(BJ.x + 1.4, 1.1, BJ.z); scene.add(rim);
+        const legs = batch(darkWood); legs.add(CYL8, BJ.x, 0.45, BJ.z, 0, 0, 0, 0.6, 0.9, 0.6); legs.build();
+        const cards = batch(new THREE.MeshLambertMaterial({ color: 0xffffff })), backs = batch(new THREE.MeshLambertMaterial({ color: 0xa01a2a }));
+        for (let k = 0; k < 4; k++) { cards.add(BOX, BJ.x + 0.2 - k * 0.15, 1.12, BJ.z - 1.2 + k * 0.8, 0, 0.3 * k, 0, 0.28, 0.01, 0.4); backs.add(BOX, BJ.x + 1.0, 1.12 + k * 0.012, BJ.z + 1.6, 0, 0.2, 0, 0.28, 0.01, 0.4); }
+        cards.build(); backs.build();
+        const dealer = makeHumanoid({ face: "clerk", skin: 0xc89070, shirt: 0xf2f2f2, vest: 0x5a0a14, pants: 0x141414, hair: 0x101010 });
+        dealer.g.position.set(BJ.x + 2.2, 0, BJ.z); dealer.g.rotation.y = -Math.PI / 2; scene.add(dealer.g); dealer.yaw = -Math.PI / 2; casinoNpcs.push(dealer);
+    }
+    // the Wheel of Fortune on the back wall
+    {
+        const g = new THREE.Group(); g.position.set(WHEEL_AT.x, 4.0, CS_Z1 - 0.5); g.rotation.y = Math.PI; scene.add(g);
+        const wcv = document.createElement("canvas"); wcv.width = wcv.height = 384; drawWheel(wcv.getContext("2d"), 384, -Math.PI / 2);
+        const wtex = new THREE.CanvasTexture(wcv); wtex.colorSpace = THREE.SRGBColorSpace;
+        const disc = new THREE.Mesh(new THREE.CircleGeometry(2.9, 48), new THREE.MeshBasicMaterial({ map: wtex })); g.add(disc);
+        part(g, CYL8, gold, 0, 0, -0.1, 3.05, 0.12, 3.05, Math.PI / 2);
+        const ptr = part(g, CONE6, new THREE.MeshBasicMaterial({ color: 0xffd040 }), 0, 3.2, 0.12, 0.3, 0.6, 0.12, Math.PI); ptr.rotation.z = 0;
+        part(g, BOX, darkWood, 0, -3.4, -0.2, 0.5, 1.6, 0.4);
+        const sg = sign("WHEEL OF FORTUNE", "#ffd040", WHEEL_AT.x, 6.8, CS_Z1 - 0.2, Math.PI, 7, 0.9);
+        const L = new THREE.PointLight(0xffe0a0, 18, 10, 1.5); L.position.set(WHEEL_AT.x, 4, CS_Z1 - 3.5); scene.add(L); L.userData.b = 18; csLights.push(L);
+        wheel3D = { disc, ang: 0 };
+    }
+    // the bar: counter, stools, shelves of glowing bottles and a bartender
+    {
+        const g = batch(darkWood), tops = batch(lamb(0x1a1a1e)), bottlesB = [0xffb040, 0x5ad8ff, 0xff5a8a, 0x7aff9a, 0xc08aff].map(c => batch(new THREE.MeshBasicMaterial({ color: c })));
+        g.add(BOX, BAR.x0 + 0.7, 0.55, (BAR.z0 + BAR.z1) / 2, 0, 0, 0, 1.2, 1.1, BAR.z1 - BAR.z0);
+        tops.add(BOX, BAR.x0 + 0.7, 1.14, (BAR.z0 + BAR.z1) / 2, 0, 0, 0, 1.5, 0.08, BAR.z1 - BAR.z0 + 0.2);
+        trimB.add(BOX, BAR.x0 + 0.08, 0.9, (BAR.z0 + BAR.z1) / 2, 0, 0, 0, 0.06, 0.08, BAR.z1 - BAR.z0);
+        for (let k = 0; k < 3; k++) g.add(BOX, CS_X1 - 0.35, 2.0 + k * 0.9, (BAR.z0 + BAR.z1) / 2, 0, 0, 0, 0.5, 0.06, BAR.z1 - BAR.z0 - 1);
+        for (let k = 0; k < 3; k++) for (let j = 0; j < 14; j++) bottlesB[(j + k) % 5].add(CYL6, CS_X1 - 0.35, 2.25 + k * 0.9, BAR.z0 + 1 + j * 0.5, 0, 0, 0, 0.08, 0.4, 0.08);
+        for (let j = 0; j < 4; j++) { const z = BAR.z0 + 1.2 + j * 2; trimB.add(CYL8, BAR.x0 - 0.9, 0.8, z, 0, 0, 0, 0.32, 0.06, 0.32); g.add(CYL6, BAR.x0 - 0.9, 0.4, z, 0, 0, 0, 0.05, 0.8, 0.05); }
+        g.build(); tops.build(); bottlesB.forEach(b => b.build());
+        const bt = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0xf2f2f2, vest: 0x1a3a5a, pants: 0x141414, hair: 0x8a5a2a });
+        bt.g.position.set(CS_X1 - 1.6, 0, 12.5); bt.g.rotation.y = -Math.PI / 2; scene.add(bt.g); bt.yaw = -Math.PI / 2; casinoNpcs.push(bt);
+        const L = new THREE.PointLight(0xffb060, 14, 12, 1.5); L.position.set(CS_X1 - 3, 4, 12.5); scene.add(L); L.userData.b = 14; csLights.push(L);
+    }
+    // a few regulars, so the place feels alive
+    for (const [x, z, ry, sh, pa] of [[CS_X0 + 2.9, SLOT_Z[1], -Math.PI / 2, 0x3a5a8a, 0x2a2a34], [CS_X0 + 2.9, SLOT_Z[4], -Math.PI / 2, 0x8a3a5a, 0x1a1a24], [BAR.x0 - 0.9, BAR.z0 + 3.2, Math.PI / 2, 0x5a8a3a, 0x3a2a1a], [ROUL.x + 2.6, ROUL.z - 2.6, 0, 0xc8a040, 0x1a1a1a]]) {
+        const p = makeHumanoid({ face: "clerk", skin: [0xf0c8a0, 0xc89070, 0x8a5a3a][Math.floor(Math.random() * 3)], shirt: sh, pants: pa, hair: [0x2a1a10, 0x8a5a2a, 0xd8c08a][Math.floor(Math.random() * 3)] });
+        p.g.position.set(x, 0, z); p.g.rotation.y = ry; scene.add(p.g); p.yaw = ry; p.patron = true; casinoNpcs.push(p);
+    }
+    wain.build(); trimB.build();
+    addTgt = prev; curBuild = prevB;
+}
+function drawSlotScreen(sm) {
+    const g = sm.cv.getContext("2d"), W = sm.cv.width, H = sm.cv.height;
+    g.fillStyle = "#0a0410"; g.fillRect(0, 0, W, H);
+    for (let k = 0; k < 3; k++) { g.fillStyle = "#f4ecd8"; g.fillRect(8 + k * 61, 8, 55, H - 16); drawSym(g, sm.syms[k], 35 + k * 61, H / 2, 44); }
+    g.fillStyle = "rgba(255,60,60,.8)"; g.fillRect(4, H / 2 - 1, W - 8, 2);
+    sm.tex.needsUpdate = true;
+}
+
+// ---- walking in and out ----
+let casinoCd = 0;
+function enterCasino() {
+    if (!casinoBuilt) buildCasinoHall();
+    sfx(260, 0.2, "triangle", 0.08, 1.5); setTimeout(() => sfx(390, 0.3, "triangle", 0.07, 1.4), 120);
+    fadeTo(() => {
+        player.pos.set(CSX, 1.7, CS_Z0 + 2.2); player.vel.set(0, 0, 0); player.yaw = Math.PI; player.pitch = -0.05;
+        csIn = true; casinoCd = 1.5;
+        if (!save.casino.visits) toast("Welcome to the Casino! Nothing can hurt you in here. Walk up to a game and press F.", "rare");
+        save.casino.visits = (save.casino.visits || 0) + 1;
+    });
+}
+function leaveCasino() {
+    const c = casino, face = Math.atan2(-c.x, -c.z), dx = Math.sin(face), dz = Math.cos(face);
+    fadeTo(() => {
+        const x = c.x + dx * 13.5, z = c.z + dz * 13.5;
+        player.pos.set(x, groundY(x, z) + 1.7, z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(-dx, -dz); player.pitch = 0;
+        csIn = false; casinoCd = 1.5; CS.auto = false;
+        writeSave();
+    });
+}
+function clampCasino(p) {
+    p.x = clamp(p.x, CS_X0 + 0.6, CS_X1 - 0.6); p.z = clamp(p.z, CS_Z0 + 0.6, CS_Z1 - 0.6);
+    if (p.x < CS_X0 + 3.0 && p.z > SLOT_Z[0] - 1.5 && p.z < SLOT_Z[5] + 1.5) p.x = CS_X0 + 3.0; // the slot machines
+    if (p.x > BAR.x0 - 0.5 && p.z > BAR.z0 - 0.4 && p.z < BAR.z1 + 0.4) p.x = BAR.x0 - 0.5; // the bar counter
+    for (const c of csCircles) { const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), m = c.r + 0.45; if (d < m && d > 0.001) { p.x = c.x + dx / d * m; p.z = c.z + dz / d * m; } }
+}
+function nearestCasino() {
+    const px = player.pos.x, pz = player.pos.z;
+    for (let i = 0; i < SLOT_Z.length; i++) if (px < CS_X0 + 4.6 && Math.abs(pz - SLOT_Z[i]) < 1.8) return { k: "cslot", i };
+    if (Math.hypot(px - ROUL.x, pz - ROUL.z) < 4.9) return { k: "croul" };
+    if (Math.hypot(px - BJ.x, pz - BJ.z) < 4.6) return { k: "cbj" };
+    if (Math.hypot(px - WHEEL_AT.x, pz - (WHEEL_AT.z - 2)) < 3.8) return { k: "cwheel" };
+    if (px > BAR.x0 - 2.6 && pz > BAR.z0 - 0.5 && pz < BAR.z1 + 0.5) return { k: "cbar" };
+    return null;
+}
+const CS_PROMPTS = { cslot: () => "[F] Play the slot machine", croul: () => "[F] Play roulette", cbj: () => "[F] Play blackjack", cwheel: () => (save.casino.wheelDay !== save.day ? "[F] Spin the Wheel of Fortune (FREE today!)" : "[F] Spin the Wheel of Fortune"), cbar: () => "[F] Order a drink" };
+function casinoInteract(n) {
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    if (n.k === "cslot") { CS.slot = n.i; openCasino("slots", pick(["Pull the lever, hotshot.", "Three sevens. That's all you need.", "This one's been running hot all night."])); }
+    else if (n.k === "croul") openCasino("roulette", pick(["Place your bets.", "Red or black? Trust your gut.", "No more bets... after you bet."]));
+    else if (n.k === "cbj") openCasino("blackjack", pick(["Twenty-one. Don't go over.", "The house stands on seventeen.", "Feeling lucky? Sit down."]));
+    else if (n.k === "cwheel") openCasino("wheel", pick(["Round and round she goes...", "One free spin a day. Everybody wins something. Mostly."]));
+    else if (n.k === "cbar") openCasino("bar", pick(["What'll it be?", "On the rocks?", "These drinks do more than taste good."]));
+}
+
+// ---- the game panel ----
+const CS = { game: null, busy: false, auto: false, slot: 0, bj: null, roulPick: null, roulHist: [], roulAng: 0, wheelAng: -Math.PI / 2 };
+const CHIPS = [100, 1000, 10000, 100000, 1000000, 10000000];
+const chipLbl = v => (v >= 1e6 ? v / 1e6 + "M" : v >= 1e3 ? v / 1e3 + "K" : String(v));
+const curBet = () => Math.max(1, save.csBet || 1000);
+const CS_TITLE = { slots: "LUCKY 7s SLOTS", roulette: "ROULETTE", blackjack: "BLACKJACK", wheel: "WHEEL OF FORTUNE", bar: "THE BAR" };
+function openCasino(game, say) {
+    CS.game = game; CS.auto = false;
+    $("csTitle").textContent = CS_TITLE[game];
+    $("csSay").textContent = say ? "“" + say + "”" : "";
+    $("csMsg").innerHTML = ""; $("csMsg").className = "";
+    renderCasinoGame();
+    openPanel("casino");
+}
+function csMsg(html, cls = "") { const m = $("csMsg"); m.innerHTML = html; m.className = cls; if (cls) { m.classList.remove("pop"); void m.offsetWidth; m.classList.add("pop"); } }
+function renderBetRow() {
+    if (CS.game === "wheel" || CS.game === "bar") { $("csBet").innerHTML = ""; return; }
+    const b = curBet();
+    $("csBet").innerHTML = `<span class="lbl">BET</span>` + CHIPS.map(v => `<button class="chip ${b === v ? "on" : ""} c${v}" data-chip="${v}" ${save.money < v && b !== v ? "disabled" : ""}>${chipLbl(v)}</button>`).join("") + `<button class="chip max" data-chip="max" ${save.money < 1 ? "disabled" : ""}>MAX</button><span class="betv">${money(b)}</span>`;
+}
+function renderCasinoGame() {
+    const G = $("csGame");
+    if (CS.game === "slots") {
+        G.innerHTML = `<div class="slotm"><div class="slotTop">★ LUCKY 7s ★ <small>MACHINE ${CS.slot + 1}</small></div>
+          <div class="reels">${[0, 1, 2].map(k => `<div class="reel"><div class="strip" id="strip${k}">${stripHtml([SYMS[(k * 2) % 6], slotMachines[CS.slot] ? slotMachines[CS.slot].syms[k] : SYMS[k], SYMS[(k + 3) % 6]])}</div></div>`).join("")}<div class="payline"></div></div>
+          <div class="paytable"><span><b class="s7">7 7 7</b> ×100</span><span><b class="sBAR">BAR</b>×3 ×25</span><span><b class="sstar">★★★</b> ×12</span><span><b class="sdia">♦♦♦</b> ×6</span><span><b class="shrt">♥♥♥</b> ×3</span><span><b class="sclb">♣♣♣</b> ×2</span><span>any pair ×1</span></div></div>
+          <div class="csActions"><button class="csbtn big" data-cs="spin">SPIN <kbd>Space</kbd></button><button class="csbtn" data-cs="auto">AUTO: ${CS.auto ? "ON" : "OFF"}</button></div>`;
+    } else if (CS.game === "blackjack") {
+        G.innerHTML = `<div class="bjTable"><div class="bjLbl">DEALER <b id="bjDv"></b></div><div class="hand" id="bjDealer"></div><div class="bjMid">BLACKJACK PAYS 3 TO 2 · DEALER STANDS ON 17</div><div class="hand" id="bjYou"></div><div class="bjLbl">YOU <b id="bjYv"></b></div></div><div class="csActions" id="bjAct"></div>`;
+        renderBJ();
+    } else if (CS.game === "roulette") {
+        const nb = n => `<button class="rn ${CS.roulPick === "n" + n ? "on" : ""}" data-rb="n${n}" style="background:${numCol(n)}">${n}</button>`;
+        let grid = "";
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 12; c++) grid += nb(c * 3 + 3 - r);
+        const ob = (k, t, cls = "") => `<button class="rb ${cls} ${CS.roulPick === k ? "on" : ""}" data-rb="${k}">${t}</button>`;
+        G.innerHTML = `<div class="roulWrap"><canvas id="roulC" width="300" height="300"></canvas>
+          <div class="roulBets"><div class="rzero">${nb(0)}</div><div class="numGrid">${grid}</div>
+          <div class="outside">${ob("red", "RED ×2", "red")}${ob("black", "BLACK ×2", "black")}${ob("odd", "ODD ×2")}${ob("even", "EVEN ×2")}${ob("low", "1-18 ×2")}${ob("high", "19-36 ×2")}${ob("d1", "1st 12 ×3")}${ob("d2", "2nd 12 ×3")}${ob("d3", "3rd 12 ×3")}</div>
+          <div class="rhint">${CS.roulPick ? "Your bet: <b>" + roulName(CS.roulPick) + "</b>" : "Pick a bet: a number (×36) or an outside bet"}</div></div></div>
+          <div class="roulHist">LAST: ${CS.roulHist.map(n => `<span style="background:${numCol(n)}">${n}</span>`).join("") || "—"}</div>
+          <div class="csActions"><button class="csbtn big" data-cs="rspin" ${CS.roulPick ? "" : "disabled"}>SPIN <kbd>Space</kbd></button></div>`;
+        drawRoulette($("roulC").getContext("2d"), 300, CS.roulAng);
+    } else if (CS.game === "wheel") {
+        const free = save.casino.wheelDay !== save.day;
+        G.innerHTML = `<div class="wheelWrap"><canvas id="wheelC" width="340" height="340"></canvas>
+          <div class="wheelInfo"><p>Land on a multiplier to win that many times <b>${money(wheelBase())}</b>.</p><p><b class="gold">JACKPOT</b> pays ${money(wheelBase() * 8)}. LUCKY and SWIFT give a 4-minute buff, MATS gives a pile of materials.</p>
+          <p>${free ? '<b class="green">Your free spin for today is ready!</b>' : "Free spin used today. Come back tomorrow (in-game)."}</p></div></div>
+          <div class="csActions"><button class="csbtn big" data-cs="wspin">${free ? "FREE SPIN" : "SPIN · " + money(wheelPrice())} <kbd>Space</kbd></button></div>`;
+        drawWheel($("wheelC").getContext("2d"), 340, CS.wheelAng);
+    } else if (CS.game === "bar") {
+        G.innerHTML = `<div class="barList">${DRINKS.map((d, i) => `<div class="drink" data-drink="${i}"><b>${d.n}</b><small>${d.d}</small><span>${d.p ? money(d.p * drinkBase()) : "FREE"}</span></div>`).join("")}</div>`;
+    }
+    renderBetRow();
+    $("csFoot").textContent = `Casino total: ${save.casino.net >= 0 ? "+" : "-"}${money(Math.abs(save.casino.net || 0))} overall · biggest win ${money(save.casino.big || 0)} · F or Esc to leave the table`;
+}
+const stripHtml = syms => syms.map(s => `<div class="sym ${symCls(s)}">${s}</div>`).join("");
+const symCls = s => ({ "7": "s7", "BAR": "sBAR", "★": "sstar", "♦": "sdia", "♥": "shrt", "♣": "sclb" })[s];
+function takeBet() {
+    const b = curBet();
+    if (save.money < b) { csMsg("Not enough cash for that bet.", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return 0; }
+    save.money -= b; save.casino.plays = (save.casino.plays || 0) + 1; save.casino.net = (save.casino.net || 0) - b;
+    return b;
+}
+function payOut(amount, bet) {
+    if (amount > 0) { save.money += amount; save.casino.net += amount; }
+    const profit = amount - bet;
+    if (profit > (save.casino.big || 0)) save.casino.big = profit;
+    if (amount >= bet * 10) { coinRain(60); flash = 0.5; jingle(true); }
+    else if (amount > bet) { coinRain(18); jingle(false); }
+    writeSave();
+}
+function jingle(big) { const notes = big ? [523, 659, 784, 1047, 784, 1047, 1319] : [659, 784, 1047]; notes.forEach((f, k) => setTimeout(() => sfx(f, 0.18, "triangle", 0.1, 1.02), k * 110)); }
+function coinRain(n) {
+    const box = $("floaters");
+    for (let i = 0; i < n; i++) { const c = document.createElement("div"); c.className = "coin"; c.style.left = Math.random() * 100 + "vw"; c.style.animationDelay = Math.random() * 0.6 + "s"; c.style.animationDuration = 1.2 + Math.random() * 0.9 + "s"; box.appendChild(c); setTimeout(() => c.remove(), 3000); }
+}
+
+// ---- slots ----
+const SLOT_ODDS = [["7", 0.002, 100], ["BAR", 0.006, 25], ["★", 0.012, 12], ["♦", 0.02, 6], ["♥", 0.035, 3], ["♣", 0.05, 2]];
+function rollSlots() {
+    let r = Math.random();
+    for (const [s, p, m] of SLOT_ODDS) { if (r < p) return { syms: [s, s, s], mult: m, jack: s === "7" }; r -= p; }
+    if (r < 0.12) { const s = SYMS[Math.floor(Math.random() * 6)]; let o; do o = SYMS[Math.floor(Math.random() * 6)]; while (o === s); const pos = Math.floor(Math.random() * 3), syms = [s, s, s]; syms[pos] = o; return { syms, mult: 1 }; }
+    const bag = SYMS.slice().sort(() => Math.random() - 0.5);
+    return { syms: bag.slice(0, 3), mult: 0 };
+}
+function spinSlots() {
+    if (CS.busy) return;
+    const bet = takeBet(); if (!bet) { CS.auto = false; return; }
+    CS.busy = true; renderBetRow();
+    const res = rollSlots(), sm = slotMachines[CS.slot];
+    if (sm) { sm.spin = 2.1; sm.result = res.syms; }
+    csMsg("Spinning...", "");
+    const SH = 84;
+    for (let k = 0; k < 3; k++) {
+        const strip = $("strip" + k); if (!strip) continue;
+        const syms = []; for (let j = 0; j < 22 + k * 6; j++) syms.push(SYMS[Math.floor(Math.random() * 6)]);
+        syms.push(res.syms[k], SYMS[Math.floor(Math.random() * 6)]);
+        strip.style.transition = "none"; strip.style.transform = "translateY(0)"; strip.innerHTML = stripHtml(syms);
+        void strip.offsetWidth;
+        strip.style.transition = `transform ${1.2 + k * 0.45}s cubic-bezier(.2,.7,.25,1.02)`;
+        strip.style.transform = `translateY(${-(syms.length - 3) * SH}px)`;
+        setTimeout(() => sfx(180 + k * 40, 0.09, "square", 0.08, 0.7), (1.2 + k * 0.45) * 1000);
+    }
+    for (let t = 0; t < 18; t++) setTimeout(() => sfx(900 + Math.random() * 300, 0.03, "square", 0.025, 1), t * 100);
+    setTimeout(() => {
+        CS.busy = false;
+        const win = Math.round(bet * res.mult);
+        payOut(win, bet);
+        if (sm) sm.win = res.mult >= 2 ? 3 : 0;
+        if (res.jack) { save.casino.jack = (save.casino.jack || 0) + 1; csMsg(`★ JACKPOT! ★ +${money(win)}`, "jack"); toast(`JACKPOT! You won ${money(win)} on the slots!`, "cash"); }
+        else if (res.mult > 1) csMsg(`WIN! +${money(win)}`, "win");
+        else if (res.mult === 1) csMsg(`A pair: your ${money(bet)} back.`, "push");
+        else csMsg(`No luck. -${money(bet)}`, "lose");
+        if (panel === "casino" && CS.game === "slots") { renderBetRow(); $("csFoot").textContent = `Casino total: ${save.casino.net >= 0 ? "+" : "-"}${money(Math.abs(save.casino.net))} overall · biggest win ${money(save.casino.big || 0)} · F or Esc to leave the table`; }
+        if (CS.auto && panel === "casino" && CS.game === "slots") setTimeout(() => { if (CS.auto && panel === "casino" && CS.game === "slots") spinSlots(); }, 700);
+    }, (1.2 + 2 * 0.45) * 1000 + 150);
+}
+
+// ---- blackjack ----
+const SUITS = ["♠", "♥", "♦", "♣"], RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+const drawCard = () => ({ r: RANKS[Math.floor(Math.random() * 13)], s: SUITS[Math.floor(Math.random() * 4)] });
+function handVal(h) { let v = 0, aces = 0; for (const c of h) { if (c.r === "A") { v += 11; aces++; } else v += ["J", "Q", "K"].includes(c.r) ? 10 : +c.r; } while (v > 21 && aces) { v -= 10; aces--; } return v; }
+const cardHtml = (c, hidden, k) => hidden ? `<div class="pcard back" style="animation-delay:${k * 0.08}s"></div>` : `<div class="pcard ${c.s === "♥" || c.s === "♦" ? "red" : ""}" style="animation-delay:${k * 0.08}s"><b>${c.r}</b><i>${c.s}</i><b class="br">${c.r}</b></div>`;
+function renderBJ() {
+    const b = CS.bj, act = $("bjAct"); if (!act) return;
+    if (!b) { $("bjDealer").innerHTML = ""; $("bjYou").innerHTML = ""; $("bjDv").textContent = ""; $("bjYv").textContent = ""; act.innerHTML = `<button class="csbtn big" data-cs="deal">DEAL <kbd>Space</kbd></button>`; return; }
+    const hideHole = b.phase === "play";
+    $("bjDealer").innerHTML = b.d.map((c, k) => cardHtml(c, hideHole && k === 1, k)).join("");
+    $("bjYou").innerHTML = b.p.map((c, k) => cardHtml(c, false, k)).join("");
+    $("bjDv").textContent = hideHole ? handVal([b.d[0]]) + " + ?" : handVal(b.d);
+    $("bjYv").textContent = handVal(b.p);
+    act.innerHTML = b.phase === "play"
+        ? `<button class="csbtn big" data-cs="hit">HIT <kbd>Space</kbd></button><button class="csbtn big" data-cs="stand">STAND <kbd>S</kbd></button>${b.p.length === 2 && save.money >= b.bet ? `<button class="csbtn" data-cs="double">DOUBLE <kbd>D</kbd></button>` : ""}`
+        : b.phase === "dealer" ? `<button class="csbtn" disabled>DEALER'S TURN...</button>` : `<button class="csbtn big" data-cs="deal">DEAL AGAIN <kbd>Space</kbd></button>`;
+}
+function bjDeal() {
+    if (CS.bj && CS.bj.phase !== "done") return;
+    const bet = takeBet(); if (!bet) return;
+    CS.bj = { bet, p: [drawCard(), drawCard()], d: [drawCard(), drawCard()], phase: "play" };
+    sfx(1400, 0.04, "square", 0.04, 0.7); setTimeout(() => sfx(1300, 0.04, "square", 0.04, 0.7), 120);
+    csMsg("", ""); renderBetRow();
+    const pv = handVal(CS.bj.p), dv = handVal(CS.bj.d);
+    if (pv === 21 || dv === 21) { bjFinish(); return; }
+    renderBJ();
+}
+function bjHit() {
+    const b = CS.bj; if (!b || b.phase !== "play") return;
+    b.p.push(drawCard()); sfx(1400, 0.04, "square", 0.04, 0.7);
+    if (handVal(b.p) > 21) { bjFinish(); return; }
+    if (handVal(b.p) === 21) { bjStand(); return; }
+    renderBJ();
+}
+function bjDouble() {
+    const b = CS.bj; if (!b || b.phase !== "play" || b.p.length !== 2 || save.money < b.bet) return;
+    save.money -= b.bet; save.casino.net -= b.bet; b.bet *= 2;
+    b.p.push(drawCard()); sfx(1400, 0.04, "square", 0.04, 0.7);
+    if (handVal(b.p) > 21) bjFinish(); else bjStand();
+}
+function bjStand() {
+    const b = CS.bj; if (!b || b.phase !== "play") return;
+    b.phase = "dealer"; renderBJ();
+    const step = () => {
+        if (handVal(b.d) < 17) { b.d.push(drawCard()); sfx(1300, 0.04, "square", 0.04, 0.7); if (panel === "casino" && CS.game === "blackjack") renderBJ(); setTimeout(step, 650); }
+        else bjFinish();
+    };
+    setTimeout(step, 600);
+}
+function bjFinish() {
+    const b = CS.bj; b.phase = "done";
+    const pv = handVal(b.p), dv = handVal(b.d), pbj = pv === 21 && b.p.length === 2, dbj = dv === 21 && b.d.length === 2;
+    let pay = 0, msg, cls;
+    if (pv > 21) { msg = `BUST with ${pv}. -${money(b.bet)}`; cls = "lose"; }
+    else if (pbj && !dbj) { pay = Math.round(b.bet * 2.5); msg = `BLACKJACK! +${money(pay)}`; cls = "jack"; }
+    else if (dbj && !pbj) { msg = `Dealer has blackjack. -${money(b.bet)}`; cls = "lose"; }
+    else if (dv > 21) { pay = b.bet * 2; msg = `Dealer busts! +${money(pay)}`; cls = "win"; }
+    else if (pv > dv) { pay = b.bet * 2; msg = `You win, ${pv} to ${dv}! +${money(pay)}`; cls = "win"; }
+    else if (pv === dv) { pay = b.bet; msg = `Push at ${pv}. Bet returned.`; cls = "push"; }
+    else { msg = `Dealer wins, ${dv} to ${pv}. -${money(b.bet)}`; cls = "lose"; }
+    payOut(pay, b.bet);
+    if (panel === "casino" && CS.game === "blackjack") { renderBJ(); csMsg(msg, cls); renderBetRow(); }
+    else toast("Blackjack: " + msg, pay > b.bet ? "cash" : "");
+}
+
+// ---- roulette ----
+function roulName(k) { return k[0] === "n" ? "number " + k.slice(1) : { red: "RED", black: "BLACK", odd: "ODD", even: "EVEN", low: "1-18", high: "19-36", d1: "1st 12", d2: "2nd 12", d3: "3rd 12" }[k]; }
+function roulPays(k, n) {
+    if (k[0] === "n") return +k.slice(1) === n ? 36 : 0;
+    if (n === 0) return 0;
+    const ok = { red: RED_N.has(n), black: !RED_N.has(n), odd: n % 2 === 1, even: n % 2 === 0, low: n <= 18, high: n >= 19, d1: n <= 12, d2: n > 12 && n <= 24, d3: n > 24 }[k];
+    return ok ? (k[0] === "d" ? 3 : 2) : 0;
+}
+function spinRoulette() {
+    if (CS.busy || !CS.roulPick) return;
+    const bet = takeBet(); if (!bet) return;
+    CS.busy = true; renderBetRow();
+    const pick = CS.roulPick, idx = Math.floor(Math.random() * 37), n = WHEEL_ORDER[idx], seg = (Math.PI * 2) / 37;
+    const start = CS.roulAng, want = -Math.PI / 2 - (idx + 0.5) * seg, diff = ((want - start) % (Math.PI * 2) + Math.PI * 4) % (Math.PI * 2), end = start + Math.PI * 8 + diff;
+    const t0 = performance.now(), T = 4600, c = $("roulC");
+    csMsg("No more bets...", "");
+    if (roul3D) roul3D.speed = 6;
+    let lastTick = 0;
+    const tick = now => {
+        const u = Math.min(1, (now - t0) / T), e = 1 - Math.pow(1 - u, 3);
+        CS.roulAng = start + (end - start) * e;
+        const ball = -Math.PI / 2 + Math.PI * 12 * (1 - e) * -1, ballR = 300 / 2 - 14 - Math.max(0, (u - 0.6) / 0.4) * 30;
+        if (c && c.isConnected) drawRoulette(c.getContext("2d"), 300, CS.roulAng, ball, ballR);
+        if (now - lastTick > 60 + u * 260) { lastTick = now; sfx(2200 + Math.random() * 400, 0.02, "square", 0.02 * (1 - u * 0.6), 1); }
+        if (u < 1) requestAnimationFrame(tick);
+        else {
+            CS.busy = false; if (roul3D) roul3D.speed = 0.3;
+            CS.roulHist.unshift(n); CS.roulHist.length = Math.min(CS.roulHist.length, 10);
+            const m = roulPays(pick, n), win = bet * m;
+            payOut(win, bet);
+            const col = n === 0 ? "GREEN" : RED_N.has(n) ? "RED" : "BLACK";
+            if (panel === "casino" && CS.game === "roulette") {
+                renderCasinoGame();
+                csMsg(m ? `${n} ${col}! You win +${money(win)}` : `${n} ${col}. -${money(bet)}`, m >= 36 ? "jack" : m ? "win" : "lose");
+            } else toast(`Roulette: ${n} ${col}. ${m ? "+" + money(win) : "-" + money(bet)}`, m ? "cash" : "");
+        }
+    };
+    requestAnimationFrame(tick);
+}
+
+// ---- the Wheel of Fortune ----
+function spinWheel() {
+    if (CS.busy) return;
+    const free = save.casino.wheelDay !== save.day, price = wheelPrice();
+    if (!free) { if (save.money < price) { csMsg("Not enough cash for a spin.", "bad"); return; } save.money -= price; save.casino.net -= price; }
+    else save.casino.wheelDay = save.day;
+    CS.busy = true;
+    const segN = WHEEL.length, seg = (Math.PI * 2) / segN, idx = Math.floor(Math.random() * segN), W = WHEEL[idx];
+    const start = CS.wheelAng, want = -Math.PI / 2 - (idx + 0.5) * seg + (Math.random() - 0.5) * seg * 0.6, diff = ((want - start) % (Math.PI * 2) + Math.PI * 4) % (Math.PI * 2), end = start + Math.PI * 6 + diff;
+    const t0 = performance.now(), T = 5200, c = $("wheelC");
+    csMsg(free ? "Free spin! Round and round..." : "Round and round...", "");
+    let lastSeg = -1;
+    const tick = now => {
+        const u = Math.min(1, (now - t0) / T), e = 1 - Math.pow(1 - u, 3.2);
+        CS.wheelAng = start + (end - start) * e;
+        if (c && c.isConnected) drawWheel(c.getContext("2d"), 340, CS.wheelAng);
+        const sNow = Math.floor(((-Math.PI / 2 - CS.wheelAng) / seg % segN + segN * 100) % segN);
+        if (sNow !== lastSeg) { lastSeg = sNow; sfx(1500, 0.03, "square", 0.04, 0.8); }
+        if (u < 1) requestAnimationFrame(tick);
+        else { CS.busy = false; wheelPrize(W, free ? 0 : price); if (panel === "casino" && CS.game === "wheel") { const keep = $("csMsg").innerHTML, cls = $("csMsg").className; renderCasinoGame(); $("csMsg").innerHTML = keep; $("csMsg").className = cls; } }
+    };
+    requestAnimationFrame(tick);
+}
+function wheelPrize(W, paid) {
+    const B = wheelBase();
+    if (W.buff) { giveBuff(W.buff, 240); csMsg(`${BUFFS[W.buff].name}! A 4-minute buff.`, "win"); jingle(false); }
+    else if (W.mats) { const ks = isleMats(), k = ks[Math.floor(Math.random() * Math.min(ks.length, 4))], n = 25 + (save.rebirths || 0) * 15; save.mats[k] = (save.mats[k] || 0) + n; csMsg(`+${n} ${MATS[k].name}!`, "win"); jingle(false); }
+    else if (W.k > 0) { const win = Math.round(B * W.k); save.money += win; save.casino.net += win; if (win - paid > (save.casino.big || 0)) save.casino.big = win - paid; coinRain(W.jack ? 70 : 20); jingle(!!W.jack); if (W.jack) flash = 0.5; csMsg(W.jack ? `★ JACKPOT! ★ +${money(win)}` : `+${money(win)}`, W.jack ? "jack" : "win"); if (W.jack) toast(`WHEEL OF FORTUNE JACKPOT! +${money(win)}`, "cash"); }
+    else { csMsg("BUST. Better luck next spin.", "lose"); sfx(140, 0.4, "sawtooth", 0.08, 0.5); }
+    writeSave();
+}
+
+// ---- the bar ----
+const DRINKS = [
+    { n: "Lucky Cocktail", d: "LUCKY SPORE: +50% loot from trees for 4 minutes", buff: "lucky", secs: 240, p: 3 },
+    { n: "Rage Shot", d: "LUMBERLUST: hit 40% harder for 3 minutes", buff: "fury", secs: 180, p: 3 },
+    { n: "Lumberjack Espresso", d: "SWIFTROOT: run 30% faster for 4 minutes", buff: "swift", secs: 240, p: 2 },
+    { n: "Iron Stout", d: "IRONHIDE: take 40% less damage for 4 minutes", buff: "ironhide", secs: 240, p: 2 },
+    { n: "Firewater", d: "FIREPROOF: walk on lava for 3 minutes", buff: "fireproof", secs: 180, p: 2 },
+    { n: "Glass of Water", d: "Heals you to full. On the house.", heal: true, p: 0 }
+];
+const drinkBase = () => Math.round(4000 * Math.pow(2, save.rebirths || 0));
+function buyDrink(i) {
+    const d = DRINKS[i], price = d.p * drinkBase();
+    if (save.money < price) { csMsg("You can't afford that one.", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return; }
+    save.money -= price;
+    if (d.heal) { player.hp = player.maxHp; csMsg("Refreshing. Health restored.", "win"); }
+    else { giveBuff(d.buff, d.secs); csMsg(`${d.n}! ${BUFFS[d.buff].name} for ${Math.round(d.secs / 60)} minutes.`, "win"); }
+    sfx(700, 0.08, "triangle", 0.08, 1.3); setTimeout(() => sfx(500, 0.12, "sine", 0.06, 0.8), 120);
+    writeSave();
+}
+
+// ---- input inside the panel ----
+document.addEventListener("click", e => {
+    if (panel !== "casino") return;
+    const ch = e.target.closest("[data-chip]");
+    if (ch && !ch.disabled) { const v = ch.dataset.chip; save.csBet = v === "max" ? Math.max(1, Math.min(Math.floor(save.money), 1e9)) : +v; renderBetRow(); sfx(800, 0.04, "square", 0.04, 1.2); return; }
+    const rb = e.target.closest("[data-rb]");
+    if (rb && !CS.busy) { CS.roulPick = rb.dataset.rb; renderCasinoGame(); sfx(900, 0.04, "square", 0.04, 1.1); return; }
+    const dr = e.target.closest("[data-drink]");
+    if (dr) { buyDrink(+dr.dataset.drink); return; }
+    const b = e.target.closest("[data-cs]");
+    if (!b || b.disabled) return;
+    const a = b.dataset.cs;
+    if (a === "spin") spinSlots();
+    else if (a === "auto") { CS.auto = !CS.auto; b.textContent = "AUTO: " + (CS.auto ? "ON" : "OFF"); if (CS.auto && !CS.busy) spinSlots(); }
+    else if (a === "deal") bjDeal(); else if (a === "hit") bjHit(); else if (a === "stand") bjStand(); else if (a === "double") bjDouble();
+    else if (a === "rspin") spinRoulette();
+    else if (a === "wspin") spinWheel();
+});
+function casinoKey(code) {
+    if (code === "Space" || code === "Enter") {
+        if (CS.game === "slots") spinSlots();
+        else if (CS.game === "roulette") spinRoulette();
+        else if (CS.game === "wheel") spinWheel();
+        else if (CS.game === "blackjack") { if (!CS.bj || CS.bj.phase === "done") bjDeal(); else bjHit(); }
+        return true;
+    }
+    if (CS.game === "blackjack" && code === "KeyS") { bjStand(); return true; }
+    if (CS.game === "blackjack" && code === "KeyD") { bjDouble(); return true; }
+    if (code === "KeyF") { closePanel(); return true; }
+    return false;
+}
+
+// ---- inside: lights, music, the machines blinking ----
+function casinoSky() {
+    scene.background.setHex(0x14080a); scene.fog.color.setHex(0x14080a); scene.fog.near = 26; scene.fog.far = 90;
+    ambL.color.setHex(0xffd0a8); ambL.intensity = 1.25; sunL.intensity = 0.35; sunL.color.setHex(0xffc890);
+    sunMesh.visible = moonMesh.visible = false; starMat.opacity = 0; wisps.visible = false; cloudMat.opacity = 0;
+}
+const LOUNGE = [[146.8, 174.6, 220, 261.6], [196, 246.9, 293.7, 349.2], [130.8, 164.8, 196, 246.9], [110, 130.8, 164.8, 196]];
+function updateCasinoInside(dt) {
+    if (!casinoBuilt) return;
+    if (panel === "casino") { const cc = $("csCash"); if (cc) cc.textContent = money(save.money); }
+    if (!inCasino()) return;
+    updateNpcs(dt, casinoNpcs.filter(p => !p.patron));
+    for (const p of casinoNpcs) if (p.patron) p.torso.scale.y = 1 + Math.sin(time * 2 + p.ph) * 0.015;
+    for (const s of csSigns) s.material.opacity = Math.random() < 0.006 ? 0.4 : 0.95;
+    for (const L of csLights) L.intensity = L.userData.b * (0.96 + Math.random() * 0.08);
+    if (roul3D) { roul3D.ang += dt * roul3D.speed; roul3D.disc.rotation.z = roul3D.ang; }
+    if (wheel3D) wheel3D.disc.rotation.z = -(CS.wheelAng + Math.PI / 2);
+    for (const sm of slotMachines) {
+        if (sm.spin > 0) {
+            sm.spin -= dt; sm.t -= dt;
+            if (sm.t <= 0) { sm.t = 0.06; sm.syms = sm.syms.map(() => SYMS[Math.floor(Math.random() * 6)]); drawSlotScreen(sm); }
+            if (sm.spin <= 0 && sm.result) { sm.syms = sm.result.slice(); drawSlotScreen(sm); }
+        } else if ((sm.t -= dt) <= 0) { sm.t = 2 + Math.random() * 4; sm.syms = sm.syms.map(() => SYMS[Math.floor(Math.random() * 6)]); drawSlotScreen(sm); } // attract mode
+        if (sm.win > 0) sm.win -= dt;
+        const blink = sm.win > 0 ? (Math.floor(time * 10) % 2 ? 0xffffff : 0xff3a3a) : [0xffd040, 0xff5ad8, 0x5ad8ff][Math.floor(time * 1.5 + sm.i) % 3];
+        sm.topM.color.setHex(blink);
+    }
+    // a soft lounge loop, only while you're inside
+    if (actx && (csMusicT -= dt) <= 0) {
+        csMusicT = 0.42;
+        const ch = LOUNGE[Math.floor(csChord / 8) % 4], k = csChord % 8; csChord++;
+        if (k === 0) sfx(ch[0] / 2, 1.4, "sine", 0.05, 1);
+        if (k % 2 === 0) sfx(ch[1 + (k / 2) % 3] * 2, 0.35, "triangle", 0.018, 1);
+        if (k === 3 || k === 6) sfx(ch[3] * 2, 0.5, "sine", 0.014, 1);
+    }
+    casinoCd -= dt;
+    if (casinoCd <= 0 && !caveFx && state === "playing" && player.pos.z < CS_Z0 + 1.1 && Math.abs(player.pos.x - CSX) < 2.4) leaveCasino();
+}
+
 // a save that's already on another island starts there (this must run after everything above is defined)
 if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
 placeEnchTable();
@@ -8140,7 +8761,7 @@ if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1,
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
-    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => "THE CASINO · COMING SOON  [F] knock", bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
+    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => "[F] Enter the Casino", ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
@@ -8167,7 +8788,7 @@ function hud(dt) {
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
     if (isle >= 2) { const mh = isleMats().filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
     else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    el.zone.textContent = inCasino() ? "THE CASINO · SAFE" : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
     { // active potions and blessings, with time left
         const bh = Object.keys(BUFFS).filter(buffOn).map(k => `<span style="color:${BUFFS[k].col};border-color:${BUFFS[k].col}">${BUFFS[k].icon} ${BUFFS[k].name} ${mmss(buffLeft(k))}</span>`).join("") + (save.phoenix > 0 ? `<span style="color:#ffb060;border-color:#ffb060">🔥 PHOENIX ×${save.phoenix}</span>` : "");
         const be = $("buffs"); if (be.dataset.h !== bh) { be.innerHTML = bh; be.dataset.h = bh; }
@@ -8269,7 +8890,7 @@ if (DEBUG) window.__ts4 = {
     setState(s) { state = s; renderMenu(); },
     interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, enterIsle4, startFight4, fight4, startEruption, getKing: () => king, VOLC, syncKing, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
     // the dev panel (dev.js) drives the game through these
-    get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
+    enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
     FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z }, FERRYMAN3: { x: FERRYMAN3.x, z: FERRYMAN3.z },
     setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
     freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)

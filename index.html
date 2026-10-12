@@ -158,6 +158,67 @@
   .rtile { background: rgba(255,255,255,.04); border: 1px dashed rgba(255,208,64,.35); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; }
   .rtile b { font: 900 38px "Segoe UI Black", sans-serif; color: rgba(255,208,64,.4); } .rtile small { font: 11px Consolas; opacity: .6; padding: 0 6px; }
   .rtile.got { border: none; background-image: url(assets/relic.jpg); background-size: 200% 300%; animation: pop .4s; }
+  #panelCasino { width: min(900px, 96vw); max-height: 94vh; overflow-y: auto; border: 2px solid #d8a840; background: radial-gradient(ellipse at top, rgba(90,14,24,.96), rgba(20,6,10,.97) 70%); box-shadow: 0 0 40px rgba(255,180,60,.25), 0 20px 60px rgba(0,0,0,.7); }
+  #panelCasino h2 { color: #ffd040; letter-spacing: 6px; text-shadow: 0 0 14px rgba(255,200,60,.6); padding-right: 170px; }
+  #csCash { color: #6dffa0; font-size: 20px; letter-spacing: 1px; margin-left: 10px; }
+  #csSay { opacity: .8; font-style: italic; margin: 2px 0 12px; }
+  #csGame { min-height: 200px; }
+  .csActions { display: flex; gap: 10px; justify-content: center; margin: 14px 0 6px; flex-wrap: wrap; }
+  .csbtn { background: linear-gradient(#3a1a0a, #200c06); color: #ffe0a0; border: 2px solid #d8a840; border-radius: 10px; padding: 10px 22px; font: 800 15px Consolas; letter-spacing: 2px; cursor: pointer; }
+  .csbtn:hover:not(:disabled) { background: linear-gradient(#5a2a0e, #301206); box-shadow: 0 0 16px rgba(255,200,60,.5); }
+  .csbtn.big { font-size: 20px; padding: 12px 34px; background: linear-gradient(#c8901a, #8a5a0a); color: #2a1200; }
+  .csbtn:disabled { opacity: .45; cursor: default; }
+  .csbtn kbd { font-size: 10px; opacity: .7; margin-left: 6px; }
+  #csBet { display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  #csBet .lbl { font: 800 12px Consolas; letter-spacing: 3px; color: #d8a840; margin-right: 4px; }
+  .chip { width: 52px; height: 52px; border-radius: 50%; border: 4px dashed rgba(255,255,255,.75); font: 900 13px Consolas; color: #fff; cursor: pointer; box-shadow: 0 3px 0 rgba(0,0,0,.5); background: #555; }
+  .chip.c100 { background: #e8e0d0; color: #222; } .chip.c1000 { background: #c8202a; } .chip.c10000 { background: #1a4ac8; } .chip.c100000 { background: #1a8a3a; } .chip.c1000000 { background: #141418; } .chip.c10000000 { background: #8a2ad8; } .chip.max { background: #d8a840; color: #2a1200; }
+  .chip.on { transform: translateY(-5px); box-shadow: 0 0 0 3px #ffd040, 0 8px 14px rgba(0,0,0,.5); } .chip:disabled { opacity: .3; cursor: default; }
+  .betv { font: 800 18px Consolas; color: #ffd040; margin-left: 10px; min-width: 120px; }
+  #csMsg { text-align: center; font: 900 22px "Segoe UI Black", sans-serif; min-height: 34px; margin-top: 10px; letter-spacing: 1px; }
+  #csMsg.win { color: #6dffa0; text-shadow: 0 0 14px rgba(109,255,160,.6); } #csMsg.lose { color: #ff8a7a; } #csMsg.push { color: #e8dcff; } #csMsg.bad { color: #ff8a7a; font-size: 16px; }
+  #csMsg.jack { color: #ffd040; font-size: 34px; text-shadow: 0 0 24px #ffb020, 0 3px 0 #000; animation: jackGlow .5s infinite alternate; }
+  #csMsg.pop { animation: csPop .35s; } #csMsg.jack.pop { animation: csPop .35s, jackGlow .5s .35s infinite alternate; }
+  @keyframes csPop { from { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.12); } to { transform: scale(1); opacity: 1; } }
+  @keyframes jackGlow { from { filter: brightness(1); } to { filter: brightness(1.6); } }
+  .slotm { background: linear-gradient(#3a0a5a, #14041e); border: 3px solid #d8a840; border-radius: 16px; padding: 14px; max-width: 560px; margin: 0 auto; box-shadow: inset 0 0 30px rgba(0,0,0,.6); }
+  .slotTop { text-align: center; font: 900 26px "Segoe UI Black", sans-serif; color: #ffd040; letter-spacing: 6px; text-shadow: 0 0 16px #ff8a20; margin-bottom: 10px; } .slotTop small { display: block; font: 700 11px Consolas; letter-spacing: 3px; color: #e8dcff; opacity: .6; text-shadow: none; }
+  .reels { position: relative; display: flex; gap: 10px; justify-content: center; }
+  .reel { width: 130px; height: 252px; overflow: hidden; background: linear-gradient(#cfc6b0, #fffaf0 30%, #fffaf0 70%, #cfc6b0); border-radius: 10px; border: 3px solid #8a6a2a; box-shadow: inset 0 10px 18px rgba(0,0,0,.45), inset 0 -10px 18px rgba(0,0,0,.45); }
+  .strip { will-change: transform; }
+  .sym { height: 84px; display: flex; align-items: center; justify-content: center; font: 900 58px "Segoe UI Symbol", Consolas, sans-serif; }
+  .s7 { color: #e8202a; text-shadow: 0 3px 0 #6a0008; } .sBAR { font: 900 26px Consolas; } .sBAR::before { content: ""; } .sym.sBAR { color: #fff; } .sym.sBAR { text-shadow: none; }
+  .sym.sBAR { background: radial-gradient(#111 55%, transparent 56%); }
+  .sstar { color: #e8a800; } .sdia { color: #1a9ad8; } .shrt { color: #e83a8a; } .sclb { color: #1aa84a; }
+  .payline { position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1px; background: rgba(255,40,40,.7); box-shadow: 0 0 10px #ff2a2a; pointer-events: none; }
+  .paytable { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; margin-top: 12px; font: 700 12px Consolas; color: #e8dcff; }
+  .paytable b { font-size: 15px; margin-right: 4px; } .paytable .sBAR { background: #111; color: #fff; padding: 0 4px; border-radius: 3px; font-size: 11px; }
+  .bjTable { background: radial-gradient(ellipse at center, #1a7a3a, #0a4a20 75%); border: 6px solid #5a3214; border-radius: 0 0 220px 220px / 0 0 120px 120px; padding: 14px 20px 34px; min-height: 290px; box-shadow: inset 0 0 40px rgba(0,0,0,.5); }
+  .bjLbl { text-align: center; font: 800 13px Consolas; letter-spacing: 3px; color: #e8d8a0; } .bjLbl b { color: #fff; font-size: 18px; margin-left: 6px; }
+  .bjMid { text-align: center; font: 900 13px Consolas; letter-spacing: 2px; color: rgba(232,216,160,.55); margin: 8px 0; }
+  .hand { display: flex; gap: 8px; justify-content: center; min-height: 104px; margin: 6px 0; }
+  .pcard { position: relative; width: 70px; height: 100px; background: #fffef6; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,.45); color: #141418; animation: deal .3s backwards; display: flex; align-items: center; justify-content: center; }
+  .pcard.red { color: #c8202a; } .pcard b { position: absolute; top: 4px; left: 7px; font: 900 18px Consolas; } .pcard b.br { top: auto; left: auto; bottom: 4px; right: 7px; transform: rotate(180deg); }
+  .pcard i { font: normal 40px "Segoe UI Symbol", sans-serif; }
+  .pcard.back { background: repeating-linear-gradient(45deg, #a01a2a 0 6px, #7a0e1c 6px 12px); border: 3px solid #fffef6; }
+  @keyframes deal { from { transform: translateY(-60px) rotate(-12deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  .roulWrap { display: flex; gap: 16px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  #roulC, #wheelC { filter: drop-shadow(0 8px 16px rgba(0,0,0,.6)); max-width: 100%; }
+  .roulBets { flex: 1; min-width: 300px; max-width: 470px; background: #0e5a2a; border: 4px solid #5a3214; border-radius: 12px; padding: 10px; }
+  .rzero { margin-bottom: 4px; } .rzero .rn { width: 100%; }
+  .numGrid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; }
+  .rn { height: 30px; border: 1px solid rgba(232,216,160,.5); border-radius: 4px; color: #fff; font: 800 12px Consolas; cursor: pointer; }
+  .rn.on, .rb.on { outline: 3px solid #ffd040; box-shadow: 0 0 12px #ffd040; position: relative; z-index: 1; }
+  .outside { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px; }
+  .rb { height: 32px; background: rgba(0,0,0,.25); color: #fff; border: 1px solid rgba(232,216,160,.5); border-radius: 6px; font: 800 12px Consolas; cursor: pointer; } .rb.red { background: #c8202a; } .rb.black { background: #141418; }
+  .rhint { margin-top: 8px; font: 12px Consolas; color: #e8d8a0; text-align: center; } .rhint b { color: #ffd040; }
+  .roulHist { text-align: center; margin-top: 10px; font: 800 12px Consolas; letter-spacing: 2px; color: #d8a840; } .roulHist span { display: inline-block; min-width: 26px; padding: 3px 4px; margin: 0 2px; border-radius: 4px; color: #fff; }
+  .wheelWrap { display: flex; gap: 20px; align-items: center; justify-content: center; flex-wrap: wrap; } .wheelInfo { max-width: 320px; font-size: 14px; line-height: 1.5; } .wheelInfo .gold { color: #ffd040; } .wheelInfo .green { color: #6dffa0; }
+  .barList { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .drink { background: rgba(255,255,255,.05); border: 1px solid rgba(216,168,64,.5); border-radius: 10px; padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; } .drink:hover { background: rgba(255,200,90,.12); border-color: #ffd040; }
+  .drink b { color: #ffd040; font-size: 16px; } .drink small { opacity: .75; } .drink span { font: 800 14px Consolas; color: #6dffa0; }
+  .coin { position: absolute; top: -40px; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff6b0, #ffd040 40%, #b8860b); border: 2px solid #8a6a0a; animation: coinFall 1.6s linear forwards; z-index: 160; }
+  @keyframes coinFall { from { transform: translateY(0) rotateY(0); } to { transform: translateY(110vh) rotateY(720deg); } }
   #fadeBlk { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .35s; z-index: 130; } #fadeBlk.show { opacity: 1; }
   #rebirthFx { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; text-align: center; background: radial-gradient(circle, #fff6d0, #ffd860 60%, #ffb020); opacity: 0; pointer-events: none; transition: opacity 1.6s ease; }
   #rebirthFx.show { opacity: 1; pointer-events: auto; }
@@ -417,6 +478,15 @@
 </div>
 <div id="bossBar"><div class="bn"><span id="bossName">THE ELDER HEART</span> <span id="bossPh"></span></div><div class="bb"><u id="bossLag"></u><i id="bossFill"></i></div><div id="bossHp"></div></div>
 <div id="titleCard"><b id="tcBig"></b><small id="tcSmall"></small></div>
+<div id="panelCasino" class="panel">
+  <button class="xbtn" data-close>✕ LEAVE TABLE <kbd>Esc</kbd></button>
+  <h2><span id="csTitle">CASINO</span> <span id="csCash">$0</span></h2>
+  <div id="csSay"></div>
+  <div id="csGame"></div>
+  <div id="csBet"></div>
+  <div id="csMsg"></div>
+  <div class="foot" id="csFoot"></div>
+</div>
 <div id="fadeBlk"></div>
 <div id="rideCap"></div>
 <div id="rebirthFx"><div><small id="rbSmall">REBIRTH</small><b>A NEW LIFE BEGINS</b></div></div>
