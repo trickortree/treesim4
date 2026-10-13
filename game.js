@@ -30,7 +30,190 @@ const SETTINGS_KEY = "ts4_settings";
 const settings = Object.assign({ sens: 1, invert: false, fov: 75, vol: 0.8, pixel: 3, bob: true, fps: true },
     (() => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch (e) { return {}; } })());
 const saveSettings = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } };
-let SCALE = settings.pixel; // render at 1/SCALE res, CSS upscales with pixelated sampling
+let SCALE = settings.pixel; // render at 1/SCALE res, CSS upscales with pixelated sampling (RETRO)
+
+// ---------- graphics style: MODERN (sharp, lit, shadows, glow) or RETRO (the original chunky pixels) ----------
+// asked once on first launch, before the world is built; it can be changed any time in Settings
+if (settings.gfx !== "modern" && settings.gfx !== "retro") {
+    settings.gfx = await new Promise(res => {
+        const box = $("gfxPick"), cards = [...box.querySelectorAll(".gpCard")];
+        let pick = "modern", done = false;
+        const sel = g => { pick = g; cards.forEach(c => c.classList.toggle("on", c.dataset.g === g)); };
+        const go = () => {
+            if (done) return; done = true;
+            removeEventListener("keydown", key);
+            $("gpGo").textContent = "LOADING…"; box.classList.add("busy");
+            requestAnimationFrame(() => requestAnimationFrame(() => res(pick))); // let "LOADING" paint before the world builds
+        };
+        const key = e => {
+            if (document.getElementById("intro")) return;
+            if (e.code === "Enter" || e.code === "Space") { e.preventDefault(); go(); }
+            if (e.code === "ArrowLeft" || e.code === "KeyA") sel("modern");
+            if (e.code === "ArrowRight" || e.code === "KeyD") sel("retro");
+        };
+        cards.forEach(c => { c.addEventListener("click", () => sel(c.dataset.g)); c.addEventListener("dblclick", () => { sel(c.dataset.g); go(); }); });
+        $("gpGo").addEventListener("click", go);
+        addEventListener("keydown", key);
+        box.classList.add("show");
+    });
+    saveSettings();
+}
+const MODERN = settings.gfx === "modern";
+// quality tiers for MODERN: render scale, anti-aliasing, shadow map, grass
+const GFXQ = {
+    // (measured on the school laptops' Radeon Vega 8: 4x MSAA was the single most expensive thing, so LOW/MEDIUM smooth edges with FXAA instead)
+    low: { rs: 0.7, msaa: 0, fxaa: 1, shadow: 0, every: 1, sr: 0, soft: 0, bloom: 1, grass: 3000, gr: 14 },
+    med: { rs: 0.75, msaa: 0, fxaa: 1, shadow: 1024, every: 3, sr: 30, soft: 0, bloom: 1, grass: 6500, gr: 19 },
+    high: { rs: 1, msaa: 4, fxaa: 0, shadow: 2048, every: 2, sr: 46, soft: 1, bloom: 1, grass: 12000, gr: 26 }
+};
+if (!GFXQ[settings.quality]) settings.quality = "med";
+const GQ = GFXQ[settings.quality];
+if (MODERN) canvas.style.imageRendering = "auto";
+const terrainMesh = []; // each island's ground mesh (grass is baked from it)
+const wtr = m => { if (MODERN) m.defines = Object.assign(m.defines || {}, { TS_WATER: "" }); return m; }; // marks a material as water
+const windy = m => { if (MODERN) m.defines = Object.assign(m.defines || {}, { TS_WIND: "" }); return m; }; // leaves that sway
+
+// shared shader inputs for every modern material
+const TSU = { tsTime: { value: 0 }, tsNoise: { value: null }, tsSunDir: { value: new THREE.Vector3(0, 1, 0) }, tsSunCol: { value: new THREE.Color() }, tsSky: { value: new THREE.Color() } };
+function makeNoiseTex() {
+    // tileable value-noise fbm: R = fine grain, G = broad patches, B = another fine layer (water ripples)
+    const N = 256, data = new Uint8Array(N * N * 4);
+    const lat = (s, f) => { const a = new Float32Array(f * f); let x = s; for (let i = 0; i < a.length; i++) { x = (x * 16807) % 2147483647; a[i] = x / 2147483647; } return a; };
+    const oct = (f, s) => {
+        const L = lat(s, f), out = new Float32Array(N * N);
+        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+            const fx = (x / N) * f, fy = (y / N) * f, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+            const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty), g = (i, j) => L[((j + f) % f) * f + ((i + f) % f)];
+            out[y * N + x] = lerp(lerp(g(x0, y0), g(x0 + 1, y0), sx), lerp(g(x0, y0 + 1), g(x0 + 1, y0 + 1), sx), sy);
+        }
+        return out;
+    };
+    const fbm = (fs, seedBase) => { const o = new Float32Array(N * N); let amp = 0.5, tot = 0; fs.forEach((f, i) => { const l = oct(f, seedBase + i * 977); for (let k = 0; k < o.length; k++) o[k] += l[k] * amp; tot += amp; amp *= 0.55; }); for (let k = 0; k < o.length; k++) o[k] /= tot; return o; };
+    const r = fbm([8, 16, 32, 64, 128], 11), g = fbm([2, 4, 8], 5003), b = fbm([4, 8, 16, 32], 90001);
+    for (let k = 0; k < N * N; k++) { data[k * 4] = clamp(r[k] * 255, 0, 255); data[k * 4 + 1] = clamp(g[k] * 255, 0, 255); data[k * 4 + 2] = clamp(b[k] * 255, 0, 255); data[k * 4 + 3] = 255; }
+    const t = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.anisotropy = 4; t.needsUpdate = true;
+    return t;
+}
+// every Lambert material gets: smooth shading, a subtle world-space surface texture, and (by define) wind or water
+function modernShader(sh) {
+    Object.assign(sh.uniforms, TSU);
+    sh.vertexShader = "#undef FLAT_SHADED\nvarying vec3 vTsW;\nvarying vec3 vTsN;\nuniform float tsTime;\n" + sh.vertexShader
+        .replace("#include <begin_vertex>", `#include <begin_vertex>
+#ifdef TS_WIND
+{ vec4 tw = modelMatrix * vec4(0.0, 0.0, 0.0, 1.0); float ph = tw.x * 0.37 + tw.z * 0.29 + (transformed.x + transformed.z) * 0.08; float k = clamp(transformed.y * 0.08, 0.0, 1.2);
+  transformed.x += (sin(tsTime * 1.6 + ph) + 0.4 * sin(tsTime * 3.7 + ph * 2.0 + transformed.y)) * 0.07 * k;
+  transformed.z += (cos(tsTime * 1.3 + ph * 1.2) + 0.4 * sin(tsTime * 4.1 + transformed.x)) * 0.06 * k; }
+#endif`)
+        .replace("#include <fog_vertex>", `#include <fog_vertex>
+{ vec4 tp = vec4(transformed, 1.0);
+#ifdef USE_INSTANCING
+  tp = instanceMatrix * tp;
+#endif
+  vTsW = (modelMatrix * tp).xyz; vTsN = normalize(mat3(modelMatrix) * objectNormal); }`);
+    sh.fragmentShader = "#undef FLAT_SHADED\nvarying vec3 vTsW;\nvarying vec3 vTsN;\nuniform sampler2D tsNoise;\nuniform float tsTime;\nuniform vec3 tsSunDir;\nuniform vec3 tsSunCol;\nuniform vec3 tsSky;\n" + sh.fragmentShader
+        .replace("#include <color_fragment>", `#include <color_fragment>
+#if !defined(TS_WATER) && !defined(TS_NODETAIL)
+{ vec3 an = abs(vTsN); float up = smoothstep(0.35, 0.75, an.y);
+  vec4 top = texture2D(tsNoise, vTsW.xz * 0.23);
+  float side = texture2D(tsNoise, (an.x > an.z ? vTsW.zy : vTsW.xy) * 0.23).r;
+  float n = mix(side, top.r, up);
+  diffuseColor.rgb *= (0.78 + 0.44 * n) * mix(1.0, 0.86 + 0.28 * texture2D(tsNoise, vTsW.xz * 0.019).g, up); }
+#endif`)
+        .replace("#include <normal_fragment_begin>", `float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;
+vec3 normal = vNormal;
+if (dot(normal, normal) < 1e-8) normal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
+else {
+  normal = normalize(normal);
+#ifdef DOUBLE_SIDED
+  normal *= faceDirection;
+#endif
+}
+vec3 nonPerturbedNormal = normal;`)
+        .replace("#include <opaque_fragment>", `#ifdef TS_WATER
+{ vec2 uv = vTsW.xz;
+  vec4 a = texture2D(tsNoise, uv * 0.035 + vec2(tsTime * 0.011, tsTime * 0.006));
+  vec4 b = texture2D(tsNoise, uv * 0.061 - vec2(tsTime * 0.008, -tsTime * 0.012));
+  vec3 wn = normalize(vec3((a.b - 0.5) * 1.4 + (b.r - 0.5), 1.0, (b.b - 0.5) * 1.4 + (a.r - 0.5)));
+  vec3 V = normalize(cameraPosition - vTsW);
+  float spec = pow(max(dot(reflect(-tsSunDir, wn), V), 0.0), 140.0) * 4.0;
+  float fres = pow(1.0 - clamp(V.y, 0.0, 1.0), 4.0);
+  outgoingLight = mix(outgoingLight, tsSky, fres * 0.6) + tsSunCol * spec + vec3(0.02, 0.04, 0.05) * (a.g - 0.5);
+  diffuseColor.a = mix(diffuseColor.a, 1.0, fres * 0.7); }
+#endif
+#include <opaque_fragment>`);
+}
+
+// post: the scene goes to a high-precision target, bright bits bleed out (bloom), then a light grade + vignette
+const FX = MODERN ? (() => {
+    const mk = (o = {}) => new THREE.WebGLRenderTarget(4, 4, Object.assign({ type: THREE.HalfFloatType, depthBuffer: false }, o));
+    const main = mk({ depthBuffer: true, samples: GQ.msaa, type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace }), b1 = mk(), b2 = mk();
+    const fsScene = new THREE.Scene(), fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const tri = new THREE.BufferGeometry(); tri.setAttribute("position", new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+    const quad = new THREE.Mesh(tri); quad.frustumCulled = false; fsScene.add(quad);
+    const VS = "varying vec2 vUv; void main(){ vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }";
+    const pass = (fs, uniforms) => new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: fs, uniforms, depthTest: false, depthWrite: false });
+    const bright = pass(`uniform sampler2D tSrc; uniform vec2 px; varying vec2 vUv;
+void main(){ vec3 c = (texture2D(tSrc, vUv + px * vec2(-1.0, -1.0)).rgb + texture2D(tSrc, vUv + px * vec2(1.0, -1.0)).rgb + texture2D(tSrc, vUv + px * vec2(-1.0, 1.0)).rgb + texture2D(tSrc, vUv + px * vec2(1.0, 1.0)).rgb) * 0.25;
+  float l = max(c.r, max(c.g, c.b)); gl_FragColor = vec4(c * smoothstep(0.86, 1.0, l), 1.0); }`, { tSrc: { value: main.texture }, px: { value: new THREE.Vector2() } });
+    const blur = pass(`uniform sampler2D tSrc; uniform vec2 dir; varying vec2 vUv;
+void main(){ vec3 c = texture2D(tSrc, vUv).rgb * 0.227;
+  c += (texture2D(tSrc, vUv + dir * 1.385).rgb + texture2D(tSrc, vUv - dir * 1.385).rgb) * 0.316;
+  c += (texture2D(tSrc, vUv + dir * 3.231).rgb + texture2D(tSrc, vUv - dir * 3.231).rgb) * 0.070;
+  gl_FragColor = vec4(c, 1.0); }`, { tSrc: { value: null }, dir: { value: new THREE.Vector2() } });
+    const comp = pass(`uniform sampler2D tScene; uniform sampler2D tBloom; uniform float bloom; uniform float time; uniform vec2 px; varying vec2 vUv;
+// FXAA (the compact Lottes version): finds edges by luma and blends along them
+vec3 fxaa(vec2 uv) {
+  vec3 nw = texture2D(tScene, uv + vec2(-1.0, -1.0) * px).rgb, ne = texture2D(tScene, uv + vec2(1.0, -1.0) * px).rgb;
+  vec3 sw = texture2D(tScene, uv + vec2(-1.0, 1.0) * px).rgb, se = texture2D(tScene, uv + vec2(1.0, 1.0) * px).rgb, m = texture2D(tScene, uv).rgb;
+  vec3 L = vec3(0.299, 0.587, 0.114);
+  float lnw = sqrt(dot(nw, L)), lne = sqrt(dot(ne, L)), lsw = sqrt(dot(sw, L)), lse = sqrt(dot(se, L)), lm = sqrt(dot(m, L));
+  float lmin = min(lm, min(min(lnw, lne), min(lsw, lse))), lmax = max(lm, max(max(lnw, lne), max(lsw, lse)));
+  if (lmax - lmin < max(0.04, lmax * 0.12)) return m;
+  vec2 dir = vec2(-((lnw + lne) - (lsw + lse)), (lnw + lsw) - (lne + lse));
+  float red = max((lnw + lne + lsw + lse) * 0.03125, 0.0078125), rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + red);
+  dir = clamp(dir * rcp, vec2(-8.0), vec2(8.0)) * px;
+  vec3 a = 0.5 * (texture2D(tScene, uv + dir * (1.0 / 3.0 - 0.5)).rgb + texture2D(tScene, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+  vec3 b = a * 0.5 + 0.25 * (texture2D(tScene, uv - dir * 0.5).rgb + texture2D(tScene, uv + dir * 0.5).rgb);
+  float lb = sqrt(dot(b, L));
+  return (lb < lmin || lb > lmax) ? a : b;
+}
+void main(){
+#ifdef FXAA
+  vec3 c = fxaa(vUv);
+#else
+  vec3 c = texture2D(tScene, vUv).rgb;
+#endif
+  c += texture2D(tBloom, vUv).rgb * bloom;
+  c = linearToOutputTexel(vec4(c, 1.0)).rgb;
+  float l = dot(c, vec3(0.299, 0.587, 0.114));
+  c = mix(vec3(l), c, 1.1); c = (c - 0.5) * 1.06 + 0.5;
+  vec2 d = vUv - 0.5; c *= mix(1.0, 0.74, smoothstep(0.1, 0.55, dot(d, d) * 2.0));
+  c += (fract(sin(dot(gl_FragCoord.xy + fract(time) * 61.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+  gl_FragColor = vec4(c, 1.0); }`, { tScene: { value: main.texture }, tBloom: { value: b1.texture }, bloom: { value: GQ.bloom ? 1 : 0 }, time: { value: 0 }, px: { value: new THREE.Vector2() } });
+    if (GQ.fxaa) comp.defines = { FXAA: "" };
+    const run = (m, target) => { quad.material = m; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam); };
+    let bw = 1, bh = 1;
+    return {
+        main, comp,
+        resize(w, h) { main.setSize(w, h); bw = Math.max(1, w >> 2); bh = Math.max(1, h >> 2); b1.setSize(bw, bh); b2.setSize(bw, bh); bright.uniforms.px.value.set(1 / w, 1 / h); comp.uniforms.px.value.set(1 / w, 1 / h); },
+        render(withView) {
+            renderer.setRenderTarget(main); renderer.clear();
+            renderer.render(scene, camera);
+            if (withView) { renderer.clearDepth(); renderer.render(viewScene, viewCam); }
+            if (GQ.bloom) {
+                run(bright, b1);
+                for (const s of [1, 2]) {
+                    blur.uniforms.tSrc.value = b1.texture; blur.uniforms.dir.value.set(s / bw, 0); run(blur, b2);
+                    blur.uniforms.tSrc.value = b2.texture; blur.uniforms.dir.value.set(0, s / bh); run(blur, b1);
+                }
+            }
+            comp.uniforms.time.value = TSU.tsTime.value;
+            run(comp, null);
+        }
+    };
+})() : null;
+if (MODERN) { TSU.tsNoise.value = makeNoiseTex(); THREE.MeshLambertMaterial.prototype.onBeforeCompile = modernShader; }
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x21143a);
@@ -47,8 +230,8 @@ let addTgt = null; // while set, scene.add puts new objects in this group
 let isle = 1; // 1 = Pine Island, 2 = the Highland Isle, 3 = Mooncap Isle
 let groundFn = null;
 const groundY = (x, z) => (x > 4500 ? 0 : groundFn ? groundFn(x, z) : 0); // x > 4500 is the casino's hall
-const curShoreAt = (x, z) => (isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
-const curShoreR = a => (isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
+const curShoreAt = (x, z) => (isle === 5 ? shoreAt5(x, z) : isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
+const curShoreR = a => (isle === 5 ? shoreR5(a) : isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
 
 // viewmodel (axe) gets its own scene + depth pass so it never clips into trees
 const viewScene = new THREE.Scene();
@@ -64,9 +247,11 @@ viewLamp.position.set(0.5, 0.1, 0.1);
 viewScene.add(viewLamp);
 
 function resize() {
-    const w = Math.max(160, Math.floor(innerWidth / SCALE));
-    const h = Math.max(100, Math.floor(innerHeight / SCALE));
+    const k = MODERN ? Math.min(devicePixelRatio || 1, 2) * GQ.rs : 1 / SCALE;
+    const w = Math.max(160, Math.floor(innerWidth * k));
+    const h = Math.max(100, Math.floor(innerHeight * k));
     renderer.setSize(w, h, false);
+    if (FX) FX.resize(w, h);
     camera.aspect = viewCam.aspect = w / h;
     camera.updateProjectionMatrix();
     viewCam.updateProjectionMatrix();
@@ -127,7 +312,7 @@ const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; 
 const gunPow = () => { let p = 0; (save.gunOwned || []).forEach((o, i) => { if (o) p = Math.max(p, GUNS[i].pow); }); return p; };
 const gunTier = () => (save.gunOwned || []).filter(Boolean).length * 2;
 const bestDmg = () => Math.max(AXES[bestIdx()].dmg, gunPow());
-const isleHp = () => [1, 1, 1.7, 2.2, 2.8][isle], isleRw = () => [1, 1, 1.6, 2.1, 2.8][isle], isleDm = () => [1, 1, 1.5, 1.9, 2.4][isle];
+const isleHp = () => [1, 1, 1.7, 2.2, 2.8, 3.6][isle], isleRw = () => [1, 1, 1.6, 2.1, 2.8, 3.6][isle], isleDm = () => [1, 1, 1.5, 1.9, 2.4, 3.0][isle];
 // timed buffs from the Apothecary and the Moonwell (they tick on play time, so pausing doesn't waste them)
 const buffOn = k => (save.buffs[k] || 0) > save.seconds;
 const dmgBuff = () => (buffOn("fury") ? 1.4 : 1) * (buffOn("blessed") ? 1.25 : 1);
@@ -196,10 +381,10 @@ let starMat = null, waterMesh = null;
     }
     g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
     g.computeVertexNormals();
-    isle1.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+    isle1.add(terrainMesh[1] = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
     const wg = new THREE.PlaneGeometry(1600, 1600);
     wg.rotateX(-Math.PI / 2);
-    waterMesh = new THREE.Mesh(wg, new THREE.MeshLambertMaterial({ color: 0x2f78a8, emissive: 0x0a2a40, transparent: true, opacity: 0.9, flatShading: true }));
+    waterMesh = new THREE.Mesh(wg, wtr(new THREE.MeshLambertMaterial({ color: 0x2f78a8, emissive: 0x0a2a40, transparent: true, opacity: 0.9, flatShading: true })));
     waterMesh.position.y = -0.45;
     scene.add(waterMesh);
 
@@ -210,7 +395,7 @@ let starMat = null, waterMesh = null;
     }
     const sg = new THREE.BufferGeometry();
     sg.setAttribute("position", new THREE.Float32BufferAttribute(sp, 3));
-    starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true });
+    starMat = new THREE.PointsMaterial({ color: 0xffffff, size: MODERN ? 2.4 : 1.6, sizeAttenuation: false, fog: false, transparent: true });
     scene.add(new THREE.Points(sg, starMat));
 }
 const wisps = (() => {
@@ -270,7 +455,204 @@ function applySky() {
     lantern.distance = 24 + save.oilLvl * 6;
     if (m3) sky3(d);
     if (m4) { scene.fog.near *= 1.6; scene.fog.far *= 2.4; sky4(d); } // the volcano should always loom over the island
+    if (isle === 5) { scene.fog.near *= 2.2; scene.fog.far *= 3.6; } // the other islands stay in sight across the water
     if (inCasino()) casinoSky(); else if (inCave()) caveSky();
+    if (MODERN) gfxSky();
+}
+
+// ---------- MODERN: sky dome, hemisphere light, sun shadows that follow you, grass ----------
+const hemiL = new THREE.HemisphereLight(0xffffff, 0x404040, 0);
+const skyDome = MODERN ? new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+    uniforms: { hz: { value: new THREE.Color() }, zn: { value: new THREE.Color() }, sd: { value: new THREE.Vector3(0, 1, 0) }, sc: { value: new THREE.Color() } },
+    vertexShader: "varying vec3 vD; void main(){ vD = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+    fragmentShader: `uniform vec3 hz; uniform vec3 zn; uniform vec3 sd; uniform vec3 sc; varying vec3 vD;
+void main(){ vec3 d = normalize(vD); vec3 c = mix(hz, zn, smoothstep(0.0, 0.62, d.y));
+  float s = max(dot(d, sd), 0.0); c += sc * (pow(s, 10.0) * 0.3 + pow(s, 80.0) * 0.7); gl_FragColor = vec4(c, 1.0); }`
+})) : null;
+if (MODERN) {
+    skyDome.renderOrder = -100; skyDome.frustumCulled = false; scene.add(skyDome);
+    scene.add(hemiL, sunL.target);
+    if (GQ.shadow) {
+        renderer.shadowMap.enabled = true; renderer.shadowMap.type = GQ.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap; renderer.shadowMap.autoUpdate = false;
+        sunL.castShadow = true; sunL.shadow.mapSize.set(GQ.shadow, GQ.shadow);
+        const sc = sunL.shadow.camera; sc.left = sc.bottom = -GQ.sr; sc.right = sc.top = GQ.sr; sc.near = 1; sc.far = 340; sc.updateProjectionMatrix();
+        sunL.shadow.bias = -0.0006; sunL.shadow.normalBias = 0.06;
+    }
+}
+const gfxT = { v: new THREE.Vector3(), lx: new THREE.Vector3(), ly: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), c: new THREE.Color(), deep: new THREE.Color(0x2a5aa8) };
+// runs at the end of applySky: turn the flat ambient into sky-above / ground-below light, aim the sun, tint the dome
+function gfxSky() {
+    const d = dayAmt(), fog = scene.fog.color;
+    hemiL.color.copy(ambL.color).lerp(fog, 0.3);
+    hemiL.groundColor.copy(ambL.color).multiplyScalar(0.32);
+    hemiL.intensity = ambL.intensity * 0.82;
+    ambL.intensity *= 0.42;
+    const ld = gfxT.v.copy(sunL.position).normalize();
+    TSU.tsSunDir.value.copy(ld);
+    TSU.tsSunCol.value.copy(sunL.color).multiplyScalar(sunL.intensity * 0.55);
+    TSU.tsSky.value.copy(fog).lerp(ambL.color, 0.25);
+    // the shadow box follows the camera, snapped to whole shadow texels so edges don't crawl as you walk
+    if (GQ.shadow) {
+        const lx = gfxT.lx.crossVectors(gfxT.up, ld).normalize(), ly = gfxT.ly.crossVectors(ld, lx), p = camera.position, tx = (GQ.sr * 2) / GQ.shadow;
+        const fx = Math.round(p.dot(lx) / tx) * tx, fy = Math.round(p.dot(ly) / tx) * tx, fz = p.dot(ld);
+        sunL.target.position.set(0, 0, 0).addScaledVector(lx, fx).addScaledVector(ly, fy).addScaledVector(ld, fz);
+        sunL.position.copy(sunL.target.position).addScaledVector(ld, 160);
+        sunL.target.updateMatrixWorld();
+    }
+    const U = skyDome.material.uniforms;
+    U.hz.value.copy(fog);
+    U.zn.value.copy(fog).lerp(gfxT.deep, 0.42 * d).multiplyScalar(lerp(0.5, 0.82, d));
+    const sunUp = sunMesh.visible;
+    U.sd.value.copy(sunUp ? sunMesh.position : moonMesh.position).sub(camera.position).normalize();
+    U.sc.value.copy(sunUp ? sunL.color : gfxT.c.setRGB(0.35, 0.4, 0.6)).multiplyScalar(sunUp ? 0.6 * (1 - 0.7 * wx.cloud) : 0.18);
+    skyDome.visible = camera.position.x < 1500; // caves, the mine and the casino are indoors
+}
+
+// shadows + texture filtering for everything in the scene (new things get picked up on the next sweep)
+function gfxSweep() {
+    scene.traverse(o => {
+        if (!o.isMesh || o.userData.gfx) return;
+        o.userData.gfx = 1;
+        const m = Array.isArray(o.material) ? o.material[0] : o.material;
+        if (!m) return;
+        for (const mm of Array.isArray(o.material) ? o.material : [o.material]) {
+            const t = mm.map;
+            if (t && t.magFilter === THREE.NearestFilter) { t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.anisotropy = 4; t.needsUpdate = true; }
+        }
+        const lit = m.isMeshLambertMaterial || m.isMeshStandardMaterial || m.isMeshPhongMaterial;
+        if (!GQ.shadow || !lit) return;
+        o.receiveShadow = !m.transparent || m.opacity > 0.8;
+        // only big things cast (trees, buildings, rocks): small parts cost a draw call each and their shadows are barely visible
+        let big = false;
+        if (!m.transparent && !terrainMesh.includes(o) && !o.userData.noCast && !(m.defines && m.defines.TS_WATER)) {
+            const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
+            o.getWorldScale(gfxT.v); big = g.boundingSphere.radius * Math.max(gfxT.v.x, gfxT.v.y, gfxT.v.z) > 0.9;
+        }
+        o.castShadow = big;
+    });
+}
+
+// ---- grass: one instanced mesh; the GPU wraps every clump to the copy nearest you, and reads height + colour from the ground ----
+const grass = MODERN && GQ.grass ? (() => {
+    const blades = [], R = Math.random;
+    for (let b = 0; b < 7; b++) {
+        const a = R() * 6.283, ox = (R() - 0.5) * 0.45, oz = (R() - 0.5) * 0.45, h = 0.16 + R() * 0.28, w = 0.03 + R() * 0.025, lean = (R() - 0.5) * 0.3;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const P = [[-w, 0, 0], [w, 0, 0], [0, h, lean]];
+        blades.push({ pts: P.map(([x, y, z]) => [ox + x * ca - z * sa, y, oz + x * sa + z * ca]) });
+    }
+    const pos = [], col = [], nor = [], idx = [];
+    for (const bl of blades) {
+        const base = pos.length / 3;
+        for (const p of bl.pts) { pos.push(...p); const t = p[1] / 0.46; col.push(0.55 + t * 0.75, 0.6 + t * 0.75, 0.5 + t * 0.6); nor.push(0, 1, 0); }
+        idx.push(base, base + 1, base + 2);
+    }
+    const g = new THREE.InstancedBufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.setIndex(idx);
+    const A = GQ.gr * 2.2, off = new Float32Array(GQ.grass * 4);
+    for (let i = 0; i < GQ.grass; i++) { off[i * 4] = R() * A; off[i * 4 + 1] = R() * A; off[i * 4 + 2] = R() * 6.283; off[i * 4 + 3] = 0.7 + R() * 0.6; }
+    g.setAttribute("aOff", new THREE.InstancedBufferAttribute(off, 4));
+    g.instanceCount = GQ.grass;
+    const gu = { tsCam: { value: new THREE.Vector3() }, tsGA: { value: A }, tsGR: { value: GQ.gr }, tsTB: { value: new THREE.Vector4(0, 0, 1, 2) }, tsGrassC: { value: null }, tsGrassH: { value: null } };
+    const m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    m.defines = { TS_NODETAIL: "" };
+    m.onBeforeCompile = sh => {
+        modernShader(sh); Object.assign(sh.uniforms, gu);
+        sh.fragmentShader = sh.fragmentShader.replace("normal *= faceDirection;", ""); // both sides of a blade face the sky
+        sh.vertexShader = "attribute vec4 aOff;\nuniform vec3 tsCam;\nuniform float tsGA;\nuniform float tsGR;\nuniform vec4 tsTB;\nuniform sampler2D tsGrassC;\nuniform sampler2D tsGrassH;\n" + sh.vertexShader.replace("#include <begin_vertex>", `#include <begin_vertex>
+{ vec2 base = aOff.xy + floor((tsCam.xz - aOff.xy) / tsGA + 0.5) * tsGA;
+  vec2 guv = ((base - tsTB.xy) / tsTB.z + 0.5) / tsTB.w;
+  vec4 gc = texture2D(tsGrassC, guv); float gh = texture2D(tsGrassH, guv).r;
+  float d = length(base - tsCam.xz);
+  float s = aOff.w * smoothstep(0.35, 0.8, gc.a) * (1.0 - smoothstep(tsGR * 0.55, tsGR, d));
+  float cr = cos(aOff.z), sr = sin(aOff.z);
+  vec3 p = transformed * vec3(s, s * (0.8 + 0.4 * gc.a), s); p.xz = vec2(cr * p.x - sr * p.z, sr * p.x + cr * p.z);
+  float bend = p.y * p.y;
+  p.x += (sin(tsTime * 1.9 + base.x * 0.35 + base.y * 0.21) + 0.5 * sin(tsTime * 4.3 + base.x * 1.3)) * 0.16 * bend;
+  p.z += cos(tsTime * 1.5 + base.y * 0.33 + base.x * 0.1) * 0.1 * bend;
+  vec2 away = base - tsCam.xz; float pd = length(away); if (pd < 0.9 && pd > 0.01) p.xz += away / pd * (0.9 - pd) * p.y * 0.8;
+  transformed = p + vec3(base.x, gh - 0.05, base.y);
+  vColor *= gc.rgb * (0.85 + 0.3 * fract(aOff.z * 7.31)); }`);
+    };
+    m.customProgramCacheKey = () => "ts_grass";
+    const mesh = new THREE.Mesh(g, m);
+    mesh.frustumCulled = false; mesh.userData.gfx = 1;
+    scene.add(mesh);
+    return { mesh, u: gu, isle: -1 };
+})() : null;
+// what counts as grassy ground on each island (by the ground's own colour)
+function grassAmt(h, s, l, y, isl) {
+    if (y < -0.25) return 0;
+    if (isl === 5) return s > 0.3 && ((h > 0.2 && h < 0.45) || (h > 0.7 && h < 0.85)) && l < 0.42 ? 1 : 0; // tropical grass on Port Haven, heather on Storm Isle
+    if (isl === 4) return h > 0.11 && h < 0.3 && s > 0.15 ? 0.75 : 0;          // tough olive scrub in the ash
+    if (isl === 3) return s > 0.3 && h > 0.44 && h < 0.84 && l < 0.34 ? 1 : 0; // teal and violet meadows
+    return s > 0.26 && h > 0.17 && h < 0.5 && l < 0.34 ? 1 : 0;
+}
+function bakeGrass() {
+    const tm = terrainMesh[isle];
+    grass.isle = isle; grass.tm = terrainMesh[isle];
+    if (!tm) { grass.mesh.visible = false; return; }
+    const g = tm.geometry, P = g.parameters, n = P.widthSegments + 1, step = P.width / P.widthSegments, minX = tm.position.x - P.width / 2, minZ = tm.position.z - P.height / 2;
+    const pos = g.attributes.position, col = g.attributes.color, N = n * n, hsl = {}, c = gfxT.c;
+    const C = new Float32Array(N * 4), H = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+        const y = pos.getY(i);
+        c.fromBufferAttribute(col, i); c.getHSL(hsl);
+        const a = grassAmt(hsl.h, hsl.s, hsl.l, y, isle);
+        C[i * 4] = c.r * 1.25; C[i * 4 + 1] = c.g * 1.3; C[i * 4 + 2] = c.b * 1.15; C[i * 4 + 3] = a; H[i] = y + tm.position.y;
+    }
+    // no grass inside buildings, fences or on the paths round obstacles
+    const clear = (x0, x1, z0, z1) => {
+        const i0 = Math.max(0, Math.floor((x0 - minX) / step)), i1 = Math.min(n - 1, Math.ceil((x1 - minX) / step)), j0 = Math.max(0, Math.floor((z0 - minZ) / step)), j1 = Math.min(n - 1, Math.ceil((z1 - minZ) / step));
+        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) C[(j * n + i) * 4 + 3] = 0;
+    };
+    for (const b of colliders) clear(b[0] - 0.6, b[1] + 0.6, b[2] - 0.6, b[3] + 0.6);
+    for (const ci of circles) if (ci.r > 1.5) clear(ci.x - ci.r * 0.8, ci.x + ci.r * 0.8, ci.z - ci.r * 0.8, ci.z + ci.r * 0.8);
+    const mk = (data, fmt) => { const hd = new Uint16Array(data.length); for (let i = 0; i < data.length; i++) hd[i] = THREE.DataUtils.toHalfFloat(data[i]); const t = new THREE.DataTexture(hd, n, n, fmt, THREE.HalfFloatType); t.magFilter = t.minFilter = THREE.LinearFilter; t.needsUpdate = true; return t; };
+    if (grass.u.tsGrassC.value) { grass.u.tsGrassC.value.dispose(); grass.u.tsGrassH.value.dispose(); }
+    grass.u.tsGrassC.value = mk(C, THREE.RGBAFormat); grass.u.tsGrassH.value = mk(H, THREE.RedFormat);
+    grass.u.tsTB.value.set(minX, minZ, step, n);
+    grass.mesh.visible = true;
+}
+// ---- point-light pool: only the few lights nearest you actually light the scene ----
+// (every point light costs every pixel, and the caves, mine and casino keep theirs in the scene the whole time)
+const LIGHT_POOL = 8, lightPool = [], vLights = new Set(), lpV = new THREE.Vector3(), lpCand = [];
+for (let i = 0; i < LIGHT_POOL; i++) { const L = new THREE.PointLight(0xffffff, 0, 1, 2); L.userData.pool = 1; scene.add(L); lightPool.push(L); }
+let lpN = 0;
+function lightsFrame() {
+    if (lpN++ % 60 === 0) scene.traverse(o => { if (o.isPointLight && !o.userData.pool && o !== lantern && !vLights.has(o)) { vLights.add(o); o.layers.set(5); } }); // off the camera's layer: no longer drawn directly
+    const cp = camera.position; lpCand.length = 0;
+    for (const L of vLights) {
+        if (!L.parent) { vLights.delete(L); continue; }
+        let on = L.intensity > 0; for (let o = L; on && o; o = o.parent) if (!o.visible) on = false;
+        if (!on) continue;
+        L.getWorldPosition(lpV); const reach = L.distance > 0 ? L.distance : 80, d = lpV.distanceTo(cp);
+        if (d > reach + 30) continue;
+        lpCand.push({ L, d: d - reach * 0.5, x: lpV.x, y: lpV.y, z: lpV.z });
+    }
+    lpCand.sort((a, b) => a.d - b.d);
+    for (let i = 0; i < LIGHT_POOL; i++) {
+        const P = lightPool[i], c = lpCand[i];
+        if (!c) { P.intensity = 0; continue; }
+        P.position.set(c.x, c.y, c.z); P.color.copy(c.L.color); P.intensity = c.L.intensity; P.distance = c.L.distance; P.decay = c.L.decay;
+    }
+}
+let gfxN = 0;
+function gfxFrame(dt) {
+    TSU.tsTime.value += dt;
+    if (skyDome) skyDome.position.copy(camera.position);
+    if (gfxN % 45 === 0) gfxSweep();
+    if (GQ.shadow) renderer.shadowMap.needsUpdate = gfxN % GQ.every === 0 && camera.position.x < 1500;
+    gfxN++;
+    if (grass) {
+        if (grass.isle !== isle || grass.tm !== terrainMesh[isle]) bakeGrass();
+        grass.u.tsCam.value.copy(camera.position);
+        grass.mesh.visible = !!terrainMesh[isle] && camera.position.x < 1500;
+    }
 }
 
 addTgt = isle1;
@@ -882,6 +1264,7 @@ function ferrymanTex() {
 }
 function clampToIsland(p) {
     if (p.x > 4500) { clampCasino(p); return; }
+    if (isle === 5) { clampIsle5(p); return; }
     if (isle === 4) { clampIsle4(p); return; }
     if (isle === 3) { clampIsle3(p); return; }
     if (isle === 2) { clampIsle2(p); return; }
@@ -988,9 +1371,9 @@ function buildGraveyard(lm) {
 function buildPond(lm) {
     const shore = new THREE.Mesh(new THREE.CircleGeometry(lm.r - 1.2, 20), decalMat(0x3a2e22));
     shore.rotation.x = -Math.PI / 2; shore.position.set(lm.x, 0.025, lm.z);
-    const water = new THREE.Mesh(new THREE.CircleGeometry(7, 20), new THREE.MeshLambertMaterial({
+    const water = new THREE.Mesh(new THREE.CircleGeometry(7, 20), wtr(new THREE.MeshLambertMaterial({
         color: 0x2a5a8a, emissive: 0x0a2a4a, transparent: true, opacity: 0.85, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4
-    }));
+    })));
     water.rotation.x = -Math.PI / 2; water.position.set(lm.x, 0.05, lm.z);
     scene.add(shore, water);
     circles.push({ x: lm.x, z: lm.z, r: 6.4 });
@@ -1255,7 +1638,7 @@ for (const [k, T] of Object.entries(TYPES)) {
     const base = { flatShading: true };
     if (T.glow !== undefined) base.emissive = T.glow;
     if (T.ghost) { base.transparent = true; base.opacity = 0.72; base.depthWrite = false; }
-    typeMats[k] = { trunk: new THREE.MeshLambertMaterial({ color: T.trunk, ...base }), leaves: T.leaf.map(c => new THREE.MeshLambertMaterial({ color: c, ...base })) };
+    typeMats[k] = { trunk: new THREE.MeshLambertMaterial({ color: T.trunk, ...base }), leaves: T.leaf.map(c => windy(new THREE.MeshLambertMaterial({ color: c, ...base }))) };
 }
 // ---------- tree mutations: rare glowing variants with their own look, sparkles and a big drop multiplier ----------
 const MUTS = {
@@ -1290,7 +1673,7 @@ const mutMats = {};
 function mutMat(k) {
     if (mutMats[k]) return mutMats[k];
     const M = MUTS[k], o = {};
-    if (M.leaf !== undefined) o.leaf = new THREE.MeshLambertMaterial({ color: M.leaf, emissive: M.em || 0, flatShading: true });
+    if (M.leaf !== undefined) o.leaf = windy(new THREE.MeshLambertMaterial({ color: M.leaf, emissive: M.em || 0, flatShading: true }));
     if (M.trunk !== undefined) o.trunk = new THREE.MeshLambertMaterial({ color: M.trunk, emissive: M.temb || 0, flatShading: true });
     o.fx = new THREE.MeshBasicMaterial({ color: M.fx, transparent: true, opacity: 0.95, depthWrite: false });
     return (mutMats[k] = o);
@@ -1325,6 +1708,13 @@ const ornMat = c => ornMats[c] || (ornMats[c] = new THREE.MeshBasicMaterial({ co
 const snowMat = new THREE.MeshLambertMaterial({ color: 0xf2f6ff, flatShading: true }), rockMat = new THREE.MeshLambertMaterial({ color: 0x7a7a84, flatShading: true });
 const dotMats = {};
 const ni = g => (g.index ? g.toNonIndexed() : g);
+// MODERN canopies: a rounder, lumpier blob instead of a 20-sided gem (normals stay round so it shades softly)
+const lumpy = (g, rad) => {
+    if (!MODERN) return g;
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), q = v => Math.round((v / rad) * 500), h = Math.sin(q(x) * 12.9898 + q(y) * 78.233 + q(z) * 37.719) * 43758.5453, k = 1 + (h - Math.floor(h) - 0.5) * 0.24; p.setXYZ(i, x * k, y * k, z * k); }
+    return g;
+};
 function treeShape(key, r, h) {
     const st = TREE_STYLE[key] || { s: "conifer" }, leaf = [], deco = [], snow = [], dots = [], rocks = [], orns = [], starG = [];
     const R = Math.random, rot = g => { g.rotateY(R() * 6.28); return g; };
@@ -1347,7 +1737,7 @@ function treeShape(key, r, h) {
         const blobs = [[0, h * 1.0, 0, 2.5]];
         for (let i = 0; i < 6; i++) { const a = (i / 6) * 6.283 + R() * 0.5; blobs.push([Math.cos(a) * r * 1.9, h * (0.7 + R() * 0.2), Math.sin(a) * r * 1.9, 1.8 + R() * 0.7]); }
         for (const [x, y, z, sz] of blobs) {
-            const b = new THREE.IcosahedronGeometry(r * sz, 0); b.rotateY(R() * 6); b.scale(1, 0.82, 1); b.translate(x, y, z); leaf.push(b);
+            const b = lumpy(new THREE.IcosahedronGeometry(r * sz, MODERN ? 1 : 0), r * sz); b.rotateY(R() * 6); b.scale(1, 0.82, 1); b.translate(x, y, z); leaf.push(b);
             if (x || z) { const br = new THREE.CylinderGeometry(r * 0.12, r * 0.22, Math.hypot(x, z) * 1.1, 5); br.translate(0, Math.hypot(x, z) * 0.55, 0); br.rotateZ(-Math.atan2(Math.hypot(x, z), y - h * 0.55) * 0.9); br.rotateY(-Math.atan2(z, x)); br.translate(0, h * 0.55, 0); deco.push(ni(br)); }
             if (st.dots) for (let d = 0; d < 2; d++) { const a = R() * 6.28, e = R() * 1.2; dot(x + Math.cos(a) * r * sz * 0.85, y + Math.sin(e) * r * sz * 0.6, z + Math.sin(a) * r * sz * 0.85); }
         }
@@ -1389,8 +1779,12 @@ function treeShape(key, r, h) {
         for (const ry of [0, Math.PI / 2]) { const p = new THREE.OctahedronGeometry(r * 0.55, 0); p.scale(0.8, 1.35, 0.35); p.rotateY(ry); p.translate(0, top, 0); starG.push(p); }
     } else if (st.s === "birch") {
         // tall pale trunk with dark bark marks and small airy leaf clumps up high
-        for (let i = 0; i < 7; i++) { const a = (i / 7) * 6.283 + R(), y = h * (0.62 + R() * 0.42), d = r * (0.6 + R() * 1.4), b = new THREE.IcosahedronGeometry(r * (1.2 + R() * 0.7), 0); b.scale(1, 1.25, 1); b.translate(Math.cos(a) * d, y, Math.sin(a) * d); leaf.push(b); }
+        for (let i = 0; i < 7; i++) { const a = (i / 7) * 6.283 + R(), y = h * (0.62 + R() * 0.42), d = r * (0.6 + R() * 1.4), bs = r * (1.2 + R() * 0.7), b = lumpy(new THREE.IcosahedronGeometry(bs, MODERN ? 1 : 0), bs); b.scale(1, 1.25, 1); b.translate(Math.cos(a) * d, y, Math.sin(a) * d); leaf.push(b); }
         for (let i = 0; i < 10; i++) { const a = R() * 6.283, y = h * (0.08 + R() * 0.62), rr = r * (1.0 - 0.32 * (y / h)) * 0.97, m = new THREE.BoxGeometry(r * 0.5, r * 0.12, r * 0.08); m.rotateY(-a + Math.PI / 2); m.translate(Math.cos(a) * rr, y, Math.sin(a) * rr); dots.push(m); }
+    }
+    if (st.s === "palm") { // long drooping fronds from the top, coconuts underneath
+        for (let i = 0; i < 9; i++) { const a = (i / 9) * 6.283 + R() * 0.3, len = h * (0.5 + R() * 0.15), c = new THREE.ConeGeometry(r * 0.95, len, 4); c.scale(1, 1, 0.22); c.translate(0, len / 2, 0); c.rotateZ(-(1.2 + R() * 0.35)); c.rotateY(-a); c.translate(0, h * 1.02, 0); leaf.push(ni(c)); }
+        for (let i = 0; i < 4; i++) { const a = R() * 6.28; dot(Math.cos(a) * r * 0.55, h * 0.95, Math.sin(a) * r * 0.55, 0.32); }
     }
     const merge = a => (a.length ? mergeGeometries(a) : null);
     return { leaf: merge(leaf), deco: merge(deco), snow: merge(snow), dots: merge(dots), rocks: merge(rocks), dotCol: st.dots, orns: orns.map((a, i) => a.length ? { geo: mergeGeometries(a), col: st.orn[i] } : null).filter(Boolean), star: merge(starG), starCol: st.star };
@@ -1525,17 +1919,18 @@ function pickType(px = 0, pz = 0) {
     const night = isNight(), here = isle >= 2 ? groundY(px, pz) : 0;
     let total = 0;
     const tier = Math.max(bestIdx(), gunTier()), blood = isBlood(), tw = T => (night ? T.wn : T.wd) * (blood && T.rare ? 2.2 : 1);
-    const ok = T => (T.isl || [1]).includes(isle) && (T.minTier || 0) <= tier && (!T.alt || (here >= T.alt[0] && here <= T.alt[1]));
+    const ok = T => (T.isl || [1]).includes(isle) && (!T.arch || T.arch === arch5) && (T.minTier || 0) <= tier && (!T.alt || (here >= T.alt[0] && here <= T.alt[1]));
     for (const T of Object.values(TYPES)) if (ok(T)) total += tw(T);
     let r = Math.random() * total;
     for (const [k, T] of Object.entries(TYPES)) { if (!ok(T)) continue; r -= tw(T); if (r <= 0) return k; }
-    return isle === 4 ? "ashwood" : isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
+    return isle === 5 ? ({ haven: "palm", coral: "coralwood", skull: "tarpine", frost: "frostpine", storm: "stormoak" })[arch5] : isle === 4 ? "ashwood" : isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
 }
 let lastRareToast = -99;
 function spawnTree(announce = true) {
     for (let tries = 0; tries < 40; tries++) {
-        const a = Math.random() * Math.PI * 2, d = SAFE_R + 4 + Math.random() * (curShoreR(a) - 10 - SAFE_R - 4);
-        const x = Math.cos(a) * d, z = Math.sin(a) * d;
+        const a = Math.random() * Math.PI * 2, d = SAFE_R + 4 + Math.random() * (curShoreR(a) - 10 - SAFE_R - 4), sp5 = isle === 5 ? arch5Spot() : null;
+        if (isle === 5 && !sp5) continue;
+        const x = sp5 ? sp5.x : Math.cos(a) * d, z = sp5 ? sp5.z : Math.sin(a) * d;
         if (Math.hypot(x - player.pos.x, z - player.pos.z) < 18) continue;
         let bad = false;
         for (const lm of curLM()) if (!lm.camp && Math.hypot(x - lm.x, z - lm.z) < lm.r + 2) { bad = true; break; }
@@ -1549,6 +1944,7 @@ function spawnTree(announce = true) {
         let hh = T.titan ? 10 + Math.random() * 2 : T.tall ? 8 + Math.random() * 5 : 3 + Math.random() * 7;
         if (mk === "giant") hh = Math.min(hh * MUTS.giant.giant, 16);
         const t = makeTree(x, z, hh, key);
+        if (isle === 5) { t.arch = arch5; t.hp = t.maxHp = Math.ceil(t.maxHp * ARCH_BY[arch5].hp); } // the far islands grow tougher trees
         if (mk) { applyMut(t, mk); if (announce && time - lastMutToast > 20) { lastMutToast = time; toast(`✦ A ${MUTS[mk].name} ${T.name} appeared somewhere! (×${MUTS[mk].mult} drops)`, "rare"); } }
         if (announce && (T.night || T.titan || T.xmas) && time - lastRareToast > 25) { lastRareToast = time; toast(T.xmas ? `Jingle bells... a ${T.name} sprouted somewhere in the woods!` : T.titan ? `A ${T.name} towers somewhere in the woods...` : `A ${T.name} stirs somewhere in the woods...`, "rare"); }
         return t;
@@ -1671,7 +2067,7 @@ function dropLogs(x, z, n, back, key = "pine") {
     const T = TYPES[key];
     const meshes = Math.min(n, 14), base = Math.floor(n / meshes), extra = n % meshes; // big drops are stacks of logs, not hundreds of meshes
     for (let i = 0; i < meshes; i++) {
-        const mk = isle >= 2 ? (T.mat || (isle === 4 ? "ash" : isle === 3 ? "spore" : "wood")) : null;
+        const mk = isle >= 2 ? (T.mat || (isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood")) : null;
         const m = mk ? new THREE.Mesh(matGeo, matMeshMat[mk]) : new THREE.Mesh(logGeo, logMats[key] || logMat);
         const d = Math.random() * 2.5;
         m.position.set(x + back.x * d, groundY(x + back.x * d, z + back.z * d) + 0.4, z + back.z * d);
@@ -1712,7 +2108,7 @@ function newContract() {
     if (isNight() && roll < 0.5) save.contract = { type: "rare", goal: 1, prog: 0, reward: Math.round(170 * m), text: "Fell a rare tree" };
     else if (roll < 0.6) { const g = 4 + Math.floor(Math.random() * 5); save.contract = { type: "fell", goal: g, prog: 0, reward: Math.round(g * 14 * m), text: `Fell ${g} trees` }; }
     else { const g = 12 + Math.floor(Math.random() * 14); save.contract = { type: "sell", goal: g, prog: 0, reward: Math.round(g * 6 * m), text: isle >= 2 ? `Sell ${g} materials at the Trading Post` : `Sell ${g} logs at the mill` }; }
-    if (isle >= 3) save.contract.reward *= isle === 4 ? 400 : 40; // later islands pay bigger money
+    if (isle >= 3) save.contract.reward *= isle === 5 ? 1000 : isle === 4 ? 400 : 40; // later islands pay bigger money
 }
 function contractProgress(kind, n = 1) {
     const c = save.contract;
@@ -1854,6 +2250,7 @@ function respawn() {
     if (state !== "dead" || deadT < 1.2) return;
     player.maxHp = maxHpNow();
     player.hp = player.maxHp;
+    if (isle === 5) boatRespawn();
     player.pos.set(RESPAWN.x, groundY(RESPAWN.x, RESPAWN.z) + 1.7, RESPAWN.z);
     player.vel.set(0, 0, 0);
     player.yaw = 0; player.pitch = 0;
@@ -1906,7 +2303,7 @@ function equipAxe(i) {
     applyAxeLook();
     swing.t = 1;
     sfx(420, 0.12, "triangle", 0.1, 1.4);
-    toast(`Equipped ${AXES[i].name}${enchTotal(i) ? "  ✦ " + enchShort(i) : ""}`, enchTotal(i) ? "rare" : "");
+    toast(`Equipped ${AXES[i].name}${enchTotal(i) ? "  ✦ " + enchShort(i) : ""} · [Z] ${ABIL[i].name}`, enchTotal(i) ? "rare" : "");
 }
 function openChest(c) {
     if (c.opened) return;
@@ -1914,9 +2311,9 @@ function openChest(c) {
     const m = (1 + 0.15 * (save.day - 1)) * (isBlood() ? 2 : 1), r = Math.random();
     let msg;
     if (isle >= 3) { // Mooncap and Ashfall chests: real money and a handful of materials
-        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle === 4 ? 10 : 1)), ks = isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
+        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle === 5 ? 25 : isle === 4 ? 10 : 1)), ks = isle === 5 ? (c.special ? ["pearl", "iceshard", "stormglass"] : ["driftwood", "salt", "coral", "tar"]) : isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
         save.money += cash; save.mats[k] = (save.mats[k] || 0) + n; if (c.special) save.bandages++;
-        msg = `${c.special ? (isle === 4 ? "Scorched chest" : "Moonlit chest") : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
+        msg = `${c.special ? (isle === 5 ? "Pirate chest" : isle === 4 ? "Scorched chest" : "Moonlit chest") : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
     } else if (c.special) { const cash = Math.round(rand(120, 260) * m); save.money += cash; save.bandages++; msg = `Cursed chest: +${money(cash)} and a bandage`; }
     else if (r < 0.6) { const cash = Math.round(rand(25, 85) * m); save.money += cash; msg = `Chest: +${money(cash)}`; }
     else if (r < 0.85) { const cash = Math.round(rand(10, 30) * m); save.money += cash; save.bandages++; msg = `Chest: a bandage and ${money(cash)}`; }
@@ -1935,9 +2332,10 @@ const SHOP_TABS = {
     forge: [["axes", "CRAFT AXES"], ["guns", "CRAFT GUNS"], ["ammo", "AMMO"], ["gear", "GEAR"], ["sellaxe", "SELL AXES"]],
     trade: [["trade", "SELL MATERIALS"]],
     brew: [["brew", "BREWS"]],
-    ench: [["ench", "ENCHANT"]]
+    ench: [["ench", "ENCHANT"]],
+    ship: [["boat", "BOAT"]]
 };
-const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST", brew: "THE APOTHECARY", ench: "THE ENCHANTING TABLE" };
+const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST", brew: "THE APOTHECARY", ench: "THE ENCHANTING TABLE", ship: "THE SHIPWRIGHT" };
 // what an axe is worth back: half its price, or half the value of the materials it was forged from
 function axeSellValue(i) {
     const r = isle >= 2 ? axeRecipe(i) : null;
@@ -1971,7 +2369,7 @@ function reaperAxeItems() {
     const out = [];
     AXES.forEach((a, i) => {
         if (i === 0 || a.isle2 || a.isle3) return;
-        out.push({ name: a.name, icon: "a" + i, desc: `${a.dmg} damage per swing${a.night ? " (x1.5 at night)" : ""}${save.owned[i] && enchTotal(i) ? " · ✦ " + enchShort(i) : ""}`, cost: a.cost, owned: !!save.owned[i], axe: i, col: a.rarity, buy() { gainAxe(i); } });
+        out.push({ name: a.name, icon: "a" + i, desc: `${a.dmg} damage per swing${a.night ? " (x1.5 at night)" : ""} · [Z] ${ABIL[i].name}${save.owned[i] && enchTotal(i) ? " · ✦ " + enchShort(i) : ""}`, cost: a.cost, owned: !!save.owned[i], axe: i, col: a.rarity, buy() { gainAxe(i); } });
     });
     return out;
 }
@@ -1994,7 +2392,8 @@ function reaperGear() {
     ];
 }
 function shopItems() {
-    if (shopTab === "brew") return brewItems();
+    if (shopTab === "boat") return boatItems();
+    if (shopTab === "brew") return isle === 5 ? brewItems5() : brewItems();
     if (shopTab === "ench") return enchItems();
     if (shopTab === "sellaxe") return sellAxeItems();
     if (shopTab === "sell") return sellItems();
@@ -2039,7 +2438,7 @@ function buy(i) {
 const recipeHtml = r => '<span class="recipe">' + Object.entries(r).map(([k, n]) => { const have = save.mats[k] || 0; return `<span class="rp ${have >= n ? "ok" : "no"}"><img src="${iconURL("m:" + k)}">${Math.min(have, n)}/${n} ${MATS[k].name}</span>`; }).join("") + "</span>";
 function renderShop() {
     $("shopCash").textContent = money(save.money);
-    $("shopName").textContent = shopMode === "forge" && isle === 4 ? "THE CRUCIBLE" : shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : shopMode === "brew" && isle === 4 ? "THE ALCHEMIST" : SHOP_NAMES[shopMode];
+    $("shopName").textContent = shopMode === "forge" && isle === 5 ? "THE SEA FORGE" : shopMode === "brew" && isle === 5 ? "THE SEA WITCH" : shopMode === "forge" && isle === 4 ? "THE CRUCIBLE" : shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : shopMode === "brew" && isle === 4 ? "THE ALCHEMIST" : SHOP_NAMES[shopMode];
     const tabs = SHOP_TABS[shopMode];
     if (!tabs.some(t => t[0] === shopTab)) shopTab = tabs[0][0];
     const th = tabs.length > 1 ? tabs.map(t => `<button class="tab ${t[0] === shopTab ? "on" : ""}" data-tab="${t[0]}">${t[1]}</button>`).join("") : "";
@@ -2296,7 +2695,7 @@ function updateNameplates() {
         if (!(nowMs - (t._occT || 0) < 120)) { t._occT = nowMs; t._occ = isOccluded(V3(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 1.5, t.z), t.solid); }
         if (t._occ || behindAxe(px, py)) { e.style.display = "none"; continue; }
         const T = t.type, dmg = treeDmg(t);
-        const tm = T.mat || (isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
+        const tm = T.mat || (isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
         const mutHtml = t.mut ? '<i class="mut' + (t.mut === "rainbow" ? ' rbtxt' : '') + '" style="color:' + MUTS[t.mut].col + '">✦ ' + MUTS[t.mut].name + ' ×' + MUTS[t.mut].mult + ' ✦</i>' : '';
         const html = mutHtml + '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle >= 2 ? ' · <em style="color:' + MATS[tm].col + '">' + treeLogs(t) + ' ' + MATS[tm].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
         if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = t.mut ? MUTS[t.mut].col : T.col; e.className = "np" + (t.mut ? " mutd" + (t.mut === "rainbow" ? " rbw" : "") : ""); e.style.setProperty("--mc", t.mut ? MUTS[t.mut].col : T.col); }
@@ -2312,6 +2711,7 @@ function updateNameplates() {
 
 // ---------- map ----------
 function drawMap() {
+    if (isle === 5) { drawMap5(); return; }
     if (isle === 4) { drawMap4(); return; }
     if (isle === 3) { drawMap3(); return; }
     if (isle === 2) { drawMap2(); return; }
@@ -2364,7 +2764,7 @@ function drawMap() {
 }
 
 // ---------- menus (title / pause) ----------
-const CONTROLS = [["WASD", "Move"], ["Mouse", "Look"], ["Click", "Swing / shoot"], ["Drag", "Weapons onto hotbar (E)"], ["Shift", "Sprint"], ["Space", "Jump"], ["Q", "Dash"],
+const CONTROLS = [["WASD", "Move"], ["Mouse", "Look"], ["Click", "Swing / shoot"], ["Drag", "Weapons onto hotbar (E)"], ["Shift", "Sprint"], ["Space", "Jump"], ["Q", "Dash"], ["Z", "Axe ability"],
     ["E", "Inventory"], ["M", "Map"], ["F", "Interact"], ["1-5", "Hotbar slot"], ["R", "Reload"], ["Wheel", "Next weapon"], ["H", "Bandage"], ["K", "Relic"], ["L", "Lantern"], ["J", "Fish journal"]];
 function renderMenu() {
     if ($("ver")) $("ver").textContent = "TREE CHOP STUDIOS · v" + VERSION;
@@ -2404,25 +2804,35 @@ const SET_ROWS = [
     { k: "invert", name: "Invert mouse Y", type: "toggle" },
     { k: "fov", name: "Field of view", type: "range", min: 60, max: 105, step: 1, show: v => v + "°" },
     { k: "vol", name: "Volume", type: "range", min: 0, max: 1, step: 0.05, show: v => Math.round(v * 100) + "%" },
-    { k: "pixel", name: "Pixel size", type: "pick", opts: [[2, "SHARP"], [3, "CLASSIC"], [4, "CHUNKY"]] },
+    { k: "gfx", name: "Graphics style", type: "pick", opts: [["modern", "MODERN"], ["retro", "RETRO"]], restart: true },
+    { k: "quality", name: "Quality", type: "pick", opts: [["low", "LOW"], ["med", "MEDIUM"], ["high", "HIGH"]], restart: true, only: "modern" },
+    { k: "pixel", name: "Pixel size", type: "pick", opts: [[2, "SHARP"], [3, "CLASSIC"], [4, "CHUNKY"]], only: "retro" },
     { k: "bob", name: "Head bob", type: "toggle" },
     { k: "fps", name: "Show FPS", type: "toggle" }
 ];
 const settingsOpen = () => $("settingsPanel").classList.contains("show");
 function renderSettings() {
-    $("setRows").innerHTML = SET_ROWS.map(r => {
+    $("setRows").innerHTML = SET_ROWS.filter(r => !r.only || r.only === settings.gfx).map(r => {
         const v = settings[r.k];
         const ctl = r.type === "range" ? `<input type="range" data-set="${r.k}" min="${r.min}" max="${r.max}" step="${r.step}" value="${v}"><b>${r.show(v)}</b>`
             : r.type === "toggle" ? `<button class="stog ${v ? "on" : ""}" data-set="${r.k}">${v ? "ON" : "OFF"}</button>`
             : r.opts.map(([ov, ot]) => `<button class="stog ${v === ov ? "on" : ""}" data-set="${r.k}" data-v="${ov}">${ot}</button>`).join("");
         return `<div class="srow"><span>${r.name}</span><div class="sctl">${ctl}</div></div>`;
-    }).join("");
+    }).join("") + `<div class="snote">Changing the graphics style or quality restarts the game. Your progress is saved.</div>`;
 }
 function applySettings() {
     if (master) master.gain.value = settings.vol;
     if (SCALE !== settings.pixel) { SCALE = settings.pixel; resize(); }
     el.fps.style.display = settings.fps ? "" : "none";
     saveSettings();
+}
+// graphics changes rebuild everything, so save and restart (skipping the studio intro)
+function restartForGfx() {
+    renderSettings();
+    $("setRows").insertAdjacentHTML("beforeend", `<div class="srow"><span style="color:#ffd040">Restarting to apply…</span></div>`);
+    writeSave();
+    try { sessionStorage.setItem("ts4_skipIntro", "1"); } catch (e) { /* ignore */ }
+    setTimeout(() => location.reload(), 400);
 }
 function openSettings(on) { $("settingsPanel").classList.toggle("show", on); if (on) { renderSettings(); armReset(false); } }
 let resetArmed = false, resetTimer = null;
@@ -2437,7 +2847,11 @@ $("settingsPanel").addEventListener("input", e => { const k = e.target.dataset.s
 $("settingsPanel").addEventListener("click", e => {
     if (e.target.closest("[data-sclose]")) { openSettings(false); return; }
     const b = e.target.closest("button[data-set]");
-    if (b) { const k = b.dataset.set; settings[k] = b.dataset.v !== undefined ? +b.dataset.v : !settings[k]; applySettings(); renderSettings(); return; }
+    if (b) {
+        const k = b.dataset.set, row = SET_ROWS.find(x => x.k === k), dv = b.dataset.v, nv = dv !== undefined ? (isNaN(+dv) ? dv : +dv) : !settings[k];
+        if (row && row.restart) { if (settings[k] !== nv) { settings[k] = nv; saveSettings(); restartForGfx(); } return; }
+        settings[k] = nv; applySettings(); renderSettings(); return;
+    }
     if (e.target.closest("#resetBtn")) {
         if (!resetArmed) { armReset(true); sfx(200, 0.2, "square", 0.08, 0.6); return; }
         // wipe the save (settings stay) and start over from the very beginning
@@ -2481,7 +2895,8 @@ addEventListener("keydown", e => {
     if (e.code === "KeyH") useBandage();
     if (e.code === "KeyR") startReload();
     if (e.code === "KeyL") toggleLantern();
-    if (e.code === "KeyQ" && player.dashCd <= 0 && !panel) {
+    if (e.code === "KeyZ") { useAbility(); return; }
+    if (e.code === "KeyQ" && player.dashCd <= 0 && !panel && !boating()) {
         const d = new THREE.Vector3((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), 0, (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0));
         if (d.lengthSq() === 0) d.set(0, 0, -1);
         d.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), player.yaw);
@@ -2510,8 +2925,10 @@ addEventListener("mousemove", e => {
 
 function nearest() {
     if (inCasino()) return nearestCasino();
+    if (isle === 5 && B5.on) return nearest5();
     if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
     if (casino && casino.isle === isle && Math.hypot(player.pos.x - casino.door.x, player.pos.z - casino.door.z) < 3.4) return { k: "casino" };
+    if (isle === 5) return nearest5();
     if (isle === 4) return nearest4();
     if (isle === 3) return nearest3();
     if (isle === 2) return nearest2();
@@ -2533,12 +2950,13 @@ function interact() {
     const n = nearest();
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
+    if (ISLE5_ACT[n.k]) { ISLE5_ACT[n.k](n); return; }
     if (n.k === "ench") { openEnch(pick(ENCH_SAY)); return; }
     if (n.k === "casino") { enterCasino(); return; }
     if (CS_PROMPTS[n.k]) { casinoInteract(n); return; }
     if (n.k === "smith") {
-        openShop("forge", pick(isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
-    } else if (n.k === "depot") openShop("trade", isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
+        openShop("forge", pick(isle === 5 ? SMITH5_SAY : isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
+    } else if (n.k === "depot") openShop("trade", isle === 5 ? pick(DEPOT5_SAY) : isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
     else if (n.k === "witch") openShop("brew", pick(WITCH_SAY));
     else if (n.k === "ferry3") { if (!save.ferry3Talk) { save.ferry3Talk = 1; startTalk("THE FERRYMAN", FERRY3_LINES, () => openFerry3()); } else openFerry3(); }
     else if (n.k === "ferry4") openFerry4();
@@ -2639,17 +3057,17 @@ function updateTrees(dt, safe, lookX, lookZ) {
             continue;
         }
         const dist = t._d, seen = t._seen;
-        if (dist < activateR() * 1.6) t.g.rotation.y += angDiff(Math.atan2(player.pos.x - t.x, player.pos.z - t.z), t.g.rotation.y) * Math.min(1, 4 * dt);
+        if (dist < activateR() * 1.6 && !(t.stun > 0)) t.g.rotation.y += angDiff(Math.atan2(player.pos.x - t.x, player.pos.z - t.z), t.g.rotation.y) * Math.min(1, 4 * dt);
 
         let mx = 0, mz = 0, sp = 0;
         if (t.type.flee) {
             if (dist < 14) { mx = -t._nx; mz = -t._nz; sp = 3.6; }
-        } else if (movers.has(t)) { mx = t._nx; mz = t._nz; sp = 1.9 * t.type.speed * (t.mut === "frozen" ? 0.55 : 1); }
+        } else if (movers.has(t) && !(t.stun > 0)) { mx = t._nx; mz = t._nz; sp = 1.9 * t.type.speed * (t.mut === "frozen" ? 0.55 : 1); }
         if (sp > 0) {
             t.x += mx * sp * dt; t.z += mz * sp * dt;
             const od = Math.hypot(t.x, t.z);
             if (od < SAFE_R + t.r + 0.5) { t.x = t.x / od * (SAFE_R + t.r + 0.5); t.z = t.z / od * (SAFE_R + t.r + 0.5); }
-            const tl = curShoreAt(t.x, t.z) - 8; if (od > tl) { t.x *= tl / od; t.z *= tl / od; }
+            if (isle === 5) clampTree5(t); else { const tl = curShoreAt(t.x, t.z) - 8; if (od > tl) { t.x *= tl / od; t.z *= tl / od; } }
             for (const c of circles) { const cx = t.x - c.x, cz = t.z - c.z, cd = Math.hypot(cx, cz), min = c.r + t.r; if (cd < min && cd > 0.001) { t.x = c.x + cx / cd * min; t.z = c.z + cz / cd * min; } }
         } else {
             const od = Math.hypot(t.x, t.z);
@@ -2661,7 +3079,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         // attacks: only sometimes, with a warning wind-up
         t.cool -= dt;
         const reach = t.r + 2.7;
-        if (!t.type.flee) {
+        if (!t.type.flee && !(t.stun > 0)) {
             if (t.atk === "idle" && !safe && dist < reach && t.cool <= 0) {
                 if (Math.random() < (isBlood() ? 0.6 : 0.4)) { t.atk = "wind"; t.atkT = 0; sfx(180, 0.3, "sawtooth", 0.05, 0.5); floatWorld(V3(t.x, t.gy + Math.min(t.h * 0.7, 3.4), t.z), "!", "warn"); }
                 else t.cool = 1 + Math.random() * 2.5; // it hesitates
@@ -2765,8 +3183,9 @@ function update(dt) {
     hurtFlash = Math.max(0, hurtFlash - dt * 1.6);
 
     // movement
-    const dir = new THREE.Vector3((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), 0, (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0));
+    const dir = boating() ? new THREE.Vector3() : new THREE.Vector3((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), 0, (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0));
     if (dir.lengthSq() > 0) dir.normalize().applyAxisAngle(UP, player.yaw);
+    if (boating()) driveBoat(dt); else {
     const maxSp = (keys.ShiftLeft ? 8.5 : 5.5) * (1 + 0.07 * save.bootLvl) * (buffOn("swift") ? 1.3 : 1) * devSpeed, accel = player.onGround ? 14 : 4;
     player.vel.x += (dir.x * maxSp - player.vel.x) * Math.min(1, accel * dt);
     player.vel.z += (dir.z * maxSp - player.vel.z) * Math.min(1, accel * dt);
@@ -2775,10 +3194,12 @@ function update(dt) {
     player.pos.addScaledVector(player.vel, dt);
     clampToIsland(player.pos);
     pushOutBoxes(player.pos, 0.45);
+    }
     if (ride) updateRide(dt);
     const gnd = groundY(player.pos.x, player.pos.z) + 1.7;
-    if (!ride && (player.pos.y <= gnd || (player.onGround && player.vel.y <= 0 && player.pos.y - gnd < 0.7))) { player.pos.y = gnd; player.vel.y = 0; player.onGround = true; }
+    if (!ride && !boating() && (player.pos.y <= gnd || (player.onGround && player.vel.y <= 0 && player.pos.y - gnd < 0.7))) { player.pos.y = gnd; player.vel.y = 0; player.onGround = true; }
     player.dashCd -= dt;
+    updateAbilities(dt);
     if (player.onGround) player.bob += dt * Math.hypot(player.vel.x, player.vel.z) * 1.6;
     const safe = inSafe();
     if (safe && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + 2 * dt);
@@ -2789,7 +3210,7 @@ function update(dt) {
     if (swing.t < 1) {
         swing.t = Math.min(1, swing.t + dt / (0.36 / (1 + 0.12 * enchLv("swift"))));
         if (!swing.hit && swing.t >= 0.46) { swing.hit = true; tryHit(); }
-    } else if (mouseDown && !panel && !fishing.on && !holdingGun() && !ride) {
+    } else if (mouseDown && !panel && !fishing.on && !holdingGun() && !ride && !boating()) {
         swing.t = 0; swing.hit = false;
         sfx(260, 0.15, "sawtooth", 0.04, 0.5);
     }
@@ -2797,7 +3218,7 @@ function update(dt) {
     camera.getWorldDirection(fwd);
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
-    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt);
+    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt); updateIsle5(dt);
     updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateEnchTable(dt); updateWild(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
@@ -3388,7 +3809,7 @@ const ENCH = {
 const ROMAN = ["", "I", "II", "III", "IV", "V"];
 const ENCH_SAY = ["The runes are hungry. Feed them gold.", "Every blade remembers what you pour into it.", "The book turns its own pages. Don't read them out loud.", "Pick a rune. Any rune."];
 // placed beside each camp, clear of the buildings
-const ENCH_AT = { 1: { x: -8.5, z: 1.5 }, 2: { x: 0, z: -10.5 }, 3: { x: 0, z: -10.5 }, 4: { x: 0, z: -10.5 } };
+const ENCH_AT = { 1: { x: -8.5, z: 1.5 }, 2: { x: 0, z: -10.5 }, 3: { x: 0, z: -10.5 }, 4: { x: 0, z: -10.5 }, 5: { x: 0, z: -10.5 } };
 const enchCost = (k, lvl, i = save.equipped) => Math.round([0, 120, 1500, 15000, 150000][isle] * ENCH[k].k * Math.pow(2.1, lvl) * (1 + i * 0.12));
 function enchItems() {
     const i = save.equipped, a = AXES[i];
@@ -3667,7 +4088,8 @@ function openFerry() {
     openPanel("ferry");
 }
 function renderFerry() {
-    if (isle === 4) { renderFerry4(); return; }
+    if (isle === 5) { renderFerry5(); return; }
+    if (isle === 4) { renderFerry4v2(); return; }
     if (isle === 3) { renderFerry3(); return; }
     if (isle === 2) { renderFerry2(); return; }
     const cost = rebirthCost(), n = (save.rebirths || 0) + 1, can = save.money >= cost;
@@ -3684,8 +4106,8 @@ function renderFerry() {
     b.classList.toggle("danger", !!ferryConfirm);
 }
 $("ferryBuy").addEventListener("click", () => {
-    if (isle === 4) return;
-    if (isle === 3 ? !rebirth3Ready() : isle === 2 ? !rebirth2Ready() : save.money < rebirthCost()) return;
+    if (isle === 5) return;
+    if (isle === 4 ? !rebirth4Ready() : isle === 3 ? !rebirth3Ready() : isle === 2 ? !rebirth2Ready() : save.money < rebirthCost()) return;
     if (!ferryConfirm) { ferryConfirm = 1; renderFerry(); setTimeout(() => { ferryConfirm = 0; if (panel === "ferry") renderFerry(); }, 5000); return; }
     if (isle >= 2) startRebirthRide(isle); else doRebirth();
 });
@@ -3892,7 +4314,7 @@ function updateGun(dt) {
     gunCd -= dt;
     if (reloading) { reloadT += dt / GUNS[save.gunEq].reload; if (reloadT >= 1) finishReload(); }
     if (!mouseDown) fireLatch = false;
-    if (mouseDown && !panel && !fishing.on && !ride && gunCd <= 0 && !reloading) {
+    if (mouseDown && !panel && !fishing.on && !ride && !boating() && gunCd <= 0 && !reloading) {
         const G = GUNS[save.gunEq];
         if (G.auto || !fireLatch) { fireLatch = true; fireGun(); }
     }
@@ -4012,7 +4434,7 @@ function axeCraftItems() {
     AXES.forEach((a, i) => {
         if (i === 0 || !axeRecipe(i)) return;
         const need = isle === 3 && i === 13 && !save.bossKills ? " · Heartwood only falls from the Elder Heart" : isle === 4 && i === 15 && !save.kingKills ? " · Molten Cores only come from the Cinder King" : "";
-        out.push({ name: a.name, icon: "a" + i, col: a.rarity, desc: `${Math.round(a.dmg * (1 + 0.1 * (save.rebirths || 0)))} damage per swing${a.night ? ` (x${a.night} at night)` : ""}${need}${save.owned[i] && enchTotal(i) ? " · ✦ " + enchShort(i) : ""}`, craft: axeRecipe(i), owned: !!save.owned[i], axe: i, buy() { gainAxe(i); } });
+        out.push({ name: a.name, icon: "a" + i, col: a.rarity, desc: `${Math.round(a.dmg * (1 + 0.1 * (save.rebirths || 0)))} damage per swing${a.night ? ` (x${a.night} at night)` : ""} · [Z] ${ABIL[i].name}${need}${save.owned[i] && enchTotal(i) ? " · ✦ " + enchShort(i) : ""}`, craft: axeRecipe(i), owned: !!save.owned[i], axe: i, buy() { gainAxe(i); } });
     });
     return out;
 }
@@ -4158,7 +4580,7 @@ function curLM() { return isle === 4 ? LM4 : isle === 3 ? LM3 : isle === 2 ? LM2
 let isle2Built = false, altar2 = null, ferry2 = null, ferryman2 = null, ferryBoat2 = null, smithMesh = null, clerkMesh = null, mapBg2 = null;
 const isle2G = new THREE.Group(); // everything on the Highland Isle (and its cave and mine), so another island can hide it
 scene.add(isle2G);
-const treeTarget = () => (isle >= 2 ? (isBlood() ? 125 : 90) : (isBlood() ? 82 : 60));
+const treeTarget = () => (isle === 5 ? archTreeTarget() : isle >= 2 ? (isBlood() ? 125 : 90) : (isBlood() ? 82 : 60));
 
 function npcFaceTex(kind) {
     const cv = document.createElement("canvas");
@@ -4278,7 +4700,7 @@ function buildIsle2() {
             col.push(c.r, c.g, c.b);
         }
         g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-        scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+        scene.add(terrainMesh[2] = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
         const wg = new THREE.PlaneGeometry(760, 760, 152, 152);
         wg.rotateX(-Math.PI / 2);
         const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x56d8d0), mid = new THREE.Color(0x2f86b8), deep = new THREE.Color(0x174a7a);
@@ -4296,7 +4718,7 @@ function buildIsle2() {
         isle2.foam = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
         scene.add(isle2.foam);
         // the lake
-        const lake = new THREE.Mesh(new THREE.CircleGeometry(LAKE2.r + 2.5, 22), new THREE.MeshLambertMaterial({ color: 0x3a9ac0, emissive: 0x0a2a40, transparent: true, opacity: 0.88, flatShading: true }));
+        const lake = new THREE.Mesh(new THREE.CircleGeometry(LAKE2.r + 2.5, 22), wtr(new THREE.MeshLambertMaterial({ color: 0x3a9ac0, emissive: 0x0a2a40, transparent: true, opacity: 0.88, flatShading: true })));
         lake.rotation.x = -Math.PI / 2; lake.position.set(LAKE2.x, -0.3, LAKE2.z);
         scene.add(lake);
         circles.push({ x: LAKE2.x, z: LAKE2.z, r: LAKE2.r - 1.2 });
@@ -4675,7 +5097,7 @@ function gunItems() {
     return out;
 }
 function gearItems2() {
-    const k3 = isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
+    const k3 = isle === 5 ? 200 : isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
     return [
         { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees and brings back their materials. Hits for ${ghostHit()} (80% of your axe). Owned: ${save.ghosts}`, cost: ghostCost() * 15, buy() { save.ghosts++; syncGhosts(); } },
         { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
@@ -4778,21 +5200,23 @@ const DECK = V3(0.55, 2.55, 3.0), deckV = new THREE.Vector3(); // where you stan
 const deckEye = (boat = ferryBoat) => { boat.updateMatrixWorld(); return deckV.copy(DECK).applyMatrix4(boat.matrixWorld); };
 function say(t) { const e = $("rideCap"); e.textContent = t; e.classList.toggle("show", !!t); }
 // which ferry you're riding: Pine Island's (to the Highland Isle) or the Highland Isle's (to Mooncap Isle)
-const rideCfg = n => (n === 3
+const rideCfg = n => (n === 4
+    ? { boat: isle4.boat4, man: ferryman4, pt: dock4Pt, DIR: D4DIR, A: D4LEN - 7, S: 4.4, lines: ["The smoke thins. The sea turns turquoise...", "Islands. Dozens of them, glittering in the sun."], finish: finishRebirth4 }
+    : n === 3
     ? { boat: isle3.boat3, man: ferryman3, pt: dock3Pt, DIR: D3DIR, A: D3LEN - 7, S: 4.4, lines: ["The air turns hot. Ash drifts over the water...", "A mountain on fire rises out of the sea."], finish: finishRebirth3 }
     : n === 2
     ? { boat: ferryBoat2, man: ferryman2, pt: dock2Pt, DIR: D2DIR, A: D2LEN - 7, S: 4.4, lines: ["The violet light grows closer...", "Two moons rise over the water."], finish: finishRebirth2 }
     : { boat: ferryBoat, man: ferryman, pt: dockPt, DIR: FDIR, A: BOAT_A, S: BOAT_S, lines: ["The golden light grows closer...", "A new life awaits."], finish: finishRebirth });
 function startRebirthRide(from = 1) {
-    if (ride || (from === 3 ? !rebirth3Ready() : from === 2 ? !rebirth2Ready() : save.money < rebirthCost())) return;
+    if (ride || (from === 4 ? !rebirth4Ready() : from === 3 ? !rebirth3Ready() : from === 2 ? !rebirth2Ready() : save.money < rebirthCost())) return;
     closePanel();
     ride = { phase: "walk", t: 0, from: player.pos.clone(), fx: false, done: false, cfg: rideCfg(from) };
     mouseDown = false; endFishing();
     player.invuln = 99999; player.vel.set(0, 0, 0);
     const fl = labelList.find(l => l.el.textContent === "FERRYMAN" && l.isle === isle); if (fl) fl.visible = false;
-    $("rbSmall").textContent = from === 3 ? "REBIRTH 3 · ASHFALL ISLE" : from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
-    $("rebirthFx").classList.toggle("violet", from === 2); $("rebirthFx").classList.toggle("ember", from === 3);
-    say(from === 3 ? "All aboard. Mind the Heartwood, it's still warm." : from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
+    $("rbSmall").textContent = from === 4 ? "REBIRTH 4 · THE ARCHIPELAGO" : from === 3 ? "REBIRTH 3 · ASHFALL ISLE" : from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
+    $("rebirthFx").classList.toggle("violet", from === 2); $("rebirthFx").classList.toggle("ember", from === 3); $("rebirthFx").classList.toggle("ocean", from === 4);
+    say(from === 4 ? "All aboard. Hold on to something." : from === 3 ? "All aboard. Mind the Heartwood, it's still warm." : from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
     sfx(200, 0.9, "sine", 0.1, 2);
     writeSave();
 }
@@ -5219,10 +5643,11 @@ function leaveWorld() {
     if (isle === 1 && !worldSnap[1]) { snapWorld(1); isle1Water = waterMesh.geometry; isle1Emit = smokeEmit.slice(); }
     if (isle === 3 && fight3.on) endFight(false, true);
     if (isle === 4 && fight4.on) endFight4(false, true);
+    if (isle === 5) B5.on = false;
     for (const p of smokePuffs) if (p.m.parent === isle1) { isle1.remove(p.m); scene.add(p.m); }
 }
 function showWorld(n) {
-    isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3; isle4G.visible = n === 4;
+    isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3; isle4G.visible = n === 4; isle5G.visible = n === 5;
     moon2.visible = false; for (const a of aurora) a.visible = false; spores3.visible = n === 3; ash4.visible = n === 4;
     wisps.material.color.setHex(n === 4 ? 0xffa060 : n === 3 ? 0xffb0f0 : 0x9dffd0);
     ghostMat.color.setHex(n === 4 ? 0xffb080 : n === 3 ? 0xd0b0ff : 0x9fe8ff); // the ghosts take on each island's glow
@@ -5456,7 +5881,7 @@ function buildIsle3() {
             col.push(c.r, c.g, c.b);
         }
         g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-        scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+        scene.add(terrainMesh[3] = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
         const wg = new THREE.PlaneGeometry(760, 760, 152, 152);
         wg.rotateX(-Math.PI / 2);
         const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x7ae4f4), mid = new THREE.Color(0x4a6ad8), deep = new THREE.Color(0x221a62);
@@ -5635,7 +6060,7 @@ function buildIsle3() {
     // ----- the Moonwell -----
     {
         const y0 = -0.3;
-        const water = new THREE.Mesh(new THREE.CircleGeometry(WELL.r + 2.6, 28), new THREE.MeshLambertMaterial({ color: 0x5ae0e8, emissive: 0x1a8a9a, transparent: true, opacity: 0.86, flatShading: true }));
+        const water = new THREE.Mesh(new THREE.CircleGeometry(WELL.r + 2.6, 28), wtr(new THREE.MeshLambertMaterial({ color: 0x5ae0e8, emissive: 0x1a8a9a, transparent: true, opacity: 0.86, flatShading: true })));
         water.rotation.x = -Math.PI / 2; water.position.set(WELL.x, y0, WELL.z); scene.add(water); isle3.wellWater = water;
         const sparkle = batch(glowM(0xd8ffff));
         for (let i = 0; i < 26; i++) { const a = srand() * 6.283, d = srange(0.5, WELL.r); sparkle.add(ICO, WELL.x + Math.cos(a) * d, y0 + 0.05, WELL.z + Math.sin(a) * d, 0, 0, 0, 0.09, 0.02, 0.09); }
@@ -6605,7 +7030,7 @@ function buildIsle4() {
             col.push(c.r, c.g, c.b);
         }
         g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-        scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+        scene.add(terrainMesh[4] = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
         const wg = new THREE.PlaneGeometry(760, 760, 152, 152);
         wg.rotateX(-Math.PI / 2);
         const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x3a8a8a), mid = new THREE.Color(0x24506a), deep = new THREE.Color(0x101e30);
@@ -6707,7 +7132,7 @@ function buildIsle4() {
         for (let i = 0; i < LEN; i++) for (const sd of [-1.9, 1.9]) { const p = pt(i + 0.5, sd, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
         posts.build(); rails.build(); bulbs.build();
         for (const sd of [-2.0, 2.0]) { const p = pt(3.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
-        const [a1, a2, c1] = kind === "arr" ? ["ARRIVALS", "FROM MOONCAP ISLE", "#ffa050"] : ["REBIRTH 4", "COMING SOON", "#9fe8ff"];
+        const [a1, a2, c1] = kind === "arr" ? ["ARRIVALS", "FROM MOONCAP ISLE", "#ffa050"] : ["REBIRTH 4", "THE ARCHIPELAGO", "#9fe8ff"];
         const s1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(kind === "arr" ? "WELCOME TO" : a1, kind === "arr" ? "ASHFALL ISLE" : a2, c1) })); s1.position.copy(pt(3.5, 0, 3.3)); s1.rotation.y = kind === "arr" ? yaw : yaw + Math.PI; scene.add(s1);
         const s2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(kind === "arr" ? a1 : "EMBER CAMP", kind === "arr" ? a2 : "THIS WAY ↑", c1) })); s2.position.copy(pt(3.5, 0, 3.3)); s2.rotation.y = kind === "arr" ? yaw + Math.PI : yaw; scene.add(s2);
         const dl = label(kind === "arr" ? "ARRIVALS" : "REBIRTH 4 FERRY", c1, 3.2, 0.7); dl.position.copy(pt(3.5, 0, 4.6)); dl.maxD = 80;
@@ -6725,11 +7150,11 @@ function buildIsle4() {
         const fm = label("FERRYMAN", "#c8a0ff", 2.6, 0.6); fm.position.set(FERRYMAN4.x, 4.7, FERRYMAN4.z); fm.maxD = 60;
         const FI = dock4Pt(D4LEN + 240);
         const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 220, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.1, fog: false, depthWrite: false, side: THREE.DoubleSide })); beam.position.set(FI.x, 110, FI.z); scene.add(beam); isle4.beam = beam;
-        const bl = label("???", "#9fe8ff", 4.2, 1.0); bl.position.set(FI.x, 46, FI.z); bl.maxD = 420; bl.blurK = 0.25;
+        const bl = label("THE ARCHIPELAGO", "#9fe8ff", 4.2, 1.0); bl.position.set(FI.x, 46, FI.z); bl.maxD = 420; bl.blurK = 0.25;
     }
     // ----- landmarks -----
     {   // hot springs: steaming turquoise pools that heal you
-        const w = new THREE.Mesh(new THREE.CircleGeometry(SPRINGS.r + 1, 24), new THREE.MeshLambertMaterial({ color: 0x5ad8e8, emissive: 0x1a6a7a, transparent: true, opacity: 0.85, flatShading: true }));
+        const w = new THREE.Mesh(new THREE.CircleGeometry(SPRINGS.r + 1, 24), wtr(new THREE.MeshLambertMaterial({ color: 0x5ad8e8, emissive: 0x1a6a7a, transparent: true, opacity: 0.85, flatShading: true })));
         w.rotation.x = -Math.PI / 2; w.position.set(SPRINGS.x, -0.25, SPRINGS.z); scene.add(w);
         const rim = batch(lamb(0xd8c8a8)); for (let i = 0; i < 22; i++) { const a = (i / 22) * 6.283, x = SPRINGS.x + Math.cos(a) * (SPRINGS.r + 1.4), z = SPRINGS.z + Math.sin(a) * (SPRINGS.r + 1.4); rim.add(ICO, x, terrain4(x, z) + 0.2, z, srand(), srand() * 3, 0, rand(0.5, 1), 0.4, rand(0.5, 1)); } rim.build();
         for (let i = 0; i < 4; i++) isle4.emit.push({ x: SPRINGS.x + rand(-4, 4), y: 0.2, z: SPRINGS.z + rand(-4, 4), rate: 1.2, acc: srand(), steam: true });
@@ -6804,6 +7229,7 @@ function finishRebirth3() {
 function enterIsle4() {
     leaveWorld();
     if (!isle4Built) { buildIsle4(); buildCasino(4); snapWorld(4); } else loadWorld(4);
+    if (casinos[4]) casino = casinos[4];
     isle = 4; save.isle = 4;
     showWorld(4);
     groundFn = groundY4;
@@ -6860,7 +7286,7 @@ function nearest4() {
 }
 const SMITH4_SAY = ["Obsidian takes an edge you could shave a mountain with.", "Ember burns inside the blade forever. Don't lick it.", "Sulfur makes the rounds go bang. Bigger bang.", "Everything here is forged in the volcano's breath."];
 const DEPOT4_SAY = ["Ash by the barrel, feathers by the one. I buy it all.", "Phoenix Feathers? Careful, they're still warm.", "Obsidian sells. Sells sharp."];
-function openFerry4() { ferryConfirm = 0; $("ferrySay").textContent = "“Ash on my coat, ash in my boots. I'm building the next boat out of something that won't burn.”"; openPanel("ferry"); }
+function openFerry4() { ferryConfirm = 0; $("ferrySay").textContent = "“She's built from something that won't burn. Bring me the King's cores and I'll take you past the smoke.”"; openPanel("ferry"); }
 function renderFerry4() {
     document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
     const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage, +${(save.rebirths || 0) * 50} max HP)</span></div>
@@ -7184,8 +7610,8 @@ function updateEruption(dt) {
 // =====================================================================
 //  1.4.0: wildlife, a little ecosystem, and decorations on every island
 // =====================================================================
-const wildDone = {}, wildBy = { 1: [], 2: [], 3: [], 4: [] };
-const isleGroup = n => [null, isle1, isle2G, isle3G, isle4G][n];
+const wildDone = {}, wildBy = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+const isleGroup = n => [null, isle1, isle2G, isle3G, isle4G, isle5G][n];
 // where wildlife may stand or walk: on land, out of camp, clear of landmarks, lakes, lava and the docks
 function wildOk(x, z, walk) {
     const d = Math.hypot(x, z);
@@ -7873,6 +8299,9 @@ function populate(n) {
         P(10, (x, z) => addWild(n, "crow", makeCrow(), x, z));
         sky("bat", () => makeBat(0xff6a3a), 8, [14, 26], { night: true });
         sky("skycrow", makeCrow, 5, [20, 32], { day: true });
+    } else if (n === 5) { // crabs scuttling, gulls on the sand and over the water
+        P(14, (x, z) => addWild(n, "crab5", makeCrab(), x, z));
+        P(10, (x, z) => addWild(n, "butterfly", makeButterfly(), x, z));
     }
 }
 function buildWild(n) {
@@ -7888,7 +8317,13 @@ function wStep(c, tx, tz, sp, dt) {
     c.g.rotation.y += angDiff(Math.atan2(dx, dz), c.g.rotation.y) * Math.min(1, 8 * dt);
     return d;
 }
-const SMALL_WILD = { rabbit: 1, squirrel: 1, marmot: 1, shroom: 1, snail: 1, beetle: 1, salamander: 1, moth: 1, butterfly: 1, crow: 1 };
+// beach crabs: wander a little, scuttle off when you come close
+function crab5AI(c, dt, dp, px, pz, live) {
+    if (live && dp < 5) { const ax = c.x - px, az = c.z - pz, l = Math.hypot(ax, az) || 1; wStep(c, c.x + ax / l * 3, c.z + az / l * 3, 3.6, dt); return; }
+    if (c.t <= 0) { c.t = rand(1.5, 5); c.tx = c.x + rand(-3, 3); c.tz = c.z + rand(-3, 3); }
+    if (c.tx !== undefined && Math.hypot(c.tx - c.x, c.tz - c.z) > 0.2) wStep(c, c.tx, c.tz, 1.1, dt);
+}
+const SMALL_WILD = { crab5: 1, rabbit: 1, squirrel: 1, marmot: 1, shroom: 1, snail: 1, beetle: 1, salamander: 1, moth: 1, butterfly: 1, crow: 1 };
 function updateWild(dt) {
     if (!wildDone[isle]) buildWild(isle);
     const list = wildBy[isle], px = player.pos.x, pz = player.pos.z, night = dayAmt() < 0.25, live = state === "playing", panic = isle === 4 && eruptLeft > 0;
@@ -7910,6 +8345,7 @@ function updateWild(dt) {
             case "shroom": shroomAI(c, dt, dp, live); break;
             case "snail": snailAI(c, dt, dp); break;
             case "beetle": beetleAI(c, dt, dp, live, panic); break;
+            case "crab5": crab5AI(c, dt, dp, px, pz, live); break;
             case "salamander": salamanderAI(c, dt, dp, px, pz, live, panic); break;
             case "moth": mothAI(c, dt, dp, px, pz, night); continue;
             case "butterfly": butterflyAI(c, dt); continue;
@@ -8064,9 +8500,10 @@ function updateAxeRunes() {
 
 // ---------- the Casino: a tower on the newest island. Walk through its doors (1.6.0) ----------
 // it always lives on the latest island: when a new island ships, point CASINO_ISLE at it and give it a style here
-const CASINO_ISLE = 4;
+const CASINO_ISLE = 4, casinos = {}; // the tower stands on Ashfall and on Port Haven
 const CASINO_STYLE = {
-    4: { at: () => at4(-0.55, 104), gy: (x, z) => groundY4(x, z), base: 0x221c1a, wall: 0x2c2624, trim: 0x9a7a3a, glow: 0xff8a3a, dim: 0x5a2a10, roof: 0x161214, sign: "#ff9a4a", rock: 0x2a2424, lm: "#ffb060" }
+    4: { at: () => at4(-0.55, 104), gy: (x, z) => groundY4(x, z), base: 0x221c1a, wall: 0x2c2624, trim: 0x9a7a3a, glow: 0xff8a3a, dim: 0x5a2a10, roof: 0x161214, sign: "#ff9a4a", rock: 0x2a2424, lm: "#ffb060" },
+    5: { at: () => ({ x: Math.cos(-0.75) * 60, z: Math.sin(-0.75) * 60 }), gy: (x, z) => groundY5(x, z), base: 0xe8e0d0, wall: 0xf4f0e8, trim: 0xd8a840, glow: 0x5ae8ff, dim: 0x1a6a8a, roof: 0x1a4a6a, sign: "#5ae8ff", rock: 0xc8b898, lm: "#7af0ff" }
 };
 let casino = null;
 const OCTA = new THREE.OctahedronGeometry(1, 0);
@@ -8078,7 +8515,7 @@ function casinoTex(lines, w, h, bg) {
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 function buildCasino(n) {
-    const S = CASINO_STYLE[n]; if (!S || n !== CASINO_ISLE) return;
+    const S = CASINO_STYLE[n]; if (!S || (n !== 4 && n !== 5)) return;
     const prev = addTgt, prevB = curBuild; addTgt = isleGroup(n); curBuild = n;
     const p = S.at(), x = p.x, z = p.z, face = Math.atan2(-x, -z), gy = S.gy(x, z) - 0.4;
     const g = new THREE.Group(); g.position.set(x, gy, z); g.rotation.y = face; scene.add(g);
@@ -8130,8 +8567,11 @@ function buildCasino(n) {
     for (const [lx, lz, r] of [[-6.2, 9.4, 1], [-4.6, 10.6, 0.8], [3.5, 13, 0.6]]) { const w2 = toW(lx, lz); circles.push({ x: w2.x, z: w2.z, r }); }
     const door = { x: x + Math.sin(face) * 11.4, z: z + Math.cos(face) * 11.4 };
     const lm = { name: "THE CASINO", x, z, r: 13, col: S.lm };
+    // a floating nametag over the tower, visible from across the island
+    const tag = label("THE CASINO", S.lm, 4.4, 1.0); tag.position.set(x, gy + 43, z); tag.maxD = 260; tag.blurK = 0.35;
+    const tag2 = label("OPEN 24/7", "#ffffff", 3, 0.7); tag2.position.set(x, gy + 39.5, z); tag2.maxD = 200; tag2.blurK = 0.35;
     if (n === 4) LM4.push(lm);
-    casino = { isle: n, x, z, door, signMat };
+    casino = casinos[n] = { isle: n, x, z, door, signMat };
     addTgt = prev; curBuild = prevB;
 }
 function updateCasino() {
@@ -8219,11 +8659,11 @@ function buildCasinoHall() {
     const gold = new THREE.MeshLambertMaterial({ color: 0xd8a840, emissive: 0x3a2a08, flatShading: true }), darkWood = lamb(0x2a140c), marble = lamb(0xe8e0d8);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ map: carpetTex() })); floor.rotation.x = -Math.PI / 2; floor.position.set(CSX, 0.01, cz); scene.add(floor);
     const wt = wallTex(), wallM = new THREE.MeshLambertMaterial({ map: wt });
-    for (const [x, z, w, d, ry] of [[CSX, CS_Z0, W, 0, 0], [CSX, CS_Z1, W, 0, Math.PI], [CS_X0, cz, D, 0, Math.PI / 2], [CS_X1, cz, D, 0, -Math.PI / 2]]) {
+    for (const [x, z, w, d, ry] of [[CSX, CS_Z0, W, 0, 0], [CS_X0, cz, D, 0, Math.PI / 2], [CS_X1, cz, D, 0, -Math.PI / 2]]) {
         const m = new THREE.Mesh(new THREE.PlaneGeometry(w, CS_H), wallM); m.position.set(x, CS_H / 2, z); m.rotation.y = ry; scene.add(m);
     }
     const wain = batch(darkWood), trimB = batch(gold);
-    for (const [x, z, sx, sz] of [[CSX, CS_Z0 + 0.15, W, 0.3], [CSX, CS_Z1 - 0.15, W, 0.3], [CS_X0 + 0.15, cz, 0.3, D], [CS_X1 - 0.15, cz, 0.3, D]]) {
+    for (const [x, z, sx, sz] of [[CSX, CS_Z0 + 0.15, W, 0.3], [CS_X0 + 0.15, cz, 0.3, D], [CS_X1 - 0.15, cz, 0.3, D]]) {
         wain.add(BOX, x, 0.6, z, 0, 0, 0, sx, 1.2, sz);
         trimB.add(BOX, x, 1.22, z, 0, 0, 0, sx + 0.02, 0.08, sz + 0.06);
         trimB.add(BOX, x, CS_H - 0.5, z, 0, 0, 0, sx + 0.02, 0.12, sz + 0.06);
@@ -8348,6 +8788,7 @@ function buildCasinoHall() {
         const p = makeHumanoid({ face: "clerk", skin: [0xf0c8a0, 0xc89070, 0x8a5a3a][Math.floor(Math.random() * 3)], shirt: sh, pants: pa, hair: [0x2a1a10, 0x8a5a2a, 0xd8c08a][Math.floor(Math.random() * 3)] });
         p.g.position.set(x, 0, z); p.g.rotation.y = ry; scene.add(p.g); p.yaw = ry; p.patron = true; casinoNpcs.push(p);
     }
+    buildCasinoWing();
     wain.build(); trimB.build();
     addTgt = prev; curBuild = prevB;
 }
@@ -8381,12 +8822,14 @@ function leaveCasino() {
     });
 }
 function clampCasino(p) {
-    p.x = clamp(p.x, CS_X0 + 0.6, CS_X1 - 0.6); p.z = clamp(p.z, CS_Z0 + 0.6, CS_Z1 - 0.6);
+    p.x = clamp(p.x, CS_X0 + 0.6, CS_X1 - 0.6); p.z = clamp(p.z, CS_Z0 + 0.6, WING_Z1 - 0.6);
+    clampWing(p);
     if (p.x < CS_X0 + 3.0 && p.z > SLOT_Z[0] - 1.5 && p.z < SLOT_Z[5] + 1.5) p.x = CS_X0 + 3.0; // the slot machines
     if (p.x > BAR.x0 - 0.5 && p.z > BAR.z0 - 0.4 && p.z < BAR.z1 + 0.4) p.x = BAR.x0 - 0.5; // the bar counter
     for (const c of csCircles) { const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), m = c.r + 0.45; if (d < m && d > 0.001) { p.x = c.x + dx / d * m; p.z = c.z + dz / d * m; } }
 }
 function nearestCasino() {
+    const wn = nearestWing(); if (wn) return wn;
     const px = player.pos.x, pz = player.pos.z;
     for (let i = 0; i < SLOT_Z.length; i++) if (px < CS_X0 + 4.6 && Math.abs(pz - SLOT_Z[i]) < 1.8) return { k: "cslot", i };
     if (Math.hypot(px - ROUL.x, pz - ROUL.z) < 4.9) return { k: "croul" };
@@ -8397,6 +8840,7 @@ function nearestCasino() {
 }
 const CS_PROMPTS = { cslot: () => "[F] Play the slot machine", croul: () => "[F] Play roulette", cbj: () => "[F] Play blackjack", cwheel: () => (save.casino.wheelDay !== save.day ? "[F] Spin the Wheel of Fortune (FREE today!)" : "[F] Spin the Wheel of Fortune"), cbar: () => "[F] Order a drink" };
 function casinoInteract(n) {
+    if (wingInteract(n)) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
     if (n.k === "cslot") { CS.slot = n.i; openCasino("slots", pick(["Pull the lever, hotshot.", "Three sevens. That's all you need.", "This one's been running hot all night."])); }
     else if (n.k === "croul") openCasino("roulette", pick(["Place your bets.", "Red or black? Trust your gut.", "No more bets... after you bet."]));
@@ -8421,16 +8865,17 @@ function openCasino(game, say) {
 }
 function csMsg(html, cls = "") { const m = $("csMsg"); m.innerHTML = html; m.className = cls; if (cls) { m.classList.remove("pop"); void m.offsetWidth; m.classList.add("pop"); } }
 function renderBetRow() {
-    if (CS.game === "wheel" || CS.game === "bar") { $("csBet").innerHTML = ""; return; }
+    if (CS.game === "wheel" || CS.game === "bar" || (CSG[CS.game] && CSG[CS.game].noBet)) { $("csBet").innerHTML = ""; return; }
     const b = curBet();
     $("csBet").innerHTML = `<span class="lbl">BET</span>` + CHIPS.map(v => `<button class="chip ${b === v ? "on" : ""} c${v}" data-chip="${v}" ${save.money < v && b !== v ? "disabled" : ""}>${chipLbl(v)}</button>`).join("") + `<button class="chip max" data-chip="max" ${save.money < 1 ? "disabled" : ""}>MAX</button><span class="betv">${money(b)}</span>`;
 }
 function renderCasinoGame() {
     const G = $("csGame");
+    if (CSG[CS.game]) { CSG[CS.game].render(G); renderBetRow(); $("csFoot").textContent = csFoot(); return; }
     if (CS.game === "slots") {
         G.innerHTML = `<div class="slotm"><div class="slotTop">★ LUCKY 7s ★ <small>MACHINE ${CS.slot + 1}</small></div>
           <div class="reels">${[0, 1, 2].map(k => `<div class="reel"><div class="strip" id="strip${k}">${stripHtml([SYMS[(k * 2) % 6], slotMachines[CS.slot] ? slotMachines[CS.slot].syms[k] : SYMS[k], SYMS[(k + 3) % 6]])}</div></div>`).join("")}<div class="payline"></div></div>
-          <div class="paytable"><span><b class="s7">7 7 7</b> ×100</span><span><b class="sBAR">BAR</b>×3 ×25</span><span><b class="sstar">★★★</b> ×12</span><span><b class="sdia">♦♦♦</b> ×6</span><span><b class="shrt">♥♥♥</b> ×3</span><span><b class="sclb">♣♣♣</b> ×2</span><span>any pair ×1</span></div></div>
+          <div class="pjack">PROGRESSIVE JACKPOT <b>${money(csPool())}</b> · line up 7 7 7 to win it all</div><div class="paytable"><span><b class="s7">7 7 7</b> ×100 + JACKPOT</span><span><b class="sBAR">BAR</b>×3 ×25</span><span><b class="sstar">★★★</b> ×12</span><span><b class="sdia">♦♦♦</b> ×6</span><span><b class="shrt">♥♥♥</b> ×3</span><span><b class="sclb">♣♣♣</b> ×2</span><span>any pair ×1</span></div></div>
           <div class="csActions"><button class="csbtn big" data-cs="spin">SPIN <kbd>Space</kbd></button><button class="csbtn" data-cs="auto">AUTO: ${CS.auto ? "ON" : "OFF"}</button></div>`;
     } else if (CS.game === "blackjack") {
         G.innerHTML = `<div class="bjTable"><div class="bjLbl">DEALER <b id="bjDv"></b></div><div class="hand" id="bjDealer"></div><div class="bjMid">BLACKJACK PAYS 3 TO 2 · DEALER STANDS ON 17</div><div class="hand" id="bjYou"></div><div class="bjLbl">YOU <b id="bjYv"></b></div></div><div class="csActions" id="bjAct"></div>`;
@@ -8458,18 +8903,18 @@ function renderCasinoGame() {
         G.innerHTML = `<div class="barList">${DRINKS.map((d, i) => `<div class="drink" data-drink="${i}"><b>${d.n}</b><small>${d.d}</small><span>${d.p ? money(d.p * drinkBase()) : "FREE"}</span></div>`).join("")}</div>`;
     }
     renderBetRow();
-    $("csFoot").textContent = `Casino total: ${save.casino.net >= 0 ? "+" : "-"}${money(Math.abs(save.casino.net || 0))} overall · biggest win ${money(save.casino.big || 0)} · F or Esc to leave the table`;
+    $("csFoot").textContent = csFoot();
 }
 const stripHtml = syms => syms.map(s => `<div class="sym ${symCls(s)}">${s}</div>`).join("");
 const symCls = s => ({ "7": "s7", "BAR": "sBAR", "★": "sstar", "♦": "sdia", "♥": "shrt", "♣": "sclb" })[s];
 function takeBet() {
     const b = curBet();
     if (save.money < b) { csMsg("Not enough cash for that bet.", "bad"); sfx(120, 0.15, "square", 0.08, 0.6); return 0; }
-    save.money -= b; save.casino.plays = (save.casino.plays || 0) + 1; save.casino.net = (save.casino.net || 0) - b;
+    save.money -= b; save.casino.plays = (save.casino.plays || 0) + 1; save.casino.net = (save.casino.net || 0) - b; wagered(b);
     return b;
 }
 function payOut(amount, bet) {
-    if (amount > 0) { save.money += amount; save.casino.net += amount; }
+    if (amount > 0) { save.money += amount; save.casino.net += amount; wonBack(amount); }
     const profit = amount - bet;
     if (profit > (save.casino.big || 0)) save.casino.big = profit;
     if (amount >= bet * 10) { coinRain(60); flash = 0.5; jingle(true); }
@@ -8494,6 +8939,7 @@ function rollSlots() {
 function spinSlots() {
     if (CS.busy) return;
     const bet = takeBet(); if (!bet) { CS.auto = false; return; }
+    save.casino.pool = csPool() + Math.round(bet * 0.03); // 3% of every spin feeds the progressive jackpot
     CS.busy = true; renderBetRow();
     const res = rollSlots(), sm = slotMachines[CS.slot];
     if (sm) { sm.spin = 2.1; sm.result = res.syms; }
@@ -8512,10 +8958,11 @@ function spinSlots() {
     for (let t = 0; t < 18; t++) setTimeout(() => sfx(900 + Math.random() * 300, 0.03, "square", 0.025, 1), t * 100);
     setTimeout(() => {
         CS.busy = false;
-        const win = Math.round(bet * res.mult);
+        const pool = res.jack ? csPool() : 0, win = Math.round(bet * res.mult) + pool;
+        if (res.jack) save.casino.pool = poolBase();
         payOut(win, bet);
         if (sm) sm.win = res.mult >= 2 ? 3 : 0;
-        if (res.jack) { save.casino.jack = (save.casino.jack || 0) + 1; csMsg(`★ JACKPOT! ★ +${money(win)}`, "jack"); toast(`JACKPOT! You won ${money(win)} on the slots!`, "cash"); }
+        if (res.jack) { save.casino.jack = (save.casino.jack || 0) + 1; csMsg(`★ PROGRESSIVE JACKPOT! ★ +${money(win)}`, "jack"); toast(`PROGRESSIVE JACKPOT! You won ${money(win)} on the slots!`, "cash"); }
         else if (res.mult > 1) csMsg(`WIN! +${money(win)}`, "win");
         else if (res.mult === 1) csMsg(`A pair: your ${money(bet)} back.`, "push");
         else csMsg(`No luck. -${money(bet)}`, "lose");
@@ -8700,6 +9147,7 @@ document.addEventListener("click", e => {
     else if (a === "wspin") spinWheel();
 });
 function casinoKey(code) {
+    if (CSG[CS.game] && CSG[CS.game].key && CSG[CS.game].key(code)) return true;
     if (code === "Space" || code === "Enter") {
         if (CS.game === "slots") spinSlots();
         else if (CS.game === "roulette") spinRoulette();
@@ -8722,12 +9170,15 @@ function casinoSky() {
 const LOUNGE = [[146.8, 174.6, 220, 261.6], [196, 246.9, 293.7, 349.2], [130.8, 164.8, 196, 246.9], [110, 130.8, 164.8, 196]];
 function updateCasinoInside(dt) {
     if (!casinoBuilt) return;
+    { const v = inCasino(); if (csLights.length && csLights[0].visible !== v) for (const L of csLights) L.visible = v; } // no casino lights lighting up the islands
+    dbUpdate();
     if (panel === "casino") { const cc = $("csCash"); if (cc) cc.textContent = money(save.money); }
     if (!inCasino()) return;
     updateNpcs(dt, casinoNpcs.filter(p => !p.patron));
     for (const p of casinoNpcs) if (p.patron) p.torso.scale.y = 1 + Math.sin(time * 2 + p.ph) * 0.015;
     for (const s of csSigns) s.material.opacity = Math.random() < 0.006 ? 0.4 : 0.95;
     for (const L of csLights) L.intensity = L.userData.b * (0.96 + Math.random() * 0.08);
+    updateWing(dt);
     if (roul3D) { roul3D.ang += dt * roul3D.speed; roul3D.disc.rotation.z = roul3D.ang; }
     if (wheel3D) wheel3D.disc.rotation.z = -(CS.wheelAng + Math.PI / 2);
     for (const sm of slotMachines) {
@@ -8752,8 +9203,1466 @@ function updateCasinoInside(dt) {
     if (casinoCd <= 0 && !caveFx && state === "playing" && player.pos.z < CS_Z0 + 1.1 && Math.abs(player.pos.x - CSX) < 2.4) leaveCasino();
 }
 
+
+// =====================================================================
+//  1.6.1: THE HIGH ROLLER WING. Through the arches either side of the Wheel of Fortune:
+//  the Tree Derby, Axe Rocket, Plinko, Mines, Video Poker, Scratchers and the VIP desk.
+//  The slots also get a progressive jackpot that grows with every spin.
+// =====================================================================
+let plBoard3D = null, derby3D = null, crashScreen = null, derbyBoard = null, jackSign = null; // the wing's 3D bits (built on first visit)
+const WING_Z1 = 46, ARCH_X = 12, ARCH_HW = 2.2, ARCH_H = 4.6;     // arches at CSX ± 12, 4.4 wide
+const DERBY = { x: CSX, z: 33.5, a: 7, b: 4.2 };                   // the oval race track
+const DERBY_WIN = { x: CSX, z: 24.6 };                             // the betting window, facing the arches
+const CRASH_POD = { x: CS_X1 - 3.6, z: 27.5 };
+const PLINKO_Z = 26.5, POKER_Z = [33, 36.5, 40];
+const MINES_AT = [{ x: CS_X1 - 3.6, z: 34.5 }, { x: CS_X1 - 3.6, z: 39.8 }];
+const VIP_AT = { x: CSX, z: 44.8 };
+const wingBoxes = [
+    [DERBY_WIN.x - 2.4, DERBY_WIN.x + 2.4, DERBY_WIN.z - 0.45, DERBY_WIN.z + 1.6],   // derby window counter + booth
+    [CS_X0, CS_X0 + 1.5, PLINKO_Z - 2, PLINKO_Z + 2],                               // the Plinko board
+    [CS_X0, CS_X0 + 2.5, POKER_Z[0] - 1, POKER_Z[2] + 1],                           // video poker machines
+    [CS_X1 - 2.6, CS_X1, 42.8, WING_Z1],                                            // scratch kiosk
+    [VIP_AT.x - 2.6, VIP_AT.x + 2.6, VIP_AT.z - 0.6, WING_Z1]                        // VIP desk
+];
+const wingCircles = [{ x: CRASH_POD.x, z: CRASH_POD.z, r: 0.55 }, ...MINES_AT.map(m => ({ x: m.x, z: m.z, r: 1.25 }))];
+const inWingArch = x => Math.abs(Math.abs(x - CSX) - ARCH_X) < ARCH_HW - 0.45;
+// keeps you out of the wing's furniture and the race track (called from clampCasino)
+function clampWing(p) {
+    // the wall between the hall and the wing, with its two arches
+    if (Math.abs(p.z - CS_Z1) < 0.55 && !inWingArch(p.x)) p.z = p.z < CS_Z1 ? CS_Z1 - 0.55 : CS_Z1 + 0.55;
+    if (p.z < CS_Z1) return;
+    // the race track rail is an ellipse you walk around
+    const ex = (p.x - DERBY.x) / (DERBY.a + 1.1), ez = (p.z - DERBY.z) / (DERBY.b + 1.1), ed = Math.hypot(ex, ez);
+    if (ed < 1 && ed > 0.0001) { p.x = DERBY.x + (ex / ed) * (DERBY.a + 1.1); p.z = DERBY.z + (ez / ed) * (DERBY.b + 1.1); }
+    for (const b of wingBoxes) {
+        const r = 0.4; if (p.x < b[0] - r || p.x > b[1] + r || p.z < b[2] - r || p.z > b[3] + r) continue;
+        const dl = p.x - (b[0] - r), dr = b[1] + r - p.x, dn = p.z - (b[2] - r), df = b[3] + r - p.z, m = Math.min(dl, dr, dn, df);
+        if (m === dl) p.x = b[0] - r; else if (m === dr) p.x = b[1] + r; else if (m === dn) p.z = b[2] - r; else p.z = b[3] + r;
+    }
+    for (const c of wingCircles) { const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), m = c.r + 0.45; if (d < m && d > 0.001) { p.x = c.x + dx / d * m; p.z = c.z + dz / d * m; } }
+}
+function nearestWing() {
+    const px = player.pos.x, pz = player.pos.z;
+    if (pz < CS_Z1) return null;
+    if (Math.abs(px - DERBY_WIN.x) < 2.8 && pz < DERBY_WIN.z - 0.2 && pz > DERBY_WIN.z - 3.4) return { k: "cderby" };
+    if (Math.hypot(px - CRASH_POD.x, pz - CRASH_POD.z) < 2.4) return { k: "ccrash" };
+    if (px < CS_X0 + 3.6 && Math.abs(pz - PLINKO_Z) < 2.2) return { k: "cplinko" };
+    for (let i = 0; i < POKER_Z.length; i++) if (px < CS_X0 + 4.2 && Math.abs(pz - POKER_Z[i]) < 1.6) return { k: "cpoker", i };
+    for (const m of MINES_AT) if (Math.hypot(px - m.x, pz - m.z) < 2.6) return { k: "cmines" };
+    if (px > CS_X1 - 4.8 && pz > 42) return { k: "cscratch" };
+    if (Math.abs(px - VIP_AT.x) < 3.4 && pz > 41.4) return { k: "cvip" };
+    return null;
+}
+Object.assign(CS_PROMPTS, {
+    cderby: () => (DB.phase === "race" ? "[F] Watch the Tree Derby" : "[F] Bet on the Tree Derby"), ccrash: () => "[F] Play Axe Rocket", cplinko: () => "[F] Play Plinko",
+    cpoker: () => "[F] Play Video Poker", cmines: () => "[F] Play Mines", cscratch: () => "[F] Buy a scratch card", cvip: () => (vipClaimable() ? "[F] VIP desk (a gift is waiting!)" : "[F] Visit the VIP desk")
+});
+Object.assign(CS_TITLE, { derby: "TREE DERBY", crash: "AXE ROCKET", plinko: "PLINKO", mines: "MINES", poker: "VIDEO POKER", scratch: "SCRATCHERS", vip: "VIP LOUNGE" });
+function wingInteract(n) {
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    const say = {
+        cderby: ["Five trees, one track. Pick a winner.", "Old Oaky's been training all week.", "Never bet against a pine in the rain."],
+        ccrash: ["It goes up. It goes boom. Cash out in between.", "How high are you willing to ride?"], cplinko: ["Drop it and pray.", "Edges pay big. The middle... not so much."],
+        cpoker: ["Jacks or better, friend.", "Hold the good ones."], cmines: ["Twenty-five tiles. Some of them bite.", "Know when to walk away."],
+        cscratch: ["Scratch three of a kind and it's yours.", "Feeling lucky? These are hot today."], cvip: ["Welcome back. The house appreciates you.", "Right this way. VIPs only."]
+    }[n.k];
+    if (!say) return false;
+    if (n.k === "cpoker") VP.machine = n.i;
+    openCasino({ cderby: "derby", ccrash: "crash", cplinko: "plinko", cpoker: "poker", cmines: "mines", cscratch: "scratch", cvip: "vip" }[n.k], pick(say));
+    return true;
+}
+
+// ---- money helpers shared by the new games ----
+const csScale = () => Math.pow(2, save.rebirths || 0);
+const poolBase = () => Math.round(25 * wheelBase());
+const csPool = () => Math.max(save.casino.pool || 0, poolBase());
+function wagered(b) { save.casino.wag = (save.casino.wag || 0) + b; save.casino.wagT = (save.casino.wagT || 0) + b; }
+function wonBack(a) { save.casino.wonT = (save.casino.wonT || 0) + a; }
+const csFoot = () => `Casino total: ${save.casino.net >= 0 ? "+" : "-"}${money(Math.abs(save.casino.net || 0))} · biggest win ${money(save.casino.big || 0)} · VIP ${VIP[vipTier()].n} · F or Esc to leave`;
+const fmtX = m => (m >= 100 ? m.toFixed(0) : m.toFixed(2)) + "×";
+
+// =========================== AXE ROCKET (crash) ===========================
+const CR = { phase: "idle", bet: 0, m: 1, crash: 1, t0: 0, auto: 0, hist: [], cashed: 0, demo: { t0: 0, crash: 2, phase: "fly" } };
+const crM = t => Math.exp(0.11 * t);
+function crRoll() { const u = Math.random(); return u < 0.03 ? 1 : Math.min(1000, Math.max(1, Math.floor((0.97 / (1 - u)) * 100) / 100)); }
+function drawCrash(g, W, H, t, m, crashed, cashedAt) {
+    g.fillStyle = "#0c0612"; g.fillRect(0, 0, W, H);
+    const tMax = Math.max(8, t * 1.15), mMax = Math.max(2, m * 1.2), X = s => 40 + (s / tMax) * (W - 60), Y = v => H - 30 - ((v - 1) / (mMax - 1)) * (H - 60);
+    g.strokeStyle = "rgba(255,255,255,.07)"; g.lineWidth = 1; g.font = "12px Consolas"; g.fillStyle = "rgba(255,255,255,.4)";
+    for (let k = 1; k <= 5; k++) { const v = 1 + ((mMax - 1) * k) / 5, y = Y(v); g.beginPath(); g.moveTo(40, y); g.lineTo(W - 10, y); g.stroke(); g.fillText(v.toFixed(1) + "×", 2, y + 4); }
+    const col = crashed ? "#ff3a3a" : cashedAt ? "#6dffa0" : "#ffb020";
+    g.strokeStyle = col; g.lineWidth = 4; g.shadowColor = col; g.shadowBlur = 12; g.beginPath();
+    for (let k = 0; k <= 60; k++) { const s = (t * k) / 60, x = X(s), y = Y(crM(s)); k ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke(); g.shadowBlur = 0;
+    const tx = X(t), ty = Y(m), ang = Math.atan2(Y(crM(t)) - Y(crM(Math.max(0, t - 0.3))), X(t) - X(Math.max(0, t - 0.3)));
+    if (!crashed) { // the rocket axe, flame first
+        g.save(); g.translate(tx, ty); g.rotate(ang);
+        g.fillStyle = "#ff7a1a"; g.beginPath(); g.moveTo(-14, -5); g.lineTo(-30 - Math.random() * 12, 0); g.lineTo(-14, 5); g.fill();
+        g.fillStyle = "#8a5a34"; g.fillRect(-14, -3, 28, 6); g.fillStyle = "#cfd8ee"; g.beginPath(); g.moveTo(8, -3); g.lineTo(18, -16); g.quadraticCurveTo(26, -2, 18, 12); g.lineTo(8, 3); g.fill();
+        g.restore();
+    } else { g.fillStyle = "#ff5a1a"; for (let k = 0; k < 14; k++) { const a = (k / 14) * 6.28; g.beginPath(); g.arc(tx + Math.cos(a) * 16, ty + Math.sin(a) * 16, 5, 0, 7); g.fill(); } }
+    g.textAlign = "center"; g.font = `900 ${Math.round(H * 0.2)}px Consolas`; g.fillStyle = col; g.shadowColor = col; g.shadowBlur = 18;
+    g.fillText(crashed ? "CRASHED @ " + fmtX(m) : fmtX(m), W / 2, H * 0.36); g.shadowBlur = 0;
+    if (cashedAt && !crashed) { g.font = "700 18px Consolas"; g.fillStyle = "#6dffa0"; g.fillText("CASHED OUT @ " + fmtX(cashedAt), W / 2, H * 0.36 + 28); }
+    g.textAlign = "left";
+}
+function crRender(G) {
+    const flying = CR.phase === "fly";
+    G.innerHTML = `<div class="crWrap"><canvas id="crC" width="680" height="300"></canvas></div>
+      <div class="crRow"><span class="lbl">AUTO CASH-OUT</span>${[0, 1.5, 2, 3, 5, 10, 25].map(v => `<button class="pill ${CR.auto === v ? "on" : ""}" data-c2="auto:${v}">${v ? v + "×" : "OFF"}</button>`).join("")}</div>
+      <div class="crHist">LAST: ${CR.hist.map(v => `<span class="${v >= 2 ? "hi" : "lo"}">${fmtX(v)}</span>`).join("") || "—"}</div>
+      <div class="csActions" id="crAct">${flying ? (CR.cashed ? `<button class="csbtn" disabled>CASHED OUT +${money(Math.round(CR.bet * CR.cashed))}</button>` : `<button class="csbtn big green" data-c2="cash">CASH OUT <span id="crCash">${money(Math.round(CR.bet * CR.m))}</span> <kbd>Space</kbd></button>`) : `<button class="csbtn big" data-c2="launch">LAUNCH <kbd>Space</kbd></button>`}</div>`;
+    crDraw();
+}
+function crDraw() { const c = $("crC"); if (c && c.isConnected) drawCrash(c.getContext("2d"), c.width, c.height, CR.phase === "idle" ? 0 : (performance.now() - CR.t0) / 1000 * (CR.phase === "done" ? 0 : 1) + (CR.phase === "done" ? CR.tEnd : 0), CR.m, CR.phase === "done" && CR.m >= CR.crash, CR.cashed); }
+function crLaunch() {
+    if (CR.phase === "fly") return;
+    const bet = takeBet(); if (!bet) return;
+    Object.assign(CR, { phase: "fly", bet, m: 1, crash: crRoll(), t0: performance.now(), cashed: 0 });
+    csMsg("3... 2... 1... LIFT OFF!", ""); sfx(120, 0.6, "sawtooth", 0.08, 3);
+    if (panel === "casino" && CS.game === "crash") crRender($("csGame"));
+    let lastBeep = 0;
+    const tick = now => {
+        const t = (now - CR.t0) / 1000; CR.m = Math.min(crM(t), CR.crash);
+        if (!CR.cashed && CR.auto && CR.m >= CR.auto) crCash(CR.auto);
+        if (!CR.cashed && (panel !== "casino" || CS.game !== "crash")) crCash(CR.m); // walked away: we cash you out
+        if (now - lastBeep > Math.max(60, 400 / CR.m)) { lastBeep = now; sfx(300 + CR.m * 40, 0.03, "square", 0.02, 1); }
+        const cc = $("crCash"); if (cc) cc.textContent = money(Math.round(CR.bet * CR.m));
+        if (CR.m >= CR.crash) {
+            CR.phase = "done"; CR.tEnd = t; CR.hist.unshift(CR.crash); CR.hist.length = Math.min(CR.hist.length, 12);
+            sfx(80, 0.6, "sawtooth", 0.16, 0.3); sfx(50, 0.8, "square", 0.12, 0.4);
+            if (!CR.cashed) { payOut(0, CR.bet); csMsg(`CRASHED at ${fmtX(CR.crash)}. -${money(CR.bet)}`, "lose"); }
+            if (panel === "casino" && CS.game === "crash") { const keep = $("csMsg").innerHTML, cls = $("csMsg").className; crRender($("csGame")); renderBetRow(); $("csMsg").innerHTML = keep; $("csMsg").className = cls; }
+            return;
+        }
+        crDraw();
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+}
+function crCash(at) {
+    if (CR.phase !== "fly" || CR.cashed) return;
+    CR.cashed = Math.min(at || CR.m, CR.crash);
+    const win = Math.round(CR.bet * CR.cashed); payOut(win, CR.bet);
+    csMsg(`Cashed out at ${fmtX(CR.cashed)}! +${money(win)}`, CR.cashed >= 10 ? "jack" : "win");
+    if (panel === "casino" && CS.game === "crash") { const a = $("crAct"); if (a) a.innerHTML = `<button class="csbtn" disabled>CASHED OUT +${money(win)}</button>`; }
+    else toast(`Axe Rocket: cashed out at ${fmtX(CR.cashed)} for +${money(win)}`, "cash");
+}
+
+// =========================== PLINKO ===========================
+const PLINKO = { low: [10, 3, 1.6, 1.3, 1.1, 1, 0.5, 1, 1.1, 1.3, 1.6, 3, 10], med: [33, 11, 4, 2, 1.1, 0.5, 0.4, 0.5, 1.1, 2, 4, 11, 33], high: [170, 24, 8.1, 1.9, 0.7, 0.2, 0.2, 0.2, 0.7, 1.9, 8.1, 24, 170] };
+const PL = { risk: "med", balls: [], flash: {}, loop: false };
+const PL_ROWS = 12, PL_W = 520, PL_H = 470;
+const plSlotCol = m => (m >= 10 ? "#ff3a5a" : m >= 3 ? "#ff8a2a" : m >= 1.5 ? "#ffd040" : m >= 1 ? "#6dffa0" : "#5a8aff");
+// where a ball is, t rows into its fall (board coordinates 0..1)
+function plPos(b, t) {
+    const r = Math.min(PL_ROWS, Math.floor(t)), f = t - r;
+    let x = 0; for (let k = 0; k < r; k++) x += b.path[k] ? 0.5 : -0.5;
+    const nx = r < PL_ROWS ? x + (b.path[r] ? 0.5 : -0.5) : x;
+    const xx = x + (nx - x) * f, yy = r + f - Math.sin(f * Math.PI) * 0.35 * (r < PL_ROWS ? 1 : 0);
+    return { x: 0.5 + xx / (PL_ROWS + 2), y: (yy + 0.6) / (PL_ROWS + 1.6) };
+}
+function drawPlinko(g, W, H, balls, risk) {
+    g.fillStyle = "#0e0818"; g.fillRect(0, 0, W, H);
+    const M = PLINKO[risk], sp = W / (PL_ROWS + 2);
+    g.fillStyle = "#e8dcff";
+    for (let r = 0; r < PL_ROWS; r++) for (let k = 0; k <= r + 2; k++) { const x = W / 2 + (k - (r + 2) / 2) * sp, y = ((r + 1.1) / (PL_ROWS + 1.6)) * (H - 40); g.beginPath(); g.arc(x, y, 3.2, 0, 7); g.fill(); }
+    const sw = sp * 0.94, y0 = H - 34;
+    M.forEach((m, k) => { const x = W / 2 + (k - 6) * sp - sw / 2, lit = PL.flash[k] > performance.now(); g.fillStyle = plSlotCol(m); g.globalAlpha = lit ? 1 : 0.75; g.fillRect(x, y0 - (lit ? 6 : 0), sw, 28); g.globalAlpha = 1; g.fillStyle = "#14080e"; g.font = `800 ${m >= 100 ? 10 : 11}px Consolas`; g.textAlign = "center"; g.fillText(m + "×", x + sw / 2, y0 + 18 - (lit ? 6 : 0)); });
+    g.textAlign = "left";
+    for (const b of balls) { const p = plPos(b, b.t); g.fillStyle = "#ff5ad8"; g.shadowColor = "#ff5ad8"; g.shadowBlur = 10; g.beginPath(); g.arc(p.x * W, p.y * (H - 40), 7, 0, 7); g.fill(); g.shadowBlur = 0; }
+}
+function plRender(G) {
+    G.innerHTML = `<div class="plWrap"><canvas id="plC" width="${PL_W}" height="${PL_H}"></canvas>
+      <div class="plSide"><span class="lbl">RISK</span>${["low", "med", "high"].map(r => `<button class="pill ${PL.risk === r ? "on" : ""}" data-c2="risk:${r}">${r === "med" ? "MEDIUM" : r.toUpperCase()}</button>`).join("")}
+      <p>Each drop costs one bet. The ball bounces off 12 rows of pegs into a slot: the edges pay big, the middle pays small.</p><p>Drop as many balls as you like.</p></div></div>
+      <div class="csActions"><button class="csbtn big" data-c2="drop">DROP BALL <kbd>Space</kbd></button><button class="csbtn" data-c2="drop5">DROP 5</button></div>`;
+    const c = $("plC"); drawPlinko(c.getContext("2d"), PL_W, PL_H, PL.balls, PL.risk);
+}
+function plDrop() {
+    if (PL.balls.length >= 15) return;
+    const bet = takeBet(); if (!bet) return;
+    const path = []; for (let k = 0; k < PL_ROWS; k++) path.push(Math.random() < 0.5 ? 0 : 1);
+    const b = { path, t: 0, bet, risk: PL.risk, slot: path.reduce((s, v) => s + v, 0) };
+    PL.balls.push(b); plBoard3D && plBoard3D.drop(b);
+    sfx(1200, 0.05, "triangle", 0.05, 0.8);
+    if (!PL.loop) { PL.loop = true; let last = performance.now();
+        const tick = now => {
+            const dt = Math.min(0.05, (now - last) / 1000); last = now;
+            for (let i = PL.balls.length - 1; i >= 0; i--) {
+                const b = PL.balls[i], r0 = Math.floor(b.t); b.t += dt * 7.5;
+                if (Math.floor(b.t) !== r0 && b.t < PL_ROWS) sfx(1400 + Math.random() * 600, 0.02, "square", 0.015, 1);
+                if (b.t >= PL_ROWS + 0.4) { PL.balls.splice(i, 1); const m = PLINKO[b.risk][b.slot], win = Math.round(b.bet * m); payOut(win, b.bet); PL.flash[b.slot] = performance.now() + 500;
+                    csMsg(m >= 1 ? `${m}× · +${money(win)}` : `${m}× · ${money(win)} back`, m >= 10 ? "jack" : m > 1 ? "win" : "lose"); sfx(m >= 1 ? 900 : 300, 0.12, "triangle", 0.06, m >= 1 ? 1.4 : 0.7); }
+            }
+            const c = $("plC"); if (c && c.isConnected) drawPlinko(c.getContext("2d"), PL_W, PL_H, PL.balls, PL.risk);
+            if (PL.balls.length || Object.values(PL.flash).some(v => v > now)) requestAnimationFrame(tick); else PL.loop = false;
+        };
+        requestAnimationFrame(tick);
+    }
+}
+
+// =========================== MINES ===========================
+const MN = { mines: 3, phase: "idle", bet: 0, grid: [], open: [], picks: 0, boom: -1 };
+const mnMult = (mines, picks) => { let m = 1; for (let i = 0; i < picks; i++) m *= (25 - i) / (25 - mines - i); return picks ? m * 0.97 : 1; };
+function mnRender(G) {
+    const play = MN.phase === "play", cur = mnMult(MN.mines, MN.picks), nxt = mnMult(MN.mines, MN.picks + 1);
+    G.innerHTML = `<div class="mnWrap"><div class="mnGrid">${Array.from({ length: 25 }, (_, i) => {
+        const o = MN.open[i], mine = MN.grid[i], show = o || (MN.phase === "done" && mine);
+        return `<button class="mt ${show ? (mine ? (i === MN.boom ? "boom" : "mine") : "gem") : ""} ${MN.phase === "done" && !o && !mine ? "dim" : ""}" data-c2="t:${i}" ${play && !o ? "" : "disabled"}>${show ? (mine ? "✹" : "◆") : ""}</button>`; }).join("")}</div>
+      <div class="mnSide"><span class="lbl">MINES</span><div>${[1, 3, 5, 10, 20].map(n => `<button class="pill ${MN.mines === n ? "on" : ""}" data-c2="mines:${n}" ${play ? "disabled" : ""}>${n}</button>`).join("")}</div>
+      ${play ? `<p>Gems found: <b>${MN.picks}</b></p><p>Now: <b class="gold">${fmtX(cur)}</b> = ${money(Math.round(MN.bet * cur))}</p><p>Next gem: <b>${fmtX(nxt)}</b></p>` : `<p>Find gems, dodge mines. Every gem raises your multiplier. Cash out whenever you like, but hit a mine and you lose the bet.</p><p>More mines = bigger multipliers.</p>`}</div></div>
+      <div class="csActions">${play ? `<button class="csbtn big green" data-c2="mcash" ${MN.picks ? "" : "disabled"}>CASH OUT ${money(Math.round(MN.bet * cur))} <kbd>Space</kbd></button>` : `<button class="csbtn big" data-c2="mstart">START <kbd>Space</kbd></button>`}</div>`;
+}
+function mnStart() {
+    if (MN.phase === "play") return;
+    const bet = takeBet(); if (!bet) return;
+    const g = Array(25).fill(false); let n = 0; while (n < MN.mines) { const i = Math.floor(Math.random() * 25); if (!g[i]) { g[i] = true; n++; } }
+    Object.assign(MN, { phase: "play", bet, grid: g, open: Array(25).fill(false), picks: 0, boom: -1 });
+    csMsg("Pick a tile.", ""); mnRender($("csGame")); renderBetRow();
+}
+function mnPick(i) {
+    if (MN.phase !== "play" || MN.open[i]) return;
+    MN.open[i] = true;
+    if (MN.grid[i]) { MN.phase = "done"; MN.boom = i; payOut(0, MN.bet); csMsg(`BOOM! -${money(MN.bet)}`, "lose"); sfx(60, 0.6, "sawtooth", 0.18, 0.3); sfx(90, 0.4, "square", 0.12, 0.4); shake = 0.3; }
+    else { MN.picks++; sfx(900 + MN.picks * 60, 0.1, "triangle", 0.07, 1.3); if (MN.picks >= 25 - MN.mines) { mnCash(); return; } csMsg(`Gem! ${fmtX(mnMult(MN.mines, MN.picks))}`, "win"); }
+    mnRender($("csGame"));
+}
+function mnCash() {
+    if (MN.phase !== "play" || !MN.picks) return;
+    const m = mnMult(MN.mines, MN.picks), win = Math.round(MN.bet * m); MN.phase = "done";
+    payOut(win, MN.bet); csMsg(`Cashed out at ${fmtX(m)}! +${money(win)}`, m >= 10 ? "jack" : "win");
+    mnRender($("csGame")); renderBetRow();
+}
+
+// =========================== TREE DERBY ===========================
+const RACERS = [
+    { n: "Old Oaky", leaf: 0x3a7a2a, sash: 0xff3a3a, css: "#ff5a5a" }, { n: "Pine Bolt", leaf: 0x1e5a34, sash: 0xffd040, css: "#ffd040" },
+    { n: "Sir Birchalot", leaf: 0x9ac85a, sash: 0x3a8aff, css: "#5a9aff" }, { n: "Shroom Zoom", leaf: 0x7a3ad8, sash: 0xffffff, css: "#e8e0ff" },
+    { n: "Ember Dash", leaf: 0xff6a1a, sash: 0x2a2a2a, css: "#ff8a3a" }
+];
+const DB = { phase: "card", pick: -1, bet: 0, p: [], odds: [], fin: [], winner: -1, t0: 0, T: 10, prog: [0, 0, 0, 0, 0], order: [], last: [] };
+function dbCard() {
+    const w = RACERS.map(() => 0.4 + Math.random() * 1.6), fav = Math.floor(Math.random() * 5); w[fav] += 1.2;
+    const s = w.reduce((a, b) => a + b, 0);
+    DB.p = w.map(v => v / s); DB.odds = DB.p.map(p => Math.max(1.3, Math.floor((0.92 / p) * 10) / 10));
+    DB.phase = "card"; DB.prog = [0, 0, 0, 0, 0]; drawDerbyBoard();
+}
+dbCard();
+function dbStart() {
+    if (DB.phase === "race") return;
+    if (DB.phase === "done") { dbCard(); DB.pick = -1; derbyRender($("csGame")); return; }
+    if (DB.pick < 0) { csMsg("Pick a tree first.", "bad"); return; }
+    const bet = takeBet(); if (!bet) return;
+    DB.bet = bet;
+    let r = Math.random(), win = 0; for (let i = 0; i < 5; i++) { r -= DB.p[i]; if (r <= 0) { win = i; break; } win = i; }
+    DB.winner = win;
+    const others = [0, 1, 2, 3, 4].filter(i => i !== win).sort(() => Math.random() - 0.5);
+    DB.fin = []; DB.fin[win] = DB.T; others.forEach((i, k) => { DB.fin[i] = DB.T * (1.02 + k * 0.035 + Math.random() * 0.02); });
+    DB.wob = RACERS.map(() => [Math.random() * 6, 0.5 + Math.random(), Math.random() * 6]);
+    DB.order = [win, ...others]; DB.phase = "race"; DB.t0 = performance.now();
+    csMsg("And they're OFF!", ""); sfx(800, 0.5, "square", 0.08, 1); setTimeout(() => sfx(1000, 0.5, "square", 0.08, 1), 250);
+    derbyRender($("csGame"));
+}
+// how far round the track each racer is at time t (0..1); the winner crosses first
+function dbProg(i, t) {
+    const f = DB.fin[i], w = DB.wob[i], k = Math.min(1, t / f), wob = 0.05 * Math.sin(t * w[1] + w[0]) * Math.sin(Math.PI * k) + 0.02 * Math.sin(t * 3.1 + w[2]) * Math.sin(Math.PI * k);
+    return Math.min(1, Math.max(0, k + wob));
+}
+function dbUpdate() {
+    if (DB.phase !== "race") return;
+    const t = (performance.now() - DB.t0) / 1000;
+    DB.prog = DB.prog.map((_, i) => dbProg(i, t));
+    if (panel === "casino" && CS.game === "derby") { const c = $("dbC"); if (c && c.isConnected) drawDerbyRace(c.getContext("2d"), c.width, c.height); }
+    if (t >= Math.max(...DB.fin) + 0.4) {
+        DB.phase = "done"; DB.last.unshift(DB.winner); DB.last.length = Math.min(DB.last.length, 6);
+        const won = DB.pick === DB.winner, win = won ? Math.round(DB.bet * DB.odds[DB.winner]) : 0;
+        payOut(win, DB.bet);
+        const msg = won ? `${RACERS[DB.winner].n} WINS! +${money(win)}` : `${RACERS[DB.winner].n} wins. Your tree came ${["", "first", "second", "third", "fourth", "last"][DB.order.indexOf(DB.pick) + 1]}. -${money(DB.bet)}`;
+        if (panel === "casino" && CS.game === "derby") { csMsg(msg, won ? (DB.odds[DB.winner] >= 6 ? "jack" : "win") : "lose"); derbyRender($("csGame")); renderBetRow(); }
+        else if (DB.bet) toast("Tree Derby: " + msg, won ? "cash" : "");
+        DB.bet = 0; drawDerbyBoard();
+    }
+}
+function drawDerbyRace(g, W, H) {
+    g.fillStyle = "#1a3a1a"; g.fillRect(0, 0, W, H);
+    const lane = (H - 20) / 5, x0 = 70, x1 = W - 40;
+    for (let i = 0; i < 5; i++) { const y = 10 + i * lane; g.fillStyle = i % 2 ? "#6a4a2a" : "#7a5634"; g.fillRect(0, y, W, lane - 2); g.fillStyle = RACERS[i].css; g.font = "700 12px Consolas"; g.fillText(RACERS[i].n.split(" ")[0].toUpperCase(), 6, y + lane / 2 + 4); }
+    g.fillStyle = "#fff"; for (let k = 0; k < 10; k++) { g.fillStyle = k % 2 ? "#fff" : "#111"; g.fillRect(x1, 10 + k * (H - 20) / 10, 8, (H - 20) / 10); }
+    for (let i = 0; i < 5; i++) {
+        const y = 10 + i * lane + lane / 2, x = x0 + DB.prog[i] * (x1 - x0 - 10), bob = DB.phase === "race" ? Math.abs(Math.sin(performance.now() / 90 + i)) * 4 : 0, L = "#" + RACERS[i].leaf.toString(16).padStart(6, "0");
+        g.fillStyle = "#5a3a22"; g.fillRect(x - 3, y - 2 - bob, 6, 12);
+        g.fillStyle = L; g.beginPath(); g.moveTo(x, y - 20 - bob); g.lineTo(x + 12, y + 2 - bob); g.lineTo(x - 12, y + 2 - bob); g.fill();
+        g.fillStyle = RACERS[i].css; g.fillRect(x - 7, y - 6 - bob, 14, 4);
+        if (DB.pick === i) { g.strokeStyle = "#ffd040"; g.lineWidth = 2; g.strokeRect(x - 15, y - 23 - bob, 30, 36); }
+    }
+}
+function derbyRender(G) {
+    const racing = DB.phase === "race";
+    G.innerHTML = `<canvas id="dbC" width="680" height="200"></canvas>
+      <div class="dbCard">${RACERS.map((r, i) => `<button class="dbR ${DB.pick === i ? "on" : ""} ${DB.phase === "done" && DB.winner === i ? "won" : ""}" data-c2="pick:${i}" ${racing ? "disabled" : ""} style="--c:${r.css}"><b>${r.n}</b><span>${DB.odds[i].toFixed(1)}×</span><small>form ${"★".repeat(Math.max(1, Math.round(DB.p[i] * 12)))}</small></button>`).join("")}</div>
+      <div class="crHist">LAST WINNERS: ${DB.last.map(i => `<span style="color:${RACERS[i].css}">${RACERS[i].n}</span>`).join(" · ") || "—"}</div>
+      <div class="csActions">${racing ? `<button class="csbtn" disabled>RACING...</button>` : DB.phase === "done" ? `<button class="csbtn big" data-c2="race">NEXT RACE <kbd>Space</kbd></button>` : `<button class="csbtn big" data-c2="race" ${DB.pick < 0 ? "disabled" : ""}>START RACE <kbd>Space</kbd></button>`}</div>`;
+    const c = $("dbC"); drawDerbyRace(c.getContext("2d"), c.width, c.height);
+}
+
+// =========================== VIDEO POKER (Jacks or Better) ===========================
+const VP_PAY = [["Royal Flush", 250], ["Straight Flush", 50], ["Four of a Kind", 25], ["Full House", 9], ["Flush", 6], ["Straight", 4], ["Three of a Kind", 3], ["Two Pair", 2], ["Jacks or Better", 1]];
+const VP = { phase: "idle", bet: 0, hand: [], held: [false, false, false, false, false], deck: [], result: -1, machine: 0 };
+function vpDeck() { const d = []; for (const s of SUITS) for (const r of RANKS) d.push({ r, s }); for (let i = d.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [d[i], d[j]] = [d[j], d[i]]; } return d; }
+function vpEval(h) {
+    const val = c => ({ A: 14, K: 13, Q: 12, J: 11 })[c.r] || +c.r, v = h.map(val).sort((a, b) => a - b), cnt = {};
+    for (const x of v) cnt[x] = (cnt[x] || 0) + 1;
+    const groups = Object.values(cnt).sort((a, b) => b - a), flush = h.every(c => c.s === h[0].s);
+    const uniq = groups.length === 5, straight = uniq && (v[4] - v[0] === 4 || (v[4] === 14 && v[0] === 2 && v[3] === 5));
+    if (straight && flush) return v[0] === 10 ? 0 : 1;
+    if (groups[0] === 4) return 2; if (groups[0] === 3 && groups[1] === 2) return 3; if (flush) return 4; if (straight) return 5;
+    if (groups[0] === 3) return 6; if (groups[0] === 2 && groups[1] === 2) return 7;
+    if (groups[0] === 2) { const pr = +Object.keys(cnt).find(k => cnt[k] === 2); if (pr >= 11) return 8; }
+    return -1;
+}
+function vpRender(G) {
+    const hold = VP.phase === "hold";
+    G.innerHTML = `<div class="vpPay">${VP_PAY.map(([n, m], i) => `<div class="${VP.result === i && VP.phase === "done" ? "hit" : ""}"><span>${n}</span><b>${m}×</b></div>`).join("")}</div>
+      <div class="vpHand">${VP.hand.length ? VP.hand.map((c, k) => `<div class="vpSlot ${VP.held[k] ? "held" : ""}" data-c2="hold:${k}">${cardHtml(c, false, k)}<em>${VP.held[k] ? "HELD" : hold ? "click / " + (k + 1) : ""}</em></div>`).join("") : [0, 1, 2, 3, 4].map(k => `<div class="vpSlot">${cardHtml(null, true, k)}</div>`).join("")}</div>
+      <div class="csActions">${hold ? `<button class="csbtn big" data-c2="draw">DRAW <kbd>Space</kbd></button>` : `<button class="csbtn big" data-c2="deal">DEAL <kbd>Space</kbd></button>`}</div>`;
+}
+function vpDeal() {
+    if (VP.phase === "hold") return vpDraw();
+    const bet = takeBet(); if (!bet) return;
+    VP.deck = vpDeck(); VP.hand = VP.deck.splice(0, 5); VP.held = [false, false, false, false, false]; VP.bet = bet; VP.phase = "hold"; VP.result = -1;
+    const pre = vpEval(VP.hand); csMsg(pre >= 0 ? `You're holding ${VP_PAY[pre][0]}! Hold the cards you want, then DRAW.` : "Hold the cards you want to keep, then DRAW.", "");
+    sfx(600, 0.06, "triangle", 0.06, 1.2); vpRender($("csGame")); renderBetRow();
+}
+function vpDraw() {
+    if (VP.phase !== "hold") return;
+    VP.hand = VP.hand.map((c, k) => (VP.held[k] ? c : VP.deck.shift()));
+    const r = vpEval(VP.hand), m = r >= 0 ? VP_PAY[r][1] : 0, win = Math.round(VP.bet * m);
+    VP.phase = "done"; VP.result = r;
+    payOut(win, VP.bet);
+    csMsg(r >= 0 ? `${VP_PAY[r][0]}! ${m > 1 ? "+" + money(win) : "Your bet back."}` : `Nothing. -${money(VP.bet)}`, r >= 0 && r <= 2 ? "jack" : r >= 0 && m > 1 ? "win" : r >= 0 ? "push" : "lose");
+    sfx(500, 0.06, "triangle", 0.06, 1.2); vpRender($("csGame")); renderBetRow();
+}
+
+// =========================== SCRATCHERS ===========================
+const SC_TIERS = [{ n: "Lucky Leaf", k: 1, col: "#6dffa0" }, { n: "Gold Rush", k: 10, col: "#ffd040" }, { n: "Diamond Dream", k: 100, col: "#9fe8ff" }];
+const SC_PRIZES = [[1, 0.14], [2, 0.08], [5, 0.035], [10, 0.015], [50, 0.003], [500, 0.0003]];
+const scUnit = () => Math.round(1000 * csScale());
+const SC = { card: null };
+function scBuy(tier) {
+    if (SC.card && !SC.card.done) { csMsg("Finish scratching this one first.", "bad"); return; }
+    const T = SC_TIERS[tier], price = T.k * scUnit();
+    if (save.money < price) { csMsg("Not enough cash for that card.", "bad"); return; }
+    save.money -= price; save.casino.net -= price; save.casino.plays = (save.casino.plays || 0) + 1; wagered(price);
+    let r = Math.random(), win = -1; for (let i = 0; i < SC_PRIZES.length; i++) { if (r < SC_PRIZES[i][1]) { win = i; break; } r -= SC_PRIZES[i][1]; }
+    const cells = []; if (win >= 0) cells.push(win, win, win);
+    const cnt = {}; if (win >= 0) cnt[win] = 3;
+    while (cells.length < 9) { const s = Math.floor(Math.random() * SC_PRIZES.length); if (s === win || (cnt[s] || 0) >= 2) continue; cnt[s] = (cnt[s] || 0) + 1; cells.push(s); }
+    cells.sort(() => Math.random() - 0.5);
+    SC.card = { tier, price, cells, win, done: false, revealed: Array(9).fill(false) };
+    sfx(700, 0.08, "triangle", 0.07, 1.3);
+    scRender($("csGame"));
+}
+function scRender(G) {
+    const c = SC.card;
+    G.innerHTML = `<div class="scWrap"><div class="scShop">${SC_TIERS.map((T, i) => `<button class="scBuy" data-c2="buy:${i}" style="--c:${T.col}"><b>${T.n}</b><span>${money(T.k * scUnit())}</span><small>top prize ${money(T.k * scUnit() * 500)}</small></button>`).join("")}
+      <p>Match three of the same prize to win it. Click and drag to scratch.</p></div>
+      <div class="scCard" style="--c:${c ? SC_TIERS[c.tier].col : "#888"}">${c ? `<div class="scHead">${SC_TIERS[c.tier].n.toUpperCase()}</div><div class="scBox"><canvas id="scBase" width="330" height="330"></canvas><canvas id="scFoil" width="330" height="330"></canvas></div>` : `<div class="scEmpty">Buy a card to start</div>`}</div></div>
+      <div class="csActions">${c && !c.done ? `<button class="csbtn" data-c2="reveal">REVEAL ALL <kbd>Space</kbd></button>` : ""}</div>`;
+    if (!c) return;
+    const g = $("scBase").getContext("2d"), cw = 110;
+    g.fillStyle = "#f4ecd8"; g.fillRect(0, 0, 330, 330);
+    c.cells.forEach((s, k) => { const x = (k % 3) * cw, y = Math.floor(k / 3) * cw, amt = c.price * SC_PRIZES[s][0], hit = c.done && s === c.win;
+        g.fillStyle = hit ? "#ffd040" : "#e8dcc0"; g.fillRect(x + 4, y + 4, cw - 8, cw - 8); g.fillStyle = hit ? "#3a1a00" : "#3a2a1a"; g.textAlign = "center";
+        g.font = "900 20px Consolas"; g.fillText(money(amt), x + cw / 2, y + cw / 2 + 6); });
+    const f = $("scFoil"), fg = f.getContext("2d");
+    if (c.done) { f.style.display = "none"; return; }
+    const grd = fg.createLinearGradient(0, 0, 330, 330); grd.addColorStop(0, "#b8bcc8"); grd.addColorStop(0.5, "#e8ecf4"); grd.addColorStop(1, "#9aa0ae");
+    fg.fillStyle = grd; fg.fillRect(0, 0, 330, 330);
+    fg.fillStyle = "rgba(60,60,80,.35)"; fg.font = "900 18px Consolas"; fg.textAlign = "center";
+    for (let k = 0; k < 9; k++) { const x = (k % 3) * cw, y = Math.floor(k / 3) * cw; fg.fillText("SCRATCH", x + cw / 2, y + cw / 2 + 6); fg.strokeStyle = "rgba(60,60,80,.25)"; fg.strokeRect(x + 4, y + 4, cw - 8, cw - 8); }
+    c.revealed.forEach((v, k) => { if (v) fg.clearRect((k % 3) * cw, Math.floor(k / 3) * cw, cw, cw); });
+    let down = false;
+    const scratch = e => {
+        const rc = f.getBoundingClientRect(), x = (e.clientX - rc.left) * (330 / rc.width), y = (e.clientY - rc.top) * (330 / rc.height);
+        fg.globalCompositeOperation = "destination-out"; fg.beginPath(); fg.arc(x, y, 21, 0, 7); fg.fill(); fg.globalCompositeOperation = "source-over";
+        if (Math.random() < 0.3) sfx(3000 + Math.random() * 1500, 0.02, "sawtooth", 0.008, 0.5);
+        scCheck(fg);
+    };
+    f.addEventListener("pointerdown", e => { down = true; scratch(e); });
+    f.addEventListener("pointermove", e => { if (down) scratch(e); });
+    addEventListener("pointerup", () => (down = false), { once: true });
+}
+function scCheck(fg) {
+    const c = SC.card; if (!c || c.done) return;
+    const d = fg.getImageData(0, 0, 330, 330).data, cw = 110;
+    for (let k = 0; k < 9; k++) {
+        if (c.revealed[k]) continue;
+        let clear = 0, n = 0; const x0 = (k % 3) * cw, y0 = Math.floor(k / 3) * cw;
+        for (let y = y0 + 10; y < y0 + cw - 10; y += 6) for (let x = x0 + 10; x < x0 + cw - 10; x += 6) { n++; if (d[(y * 330 + x) * 4 + 3] < 40) clear++; }
+        if (clear / n > 0.42) c.revealed[k] = true;
+    }
+    if (c.revealed.every(Boolean)) scFinish();
+}
+function scFinish() {
+    const c = SC.card; if (!c || c.done) return;
+    c.done = true;
+    const win = c.win >= 0 ? Math.round(c.price * SC_PRIZES[c.win][0]) : 0;
+    payOut(win, c.price);
+    csMsg(win ? `Three of a kind! +${money(win)}` : "No match this time.", win >= c.price * 10 ? "jack" : win > c.price ? "win" : win ? "push" : "lose");
+    scRender($("csGame"));
+}
+
+// =========================== VIP ===========================
+const VIP = [{ n: "BRONZE", at: 0, cb: 0, gift: 0, col: "#d8925a" }, { n: "SILVER", at: 25, cb: 0.05, gift: 1, col: "#d8dce8" }, { n: "GOLD", at: 250, cb: 0.08, gift: 3, col: "#ffd040" }, { n: "PLATINUM", at: 2500, cb: 0.12, gift: 8, col: "#bfe8ff" }, { n: "DIAMOND", at: 25000, cb: 0.15, gift: 20, col: "#9ff8ff" }];
+const vipNeed = i => VIP[i].at * 20000; // fixed amounts, so rebirths don't knock you down a tier
+function vipTier() { const w = save.casino.wag || 0; let t = 0; VIP.forEach((v, i) => { if (w >= vipNeed(i)) t = i; }); return t; }
+const vipCashback = () => Math.max(0, Math.round(((save.casino.wagT || 0) - (save.casino.wonT || 0)) * VIP[vipTier()].cb));
+const vipGift = () => Math.round(VIP[vipTier()].gift * wheelBase());
+const vipClaimable = () => vipTier() > 0 && save.casino.vipDay !== save.day && (vipGift() + vipCashback()) > 0;
+function vipRender(G) {
+    const t = vipTier(), V = VIP[t], nx = VIP[t + 1], w = save.casino.wag || 0, pct = nx ? Math.min(100, ((w - vipNeed(t)) / (vipNeed(t + 1) - vipNeed(t))) * 100) : 100;
+    G.innerHTML = `<div class="vipWrap"><div class="vipBadge" style="--c:${V.col}"><small>YOUR STATUS</small><b>${V.n}</b></div>
+      <div class="vipBar"><div style="width:${pct}%;background:${nx ? nx.col : V.col}"></div></div>
+      <p class="vipNext">${nx ? `Wagered ${money(w)} · ${money(vipNeed(t + 1) - w)} more to <b style="color:${nx.col}">${nx.n}</b>` : `Wagered ${money(w)} · the highest tier there is.`}</p>
+      <div class="vipTiers">${VIP.map((v, i) => `<div class="${i === t ? "on" : ""}" style="--c:${v.col}"><b>${v.n}</b><span>${i ? money(vipNeed(i)) + " wagered" : "everyone"}</span><small>${i ? `${Math.round(v.cb * 100)}% cashback on losses · daily gift ${money(Math.round(v.gift * wheelBase()))}` : "no perks yet"}</small></div>`).join("")}</div>
+      <p>${t === 0 ? "Wager at any game in the casino to climb the tiers." : save.casino.vipDay === save.day ? "You've collected today's perks. Come back tomorrow (in-game)." : `Today: gift <b>${money(vipGift())}</b> + cashback <b>${money(vipCashback())}</b>`}</p></div>
+      <div class="csActions"><button class="csbtn big" data-c2="claim" ${vipClaimable() ? "" : "disabled"}>CLAIM <kbd>Space</kbd></button></div>`;
+}
+function vipClaim() {
+    if (!vipClaimable()) return;
+    const amt = vipGift() + vipCashback();
+    save.money += amt; save.casino.vipDay = save.day; save.casino.wagT = 0; save.casino.wonT = 0;
+    coinRain(30); jingle(true); csMsg(`VIP perks collected: +${money(amt)}`, "win"); writeSave();
+    vipRender($("csGame"));
+}
+
+// ---- one table of handlers for all the new games ----
+const CSG = {
+    crash: { render: crRender, act(a) { if (a === "launch") crLaunch(); else if (a === "cash") crCash(); else if (a.startsWith("auto:")) { CR.auto = +a.slice(5); crRender($("csGame")); } }, key(c) { if (c === "Space" || c === "Enter") { CR.phase === "fly" ? crCash() : crLaunch(); return true; } } },
+    plinko: { render: plRender, act(a) { if (a === "drop") plDrop(); else if (a === "drop5") for (let k = 0; k < 5; k++) setTimeout(plDrop, k * 160); else if (a.startsWith("risk:")) { PL.risk = a.slice(5); plRender($("csGame")); } }, key(c) { if (c === "Space" || c === "Enter") { plDrop(); return true; } } },
+    mines: { render: mnRender, act(a) { if (a === "mstart") mnStart(); else if (a === "mcash") mnCash(); else if (a.startsWith("t:")) mnPick(+a.slice(2)); else if (a.startsWith("mines:")) { MN.mines = +a.slice(6); mnRender($("csGame")); } }, key(c) { if (c === "Space" || c === "Enter") { MN.phase === "play" ? mnCash() : mnStart(); return true; } } },
+    derby: { render: derbyRender, act(a) { if (a === "race") dbStart(); else if (a.startsWith("pick:") && DB.phase !== "race") { if (DB.phase === "done") { dbCard(); } DB.pick = +a.slice(5); derbyRender($("csGame")); } }, key(c) { if (c === "Space" || c === "Enter") { dbStart(); return true; } const n = +(c.match(/^Digit([1-5])$/) || [])[1]; if (n && DB.phase !== "race") { if (DB.phase === "done") dbCard(); DB.pick = n - 1; derbyRender($("csGame")); return true; } } },
+    poker: { render: vpRender, act(a) { if (a === "deal") vpDeal(); else if (a === "draw") vpDraw(); else if (a.startsWith("hold:") && VP.phase === "hold") { const k = +a.slice(5); VP.held[k] = !VP.held[k]; sfx(900, 0.03, "square", 0.03, 1); vpRender($("csGame")); } }, key(c) { if (c === "Space" || c === "Enter") { VP.phase === "hold" ? vpDraw() : vpDeal(); return true; } const n = +(c.match(/^Digit([1-5])$/) || [])[1]; if (n && VP.phase === "hold") { VP.held[n - 1] = !VP.held[n - 1]; vpRender($("csGame")); return true; } } },
+    scratch: { noBet: true, render: scRender, act(a) { if (a.startsWith("buy:")) scBuy(+a.slice(4)); else if (a === "reveal") scFinish(); }, key(c) { if ((c === "Space" || c === "Enter") && SC.card && !SC.card.done) { scFinish(); return true; } } },
+    vip: { noBet: true, render: vipRender, act(a) { if (a === "claim") vipClaim(); }, key(c) { if (c === "Space" || c === "Enter") { vipClaim(); return true; } } }
+};
+document.addEventListener("click", e => {
+    if (panel !== "casino" || !CSG[CS.game]) return;
+    const b = e.target.closest("[data-c2]"); if (!b || b.disabled) return;
+    CSG[CS.game].act(b.dataset.c2, b, e);
+});
+
+// =========================== the wing itself (3D) ===========================
+function wingSign(txt, col, x, y, z, ry, w = 6, h = 1.4) { const fs = Math.min(92, Math.floor(1300 / Math.max(6, txt.length))); const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: casinoTex([[txt, fs, col, 96]], 768, 192), transparent: true, depthWrite: false })); m.position.set(x, y, z); m.rotation.y = ry; scene.add(m); csSigns.push(m); return m; }
+function liveScreen(w, h, cw, ch, x, y, z, ry) { const cv = document.createElement("canvas"); cv.width = cw; cv.height = ch; const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex })); m.position.set(x, y, z); m.rotation.y = ry; scene.add(m); return { m, cv, g: cv.getContext("2d"), tex }; }
+function buildCasinoWing() {
+    const gold = new THREE.MeshLambertMaterial({ color: 0xd8a840, emissive: 0x3a2a08, flatShading: true }), darkWood = lamb(0x2a140c);
+    const W = CS_X1 - CS_X0, D = WING_Z1 - CS_Z1, cz = (CS_Z1 + WING_Z1) / 2;
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ map: carpetTex() })); floor.rotation.x = -Math.PI / 2; floor.position.set(CSX, 0.01, cz); scene.add(floor);
+    const wallM = new THREE.MeshLambertMaterial({ map: wallTex() });
+    const plane = (w, h, x, y, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallM); m.position.set(x, y, z); m.rotation.y = ry; scene.add(m); };
+    plane(W, CS_H, CSX, CS_H / 2, WING_Z1, Math.PI); plane(D, CS_H, CS_X0, CS_H / 2, cz, Math.PI / 2); plane(D, CS_H, CS_X1, CS_H / 2, cz, -Math.PI / 2);
+    // the shared wall, both faces, with two arches in it
+    const segs = [[CS_X0, CSX - ARCH_X - ARCH_HW], [CSX - ARCH_X + ARCH_HW, CSX + ARCH_X - ARCH_HW], [CSX + ARCH_X + ARCH_HW, CS_X1]];
+    const wain = batch(darkWood), trim = batch(gold);
+    for (const [a, b] of segs) for (const [z, ry, s] of [[CS_Z1 - 0.01, Math.PI, -1], [CS_Z1 + 0.01, 0, 1]]) {
+        plane(b - a, CS_H, (a + b) / 2, CS_H / 2, z, ry);
+        wain.add(BOX, (a + b) / 2, 0.6, z + s * 0.15, 0, 0, 0, b - a, 1.2, 0.3); trim.add(BOX, (a + b) / 2, 1.22, z + s * 0.15, 0, 0, 0, b - a, 0.08, 0.36); trim.add(BOX, (a + b) / 2, CS_H - 0.5, z + s * 0.15, 0, 0, 0, b - a, 0.12, 0.36);
+    }
+    for (const sx of [-1, 1]) {
+        const ax = CSX + sx * ARCH_X;
+        for (const [z, ry] of [[CS_Z1 - 0.01, Math.PI], [CS_Z1 + 0.01, 0]]) plane(ARCH_HW * 2, CS_H - ARCH_H, ax, (CS_H + ARCH_H) / 2, z, ry);
+        trim.add(BOX, ax - ARCH_HW, ARCH_H / 2, CS_Z1, 0, 0, 0, 0.3, ARCH_H, 0.7); trim.add(BOX, ax + ARCH_HW, ARCH_H / 2, CS_Z1, 0, 0, 0, 0.3, ARCH_H, 0.7); trim.add(BOX, ax, ARCH_H, CS_Z1, 0, 0, 0, ARCH_HW * 2 + 0.3, 0.3, 0.7);
+        wingSign("HIGH ROLLER WING", "#ff5ad8", ax, ARCH_H + 1.0, CS_Z1 - 0.14, Math.PI, 5.2, 1.3);
+    }
+    for (const [x, z, sx, sz] of [[CSX, WING_Z1 - 0.15, W, 0.3], [CS_X0 + 0.15, cz, 0.3, D], [CS_X1 - 0.15, cz, 0.3, D]]) { wain.add(BOX, x, 0.6, z, 0, 0, 0, sx, 1.2, sz); trim.add(BOX, x, 1.22, z, 0, 0, 0, sx + 0.02, 0.08, sz + 0.06); trim.add(BOX, x, CS_H - 0.5, z, 0, 0, 0, sx + 0.02, 0.12, sz + 0.06); }
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, D), lamb(0x1a0a10)); ceil.rotation.x = Math.PI / 2; ceil.position.set(CSX, CS_H, cz); scene.add(ceil);
+    for (let x = CS_X0 + 4; x < CS_X1; x += 6) trim.add(BOX, x, CS_H - 0.1, cz, 0, 0, 0, 0.16, 0.16, D);
+    // two chandeliers (the only real lights in here; everything else glows)
+    const crystal = new THREE.MeshBasicMaterial({ color: 0xfff4d8 });
+    for (const x of [CSX - 9, CSX + 9]) {
+        const ch = new THREE.Group(); ch.position.set(x, CS_H - 1.6, 32); scene.add(ch);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.07, 6, 16), gold); ring.rotation.x = Math.PI / 2; ch.add(ring);
+        for (let k = 0; k < 12; k++) { const a = (k / 12) * Math.PI * 2; part(ch, CONE6, crystal, Math.cos(a) * 1.2, -0.25, Math.sin(a) * 1.2, 0.07, 0.4, 0.07, Math.PI); }
+        part(ch, ICO, crystal, 0, -0.6, 0, 0.22); part(ch, CYL6, gold, 0, 1.0, 0, 0.04, 1.4, 0.04);
+        const L = new THREE.PointLight(0xffd8a0, 40, 30, 1.4); L.position.set(0, -0.6, 0); ch.add(L); L.userData.b = 40; csLights.push(L);
+    }
+    // ---- Tree Derby: an oval track, a rail, five little racing trees, a betting window and a big board ----
+    {
+        const sh = new THREE.Shape(), hole = new THREE.Path(), A = DERBY.a, B = DERBY.b;
+        sh.absellipse(0, 0, A + 0.9, B + 0.9, 0, Math.PI * 2, false, 0); hole.absellipse(0, 0, A - 0.9, B - 0.9, 0, Math.PI * 2, true, 0); sh.holes.push(hole);
+        const track = new THREE.Mesh(new THREE.ShapeGeometry(sh, 48), lamb(0x8a6040)); track.rotation.x = -Math.PI / 2; track.position.set(DERBY.x, 0.03, DERBY.z); scene.add(track);
+        const inner = new THREE.Mesh(new THREE.CircleGeometry(1, 40), lamb(0x2a6a2a)); inner.scale.set(A - 0.9, B - 0.9, 1); inner.rotation.x = -Math.PI / 2; inner.position.set(DERBY.x, 0.025, DERBY.z); scene.add(inner);
+        const rail = batch(lamb(0xf2f2f2));
+        for (const k of [1.0, -1.0]) for (let i = 0; i < 40; i++) { const a = (i / 40) * Math.PI * 2, x = DERBY.x + Math.cos(a) * (A + k * 0.95), z = DERBY.z + Math.sin(a) * (B + k * 0.95); rail.add(CYL6, x, 0.4, z, 0, 0, 0, 0.05, 0.8, 0.05); const a2 = ((i + 1) / 40) * Math.PI * 2, x2 = DERBY.x + Math.cos(a2) * (A + k * 0.95), z2 = DERBY.z + Math.sin(a2) * (B + k * 0.95); rail.add(BOX, (x + x2) / 2, 0.8, (z + z2) / 2, 0, -Math.atan2(z2 - z, x2 - x), 0, Math.hypot(x2 - x, z2 - z) + 0.02, 0.06, 0.06); }
+        rail.build();
+        const fin = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.4), new THREE.MeshBasicMaterial({ map: csCanvas(64, 16, (g) => { for (let i = 0; i < 16; i++) for (let j = 0; j < 4; j++) { g.fillStyle = (i + j) % 2 ? "#111" : "#fff"; g.fillRect(i * 4, j * 4, 4, 4); } }) }));
+        fin.rotation.x = -Math.PI / 2; fin.rotation.z = Math.PI / 2; fin.position.set(DERBY.x, 0.04, DERBY.z - B); scene.add(fin);
+        derby3D = RACERS.map((r, i) => {
+            const g = new THREE.Group(); scene.add(g);
+            const bark = lamb(0x5a3a22), leaf = lamb(r.leaf);
+            part(g, CYL6, bark, 0, 0.35, 0, 0.13, 0.7, 0.13); part(g, CONE6, leaf, 0, 1.05, 0, 0.45, 0.9, 0.45); part(g, CONE6, leaf, 0, 1.45, 0, 0.32, 0.6, 0.32);
+            part(g, BOX, new THREE.MeshBasicMaterial({ color: r.sash }), 0, 0.62, 0, 0.32, 0.1, 0.32);
+            const eyes = new THREE.MeshBasicMaterial({ color: 0xffd040 }); part(g, BOX, eyes, -0.06, 0.95, 0.24, 0.05, 0.05, 0.02); part(g, BOX, eyes, 0.06, 0.95, 0.24, 0.05, 0.05, 0.02);
+            const legs = [-1, 1].map(s => part(g, CYL6, bark, s * 0.09, 0.1, 0, 0.04, 0.25, 0.04));
+            return { g, legs, lane: (i - 2) * 0.32 };
+        });
+        // the window and the clerk
+        const booth = batch(darkWood); booth.add(BOX, DERBY_WIN.x, 0.55, DERBY_WIN.z, 0, 0, 0, 4.6, 1.1, 0.7); booth.add(CYL6, DERBY_WIN.x - 2.2, 1.8, DERBY_WIN.z, 0, 0, 0, 0.08, 3.6, 0.08); booth.add(CYL6, DERBY_WIN.x + 2.2, 1.8, DERBY_WIN.z, 0, 0, 0, 0.08, 3.6, 0.08); booth.build();
+        trim.add(BOX, DERBY_WIN.x, 1.14, DERBY_WIN.z - 0.1, 0, 0, 0, 4.7, 0.08, 0.9);
+        wingSign("TREE DERBY", "#6dffa0", DERBY_WIN.x, 3.9, DERBY_WIN.z - 0.4, 0, 4.4, 1.1);
+        const clerk = makeHumanoid({ face: "clerk", skin: 0xe8c0a0, shirt: 0xf2f2f2, vest: 0x1a5a2a, pants: 0x141414, hair: 0x5a3a1a });
+        clerk.g.position.set(DERBY_WIN.x, 0, DERBY_WIN.z + 1.0); clerk.g.rotation.y = Math.PI; scene.add(clerk.g); clerk.yaw = Math.PI; clerk.patron = true; casinoNpcs.push(clerk);
+        derbyBoard = liveScreen(7, 2.4, 768, 264, VIP_AT.x, 4.9, WING_Z1 - 0.14, Math.PI);
+        trim.add(BOX, VIP_AT.x, 4.9, WING_Z1 - 0.08, 0, 0, 0, 7.3, 2.7, 0.08);
+        drawDerbyBoard();
+    }
+    // ---- Axe Rocket: a giant screen on the east wall and a little podium to bet at ----
+    crashScreen = liveScreen(6.6, 3.4, 640, 330, CS_X1 - 0.14, 3.6, CRASH_POD.z, -Math.PI / 2);
+    trim.add(BOX, CS_X1 - 0.08, 3.6, CRASH_POD.z, 0, 0, 0, 0.08, 3.7, 6.9);
+    trim.add(CYL8, CRASH_POD.x, 0.5, CRASH_POD.z, 0, 0, 0, 0.45, 1.0, 0.45); part(scene, BOX, new THREE.MeshBasicMaterial({ color: 0xffb020 }), CRASH_POD.x, 1.05, CRASH_POD.z, 0.6, 0.06, 0.6);
+    wingSign("AXE ROCKET", "#ffb020", CS_X1 - 0.12, 6.0, CRASH_POD.z, -Math.PI / 2, 4.6, 1.1);
+    // ---- Plinko: a tall glowing board on the west wall; balls you drop fall down it in 3D ----
+    {
+        const BW = 3.4, BH = 4.6, bx = CS_X0 + 0.25, cyy = 3.0;
+        const tex = csCanvas(256, 340, (g, w, h) => { g.fillStyle = "#0e0818"; g.fillRect(0, 0, w, h); const sp = w / (PL_ROWS + 2); g.fillStyle = "#e8dcff"; for (let r = 0; r < PL_ROWS; r++) for (let k = 0; k <= r + 2; k++) { g.beginPath(); g.arc(w / 2 + (k - (r + 2) / 2) * sp, ((r + 1.1) / (PL_ROWS + 1.6)) * (h - 30), 2.4, 0, 7); g.fill(); } PLINKO.med.forEach((m, k) => { g.fillStyle = plSlotCol(m); g.fillRect(w / 2 + (k - 6) * sp - sp * 0.46, h - 26, sp * 0.92, 22); }); });
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(BW, BH), new THREE.MeshBasicMaterial({ map: tex })); board.position.set(bx, cyy, PLINKO_Z); board.rotation.y = Math.PI / 2; scene.add(board);
+        trim.add(BOX, bx - 0.05, cyy, PLINKO_Z, 0, 0, 0, 0.12, BH + 0.3, BW + 0.3); wain.add(BOX, CS_X0 + 0.7, 0.4, PLINKO_Z, 0, 0, 0, 1.2, 0.8, BW);
+        wingSign("PLINKO", "#ff5ad8", CS_X0 + 0.12, 6.1, PLINKO_Z, Math.PI / 2, 3.4, 1.0);
+        const ballM = new THREE.MeshBasicMaterial({ color: 0xff5ad8 }), live = [];
+        plBoard3D = {
+            drop(b) { const m = new THREE.Mesh(ICO, ballM); m.scale.setScalar(0.09); scene.add(m); live.push({ b, m }); },
+            update() { for (let i = live.length - 1; i >= 0; i--) { const { b, m } = live[i]; if (!PL.balls.includes(b)) { scene.remove(m); live.splice(i, 1); continue; } const p = plPos(b, b.t); m.position.set(bx + 0.1, cyy + BH / 2 - p.y * (BH - 0.4), PLINKO_Z - (p.x - 0.5) * BW); } }
+        };
+    }
+    // ---- video poker cabinets ----
+    POKER_Z.forEach((z, i) => {
+        const m = new THREE.Group(); m.position.set(CS_X0 + 1.5, 0, z); m.rotation.y = Math.PI / 2; scene.add(m);
+        const body = lamb([0x1a3a8a, 0x8a1a3a, 0x1a6a4a][i]);
+        part(m, BOX, body, 0, 0.55, 0, 1.3, 1.1, 0.9); part(m, BOX, body, 0, 1.6, -0.12, 1.3, 1.1, 0.66); part(m, BOX, gold, 0, 1.06, 0.32, 1.34, 0.06, 0.28);
+        const tex = csCanvas(256, 160, (g, w, h) => { g.fillStyle = "#0a1a5a"; g.fillRect(0, 0, w, h); g.fillStyle = "#ffd040"; g.font = "900 22px Consolas"; g.textAlign = "center"; g.fillText("JACKS OR BETTER", w / 2, 28); ["A♠", "K♠", "Q♠", "J♠", "10♠"].forEach((c, k) => { g.fillStyle = "#fffef6"; g.fillRect(14 + k * 46, 50, 40, 60); g.fillStyle = "#141418"; g.font = "800 16px Consolas"; g.fillText(c, 34 + k * 46, 86); }); g.fillStyle = "#6dffa0"; g.font = "800 14px Consolas"; g.fillText("ROYAL FLUSH ×250", w / 2, 140); });
+        const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.68), new THREE.MeshBasicMaterial({ map: tex })); scr.position.set(0, 1.62, 0.22); m.add(scr);
+        part(m, CYL8, gold, 0, 0.45, 1.15, 0.32, 0.06, 0.32); part(m, CYL6, darkWood, 0, 0.22, 1.15, 0.05, 0.45, 0.05);
+    });
+    wingSign("VIDEO POKER", "#5a9aff", CS_X0 + 0.12, 5.4, POKER_Z[1], Math.PI / 2, 5, 1.2);
+    // ---- mines tables ----
+    const mineTop = csCanvas(256, 256, (g, w) => { g.fillStyle = "#0e1a2a"; g.fillRect(0, 0, w, w); for (let i = 0; i < 25; i++) { const x = 18 + (i % 5) * 45, y = 18 + Math.floor(i / 5) * 45; g.fillStyle = [3, 11, 17].includes(i) ? "#ff3a5a" : "#2a4a7a"; g.fillRect(x, y, 40, 40); if (![3, 11, 17].includes(i) && i % 3 === 0) { g.fillStyle = "#6dffa0"; g.beginPath(); g.moveTo(x + 20, y + 8); g.lineTo(x + 32, y + 20); g.lineTo(x + 20, y + 32); g.lineTo(x + 8, y + 20); g.fill(); } } });
+    for (const mt of MINES_AT) {
+        trim.add(CYL8, mt.x, 0.45, mt.z, 0, 0, 0, 0.35, 0.9, 0.35);
+        const top = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.12, 24), [lamb(0x2a140c), new THREE.MeshBasicMaterial({ map: mineTop }), lamb(0x2a140c)]); top.position.set(mt.x, 0.96, mt.z); scene.add(top);
+    }
+    wingSign("MINES", "#5ad8ff", CS_X1 - 0.12, 5.4, (MINES_AT[0].z + MINES_AT[1].z) / 2, -Math.PI / 2, 3.2, 1.0);
+    // ---- scratch kiosk ----
+    {
+        const k = batch(darkWood); k.add(BOX, CS_X1 - 1.3, 0.55, 44.4, 0, 0, 0, 2.4, 1.1, 3); k.build();
+        trim.add(BOX, CS_X1 - 1.3, 1.14, 44.4, 0, 0, 0, 2.5, 0.08, 3.1);
+        const cards = [0x6dffa0, 0xffd040, 0x9fe8ff].map(c => batch(new THREE.MeshBasicMaterial({ color: c })));
+        for (let j = 0; j < 9; j++) cards[j % 3].add(BOX, CS_X1 - 0.3, 1.6 + Math.floor(j / 3) * 0.5, 43.4 + (j % 3) * 0.9, 0, 0, 0, 0.04, 0.4, 0.6);
+        cards.forEach(c => c.build());
+        wingSign("SCRATCHERS", "#6dffa0", CS_X1 - 0.12, 4.4, 44.4, -Math.PI / 2, 3.2, 0.8);
+        const seller = makeHumanoid({ face: "clerk", skin: 0x8a5a3a, shirt: 0xf2f2f2, vest: 0x5a3a8a, pants: 0x141414, hair: 0x101010 });
+        seller.g.position.set(CS_X1 - 0.9, 0, 45.4); seller.g.rotation.y = -Math.PI / 2; scene.add(seller.g); seller.yaw = -Math.PI / 2; seller.patron = true; casinoNpcs.push(seller);
+    }
+    // ---- the VIP desk ----
+    {
+        const d = batch(darkWood); d.add(BOX, VIP_AT.x, 0.55, VIP_AT.z, 0, 0, 0, 4.8, 1.1, 0.8); d.build();
+        trim.add(BOX, VIP_AT.x, 1.14, VIP_AT.z, 0, 0, 0, 4.9, 0.08, 0.9);
+        const rope = new THREE.MeshLambertMaterial({ color: 0xa01020, flatShading: true });
+        for (const s of [-1, 1]) { trim.add(CYL6, VIP_AT.x + s * 3.2, 0.5, VIP_AT.z - 1.4, 0, 0, 0, 0.07, 1, 0.07); trim.add(ICO, VIP_AT.x + s * 3.2, 1.02, VIP_AT.z - 1.4, 0, 0, 0, 0.12); const r = new THREE.Mesh(CYL6, rope); r.scale.set(0.05, 1.6, 0.05); r.rotation.z = Math.PI / 2; r.position.set(VIP_AT.x + s * 3.2 - s * 0.8, 0.85, VIP_AT.z - 1.4); scene.add(r); }
+        wingSign("VIP", "#ffd040", VIP_AT.x, 3.0, WING_Z1 - 0.14, Math.PI, 2.2, 0.9);
+        const host = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0xf2f2f2, vest: 0x8a6a1a, pants: 0x141414, hair: 0xd8c08a });
+        host.g.position.set(VIP_AT.x, 0, VIP_AT.z + 0.75); host.g.rotation.y = Math.PI; scene.add(host.g); host.yaw = Math.PI; host.patron = true; casinoNpcs.push(host);
+    }
+    // a few high rollers
+    for (const [x, z, ry, shc] of [[CS_X0 + 3.0, POKER_Z[0], -Math.PI / 2, 0x2a2a2a], [CS_X0 + 3.0, POKER_Z[2], -Math.PI / 2, 0x6a1a2a], [DERBY.x + DERBY.a + 2.2, DERBY.z - 1, -Math.PI / 2, 0x3a6a8a], [DERBY.x + 4.5, DERBY.z + DERBY.b + 1.8, Math.PI, 0x8a6a2a], [MINES_AT[1].x - 1.7, MINES_AT[1].z, Math.PI / 2, 0x4a2a6a]]) {
+        const p = makeHumanoid({ face: "clerk", skin: [0xf0c8a0, 0xc89070, 0x8a5a3a][Math.floor(Math.random() * 3)], shirt: shc, pants: 0x1a1a24, hair: [0x2a1a10, 0x8a5a2a, 0xd8c08a][Math.floor(Math.random() * 3)] });
+        p.g.position.set(x, 0, z); p.g.rotation.y = ry; scene.add(p.g); p.yaw = ry; p.patron = true; casinoNpcs.push(p);
+    }
+    // the progressive jackpot, in lights over the slot machines (back in the main hall)
+    jackSign = liveScreen(5.2, 0.9, 520, 90, CS_X0 + 0.13, 3.75, 3, Math.PI / 2);
+    wain.build(); trim.build();
+}
+function drawDerbyBoard() {
+    if (!derbyBoard) return;
+    const g = derbyBoard.g, W = derbyBoard.cv.width, H = derbyBoard.cv.height;
+    g.fillStyle = "#06120a"; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#6dffa0"; g.font = "900 34px Consolas"; g.textAlign = "center"; g.fillText(DB.phase === "race" ? "★ RACE IN PROGRESS ★" : DB.phase === "done" ? `WINNER: ${RACERS[DB.winner].n.toUpperCase()}` : "TREE DERBY · NEXT RACE", W / 2, 40);
+    const order = DB.phase === "race" ? [0, 1, 2, 3, 4].sort((a, b) => DB.prog[b] - DB.prog[a]) : [0, 1, 2, 3, 4];
+    order.forEach((i, k) => { const y = 82 + k * 36; g.textAlign = "left"; g.fillStyle = RACERS[i].css; g.font = "800 26px Consolas"; g.fillText(`${DB.phase === "race" ? k + 1 + "." : "•"} ${RACERS[i].n}`, 60, y); g.textAlign = "right"; g.fillStyle = "#ffd040"; g.fillText(DB.odds[i].toFixed(1) + "×", W - 60, y); });
+    g.textAlign = "left"; derbyBoard.tex.needsUpdate = true;
+}
+let wingT = 0, crDemo = { t0: 0, crash: 2.4 };
+function updateWing(dt) {
+    if (!derby3D) return;
+    wingT += dt;
+    dbUpdate();
+    plBoard3D.update();
+    // the racers: lined up at the gate, then a lap of the track during a race
+    derby3D.forEach((r, i) => {
+        const p = DB.phase === "card" ? 0 : DB.prog[i], th = -Math.PI / 2 + p * Math.PI * 2 + 0.02, rr = 1 + r.lane / DERBY.a;
+        const x = DERBY.x + Math.cos(th) * DERBY.a * rr, z = DERBY.z + Math.sin(th) * DERBY.b * rr;
+        r.g.position.set(x, DB.phase === "race" ? Math.abs(Math.sin(wingT * 14 + i)) * 0.12 : 0, z);
+        r.g.rotation.y = Math.atan2(-Math.sin(th) * DERBY.a, Math.cos(th) * DERBY.b);
+        const run = DB.phase === "race" && p < 1; r.legs[0].rotation.x = run ? Math.sin(wingT * 16 + i) * 0.7 : 0; r.legs[1].rotation.x = run ? -Math.sin(wingT * 16 + i) * 0.7 : 0;
+    });
+    // the screens refresh a few times a second (cheap enough, and only while you're inside)
+    if ((wingT * 10 | 0) !== ((wingT - dt) * 10 | 0)) {
+        if (DB.phase === "race") drawDerbyBoard();
+        if (CR.phase === "fly" || CR.phase === "done" && performance.now() - CR.t0 < (CR.tEnd + 3) * 1000) drawCrash(crashScreen.g, 640, 330, CR.phase === "fly" ? (performance.now() - CR.t0) / 1000 : CR.tEnd, CR.m, CR.phase === "done" && CR.m >= CR.crash, CR.cashed);
+        else { const t = (performance.now() - crDemo.t0) / 1000, m = Math.min(crM(t), crDemo.crash); drawCrash(crashScreen.g, 640, 330, t, m, m >= crDemo.crash, 0); if (m >= crDemo.crash && t > Math.log(crDemo.crash) / 0.11 + 2.5) crDemo = { t0: performance.now(), crash: crRoll() }; }
+        crashScreen.tex.needsUpdate = true;
+        const jg = jackSign.g; jg.fillStyle = "#14020a"; jg.fillRect(0, 0, 520, 90); jg.fillStyle = Math.floor(wingT * 3) % 2 ? "#ffd040" : "#ff5a3a"; jg.font = "900 26px Consolas"; jg.textAlign = "center"; jg.fillText("PROGRESSIVE JACKPOT", 260, 32); jg.fillStyle = "#6dffa0"; jg.font = "900 38px Consolas"; jg.fillText(money(csPool()), 260, 76); jackSign.tex.needsUpdate = true;
+    }
+}
+
+// =====================================================================
+//  REBIRTH 4: THE ARCHIPELAGO. Five islands scattered over open sea. Port Haven is home;
+//  everything else is a boat ride away, and the boat runs on fuel. Run dry in open water
+//  and the sea takes you, and every material you were carrying goes down with the boat.
+// =====================================================================
+const ARCH = [
+    { k: "haven", name: "PORT HAVEN", x: 0, z: 0, r: 92, w: [6, 4, 3], ph: [0.3, 1.7, 2.9], col: "#ffd890", hp: 1, pump: true },
+    { k: "coral", name: "CORAL KEY", x: 232, z: 196, r: 54, w: [5, 3, 2], ph: [1.1, 0.4, 2.2], col: "#ff8aa0", hp: 1.15, pump: true },
+    { k: "skull", name: "SKULL ROCK", x: -302, z: 128, r: 58, w: [6, 4, 2], ph: [2.4, 1.2, 0.5], col: "#d8c8b0", hp: 1.3 },
+    { k: "frost", name: "FROSTCAP", x: -112, z: -338, r: 56, w: [4, 5, 2], ph: [0.8, 2.6, 1.4], col: "#bff4ff", hp: 1.45 },
+    { k: "storm", name: "STORM ISLE", x: 362, z: -268, r: 52, w: [5, 3, 3], ph: [1.9, 0.2, 2.7], col: "#c8a0ff", hp: 1.7 }
+];
+const ARCH_BY = Object.fromEntries(ARCH.map(I => [I.k, I]));
+const archR = (I, th) => I.r + I.w[0] * Math.sin(2 * th + I.ph[0]) + I.w[1] * Math.sin(3 * th + I.ph[1]) + I.w[2] * Math.sin(5 * th + I.ph[2]);
+const archIn = (I, x, z) => archR(I, Math.atan2(z - I.z, x - I.x)) - Math.hypot(x - I.x, z - I.z); // how far inside the shore (negative = at sea)
+function archAt(x, z) { // the island a point belongs to (or is nearest)
+    let best = ARCH[0], bd = 1e9;
+    for (const I of ARCH) { const d = Math.hypot(x - I.x, z - I.z) - I.r; if (d < bd) { bd = d; best = I; } }
+    return best;
+}
+const shoreR5 = th => archR(ARCH[0], th), shoreAt5 = (x, z) => shoreR5(Math.atan2(z, x));
+function archTerrain(I, x, z) {
+    const lx = x - I.x, lz = z - I.z, d = Math.hypot(lx, lz), inside = archR(I, Math.atan2(lz, lx)) - d;
+    if (inside < 5) return Math.max(-3.4, -(5 - inside) * 0.22);
+    let h = 0;
+    if (I.k === "haven") h = Math.max(0, fbm2(x * 0.021 + 3.1, z * 0.021 - 5.3, 3) - 0.36) * 14 * sstep(22, 40, d) + fbm2(x * 0.09, z * 0.09, 2) * 0.6;
+    else if (I.k === "coral") h = 0.5 + fbm2(x * 0.05 + 1.7, z * 0.05 - 2.2, 3) * 2.4;
+    else if (I.k === "skull") { h = Math.max(0, fbm2(x * 0.04 - 2, z * 0.04 + 8, 3) - 0.3) * 12; const k = 1 - d / (I.r * 0.42); if (k > 0) h = Math.max(h, 19 * Math.pow(k, 1.3)); }
+    else if (I.k === "frost") h = 30 * Math.pow(Math.max(0, 1 - d / (I.r * 0.86)), 1.5) + fbm2(x * 0.06, z * 0.06, 3) * 3;
+    else if (I.k === "storm") h = 9 * sstep(4, 20, inside) + fbm2(x * 0.07 + 4, z * 0.07, 3) * 2.5;
+    return h * sstep(4, 15, inside) + (inside < 15 ? (1 - sstep(4, 15, inside)) * 0.35 : 0);
+}
+// ---- docks: one harbor dock on every island, plus arrivals and the next ferry at Port Haven ----
+function mkDock(I, th, len, kind) {
+    const DIR = V3(Math.cos(th), 0, Math.sin(th)), PERP = V3(-DIR.z, 0, DIR.x), R = archR(I, th) - 8;
+    return { I, kind, th, LEN: len, DIR, PERP, B: V3(I.x + DIR.x * R, 0, I.z + DIR.z * R), pt(a, s = 0, y = 0) { return V3(this.B.x + this.DIR.x * a + this.PERP.x * s, y, this.B.z + this.DIR.z * a + this.PERP.z * s); } };
+}
+const DOCKS5 = [
+    mkDock(ARCH[0], 2.45, 22, "arr"), mkDock(ARCH[0], 0.62, 26, "harbor"), mkDock(ARCH[0], -1.95, 24, "next"),
+    mkDock(ARCH[1], 0.69 + Math.PI, 22, "harbor"), mkDock(ARCH[2], -0.4, 22, "harbor"), mkDock(ARCH[3], 1.25, 22, "harbor"), mkDock(ARCH[4], 2.5, 22, "harbor")
+];
+const HARBOR5 = DOCKS5[1], ARR5 = DOCKS5[0], NEXT5 = DOCKS5[2];
+const harborOf = I => DOCKS5.find(D => D.I === I && D.kind === "harbor");
+const pumpAt = D => D.pt(D.LEN - 3, -1.2);
+const FERRYMAN5 = (() => { const p = NEXT5.pt(NEXT5.LEN - 3.5, -0.9); return { x: p.x, z: p.z }; })();
+function onDock5(x, z) { for (const D of DOCKS5) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 4 && along < D.LEN + 0.4 && Math.abs(side) < 2.0) return D; } return null; }
+function groundY5(x, z) {
+    if (onDock5(x, z)) return 0;
+    const I = archAt(x, z);
+    return Math.max(-0.4, archTerrain(I, x, z));
+}
+const landH5 = (x, z) => (onDock5(x, z) ? 0.3 : archTerrain(archAt(x, z), x, z));
+// the camp at Port Haven
+const BED5 = { x: -9, z: 6 }, SMITH5 = { x: -11, z: -7 }, DEPOT5 = { x: 11, z: -7 }, WITCH5 = { x: 10, z: 8 };
+const SMITH5_AT = standPt(SMITH5), DEPOT5_AT = standPt(DEPOT5), WITCH5_AT = standPt(WITCH5);
+const SHIPWRIGHT = (() => { const p = HARBOR5.pt(-3, 5.5); return { x: p.x, z: p.z }; })();
+const LM5 = [
+    { name: "PORT HAVEN", x: 0, z: 0, r: 24, col: "#ffd890", camp: true },
+    ...ARCH.slice(1).map(I => ({ name: I.name, x: I.x, z: I.z, r: 6, col: I.col }))
+];
+function clampIsle5(p) {
+    if (B5.on) return; // the boat moves itself
+    for (const D of DOCKS5) {
+        const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP);
+        if (along > 4.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; }
+    }
+    const I = archAt(p.x, p.z), dx = p.x - I.x, dz = p.z - I.z, d = Math.hypot(dx, dz), lim = archR(I, Math.atan2(dz, dx)) - 3;
+    if (d > lim) { p.x = I.x + dx / d * lim; p.z = I.z + dz / d * lim; }
+}
+// ---- trees live on whichever island you're on ----
+let arch5 = "haven";
+const archOK5 = (x, z, I) => { if (archIn(I, x, z) < 10) return false; if (I.k === "haven" && Math.hypot(x, z) < SAFE_R + 4) return false; for (const D of DOCKS5) if (D.I === I && Math.hypot(x - D.B.x, z - D.B.z) < 12) return false; if (I.k === "storm" && Math.hypot(x - I.x, z - I.z) < 9) return false; return true; };
+function arch5Spot() {
+    const I = ARCH_BY[arch5];
+    for (let k = 0; k < 20; k++) { const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * (archR(I, a) - 10), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (archOK5(x, z, I)) return { x, z }; }
+    return null;
+}
+function clampTree5(t) {
+    const I = ARCH_BY[t.arch] || archAt(t.x, t.z), dx = t.x - I.x, dz = t.z - I.z, d = Math.hypot(dx, dz) || 1, lim = archR(I, Math.atan2(dz, dx)) - 8;
+    if (d > lim) { t.x = I.x + dx / d * lim; t.z = I.z + dz / d * lim; }
+}
+const archTreeTarget = () => Math.round((arch5 === "haven" ? 55 : 38) * (isBlood() ? 1.4 : 1));
+function setArch5(k, quiet) {
+    if (arch5 === k) return;
+    arch5 = k; terrainMesh[5] = isle5.terrain[k] || terrainMesh[5];
+    resetIsleTrees(Math.round(archTreeTarget() * 0.8));
+    if (!quiet) { const I = ARCH_BY[k]; say(I.name); setTimeout(() => say(""), 2600); }
+}
+
+// ---- materials, trees and recipes for the Archipelago ----
+Object.assign(MATS, {
+    driftwood: { name: "Driftwood", col: "#d8b890", price: 120, hex: 0xa08a6a },
+    salt: { name: "Sea Salt", col: "#e8f4ff", price: 170, hex: 0xe0ecf4 },
+    coral: { name: "Coral", col: "#ff7a8a", price: 260, hex: 0xff6a7a },
+    tar: { name: "Pitch Tar", col: "#a89078", price: 380, hex: 0x2a201a },
+    iceshard: { name: "Glacier Shard", col: "#9fe8ff", price: 560, hex: 0x8ad8ff },
+    pearl: { name: "Pearl", col: "#f4f0ff", price: 900, hex: 0xf0eaff },
+    stormglass: { name: "Stormglass", col: "#c8a0ff", price: 1600, hex: 0x9a7aff }
+});
+MATS_BY_ISLE[5] = ["driftwood", "salt", "coral", "tar", "iceshard", "pearl", "stormglass"];
+GLOW_MATS.push("iceshard", "pearl", "stormglass");
+for (const k of MATS_BY_ISLE[5]) matMeshMat[k] = new THREE.MeshLambertMaterial({ color: MATS[k].hex, flatShading: true, emissive: GLOW_MATS.includes(k) ? MATS[k].hex : 0x000000, emissiveIntensity: 0.35 });
+const TYPES5 = {
+    palm:       { name: "Palm Tree",    leaf: [0x3aa04a, 0x2e8a3e], trunk: 0xa8885a, hp: 3.0, logs: 1.3, dmg: 1.3, speed: 1,   bonus: 0,  wd: 0.55, wn: 0.4,  col: "#7affa0", isl: [5], mat: "driftwood", arch: "haven" },
+    mangrove:   { name: "Mangrove",     leaf: [0x2a6a3a, 0x3a7a2a], trunk: 0x5a4a3a, hp: 3.4, logs: 1.4, dmg: 1.4, speed: 0.9, bonus: 0,  wd: 0.35, wn: 0.35, col: "#9ad08a", isl: [5], mat: "salt", arch: "haven", minTier: 2 },
+    coralwood:  { name: "Coralwood",    leaf: [0xff6a8a, 0xff8a6a], trunk: 0xe88a7a, hp: 3.6, logs: 1.4, dmg: 1.4, speed: 1,   bonus: 0,  wd: 0.5,  wn: 0.45, col: "#ff8aa0", isl: [5], mat: "coral", arch: "coral" },
+    pearlbloom: { name: "Pearlbloom",   leaf: [0xf4f0ff, 0xd8e8ff], trunk: 0xc8b8d8, glow: 0x2a2a44, hp: 2.6, logs: 0.6, dmg: 0.9, speed: 1, bonus: 60, wd: 0.07, wn: 0.14, col: "#f4f0ff", isl: [5], rare: true, mat: "pearl", arch: "coral" },
+    tarpine:    { name: "Tar Pine",     leaf: [0x2a2a22, 0x3a3428], trunk: 0x1a1612, hp: 4.0, logs: 1.5, dmg: 1.6, speed: 1,   bonus: 0,  wd: 0.5,  wn: 0.45, col: "#c8b098", isl: [5], mat: "tar", arch: "skull" },
+    cursedmast: { name: "Cursed Mast",  leaf: [0x3a1a3a, 0x5a2a5a], trunk: 0x2a1a14, glow: 0x2a0a2a, hp: 3.0, logs: 0.8, dmg: 2.0, speed: 1.4, bonus: 80, wd: 0.03, wn: 0.12, col: "#d08aff", isl: [5], rare: true, night: true, mat: "pearl", arch: "skull" },
+    frostpine:  { name: "Frost Pine",   leaf: [0xd8f4ff, 0x9ad8f0], trunk: 0x6a7a8a, hp: 4.4, logs: 1.6, dmg: 1.7, speed: 0.9, bonus: 0,  wd: 0.5,  wn: 0.45, col: "#bff4ff", isl: [5], mat: "iceshard", arch: "frost" },
+    stormoak:   { name: "Storm Oak",    leaf: [0x3a3a6a, 0x5a5a9a], trunk: 0x2a2a3a, glow: 0x14143a, hp: 5.2, logs: 1.6, dmg: 2.0, speed: 1.1, bonus: 0, wd: 0.5, wn: 0.5, col: "#c8a0ff", isl: [5], mat: "stormglass", arch: "storm" },
+    xmaspalm:   { name: "Tinsel Palm",  leaf: [0x2a8a4a, 0x1e7a3e], trunk: 0xa8885a, hp: 2.6, logs: 2.6, dmg: 1.2, speed: 0.9, bonus: 40, wd: 0.05, wn: 0.06, col: "#ff6a6a", isl: [5], rare: true, xmas: true, mat: "driftwood", arch: "haven" }
+};
+Object.assign(TYPES, TYPES5);
+Object.assign(TREE_STYLE, { palm: { s: "palm", dots: 0x6a4a2a }, mangrove: { s: "round" }, coralwood: { s: "dead", dots: 0xffd0e0 }, pearlbloom: { s: "round", dots: 0xffffff }, tarpine: { s: "conifer" },
+    cursedmast: { s: "dead", dots: 0xb07aff }, frostpine: { s: "conifer", snow: true }, stormoak: { s: "round", dots: 0xc8a0ff }, xmaspalm: { s: "palm", dots: 0xff3a3a } });
+for (const [k, T] of Object.entries(TYPES5)) {
+    const base = { flatShading: true }; if (T.glow !== undefined) base.emissive = T.glow;
+    typeMats[k] = { trunk: new THREE.MeshLambertMaterial({ color: T.trunk, ...base }), leaves: T.leaf.map(c => windy(new THREE.MeshLambertMaterial({ color: c, ...base }))) };
+}
+Object.assign(HIT_COL, { palm: [0x3aa04a, 0xa8885a], coralwood: [0xff6a8a, 0xffd0e0], pearlbloom: [0xf4f0ff, 0xd8e8ff], tarpine: [0x2a2a22, 0x5a4a3a], cursedmast: [0x5a2a5a, 0xb07aff], frostpine: [0xd8f4ff, 0xffffff], stormoak: [0x5a5a9a, 0xc8a0ff] });
+// the Sea Forge: every axe again, from sea materials
+const AXE_RECIPES5 = [null, { driftwood: 8 }, { driftwood: 12, salt: 4 }, { driftwood: 16, salt: 8 }, { salt: 14, coral: 4 }, { salt: 20, coral: 10 }, { salt: 26, coral: 12, tar: 4 }, { coral: 20, tar: 10 },
+    { tar: 18, iceshard: 4 }, { coral: 20, tar: 26, iceshard: 10 }, { tar: 30, iceshard: 22, pearl: 2 }, { salt: 60, iceshard: 34, pearl: 5 }, { tar: 50, iceshard: 60, pearl: 10 }, { tar: 60, iceshard: 80, pearl: 16, stormglass: 2 }, { iceshard: 80, pearl: 20, stormglass: 6 }, { pearl: 30, stormglass: 14 }];
+const GUN_RECIPES5 = [{ driftwood: 10, salt: 6 }, { driftwood: 20, salt: 12, coral: 4 }, { salt: 26, coral: 12 }, { salt: 30, coral: 18, tar: 6 }, { coral: 40, tar: 40, iceshard: 18 }, { tar: 30, iceshard: 40, pearl: 8 }, { iceshard: 60, pearl: 12, stormglass: 4 }];
+const AMMO_RECIPES5 = [{ driftwood: 2, salt: 1 }, { driftwood: 3, salt: 3 }, { salt: 4, coral: 2 }, { salt: 3, coral: 3 }, { coral: 10, tar: 4 }, { tar: 3, iceshard: 2 }, { coral: 8, iceshard: 3 }];
+for (const list of [AXE_RECIPES5, GUN_RECIPES5]) for (const rc of list) if (rc) for (const k in rc) rc[k] = Math.max(1, Math.round(rc[k] * 0.6));
+RECIPES[5] = [AXE_RECIPES5, GUN_RECIPES5, AMMO_RECIPES5];
+function brewItems5() {
+    const b = (k, name, desc, secs, craft, cost) => ({ name, col: BUFFS[k].col, desc: `${desc} for ${secs / 60} min${buffLeft(k) > 0 ? ` · ACTIVE ${mmss(buffLeft(k))} (drinking adds more time)` : ""}`, craft, cost, verb: "Brewed", quiet: true, buy() { giveBuff(k, secs); } });
+    return [
+        b("swift", "Sea Breeze Tonic", "+30% move speed", 240, { salt: 6 }, 9000),
+        b("ironhide", "Barnacle Draught", "Take 40% less damage", 240, { salt: 4, coral: 6 }, 18000),
+        b("fury", "Grog of Fury", "+40% axe and gun damage", 240, { coral: 6, tar: 5 }, 36000),
+        b("lucky", "Mermaid's Luck", "+50% materials from every tree", 300, { salt: 12, pearl: 2 }, 50000),
+        { name: "Phoenix Tear", icon: "phoenix", col: "#ffb060", desc: `If you would die, you rise again with 60% health instead (not at sea: the sea doesn't give back). You have ${save.phoenix || 0} (max 3)`, craft: { pearl: 3, stormglass: 1 }, cost: 300000, verb: "Brewed", maxed: (save.phoenix || 0) >= 3, buy() { save.phoenix = (save.phoenix || 0) + 1; } }
+    ];
+}
+
+// =========================== THE BOAT ===========================
+const B5 = { on: false, x: 0, z: 0, yaw: 0, speed: 0, mesh: null, prop: null, wakeT: 0, engT: 0, strand: 0, warned: 0, docked: "haven", lastLand: 0 };
+if (!save.boat || typeof save.boat !== "object") save.boat = { fuel: 100, tank: 0, engine: 0, cans: 0, hull: 0 };
+const boatMaxFuel = () => 100 * (1 + 0.45 * (save.boat.tank || 0));
+const boatTop = () => 15 * (1 + 0.13 * (save.boat.engine || 0));
+const fuelPrice = () => Math.round(18 * rebirthMult()); // per unit
+const boating = () => B5.on;
+function makeSpeedboat() {
+    const g = new THREE.Group(), hullM = lamb(0xf2f2f2), stripe = lamb(0x1a6ab0), deck = lamb(0xb08a5a), dark = lamb(0x22262e);
+    // hull: a box with a pointed bow
+    part(g, BOX, hullM, 0, 0.45, -0.3, 2.2, 0.9, 4.6);
+    const bow = new THREE.Mesh(new THREE.ConeGeometry(1.1, 1.8, 4), hullM); bow.rotation.set(Math.PI / 2, 0, Math.PI / 4); bow.scale.set(1, 1, 0.64); bow.position.set(0, 0.45, 2.75); g.add(bow);
+    part(g, BOX, stripe, 0, 0.62, -0.3, 2.24, 0.14, 4.62); part(g, BOX, deck, 0, 0.92, -0.6, 1.9, 0.06, 3.6);
+    part(g, BOX, dark, 0, 1.68, 0.68, 1.7, 0.05, 0.06); for (const sx of [-0.83, 0.83]) part(g, BOX, dark, sx, 1.33, 0.78, 0.05, 0.7, 0.05); // a slim windscreen frame
+    const glass = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.18 })); glass.scale.set(1.6, 0.6, 0.03); glass.position.set(0, 1.36, 0.74); glass.rotation.x = -0.35; g.add(glass);
+    part(g, BOX, lamb(0x8a2a2a), -0.45, 1.15, -0.5, 0.7, 0.4, 0.7); part(g, BOX, lamb(0x8a2a2a), 0.45, 1.15, -0.5, 0.7, 0.4, 0.7); // seats
+    part(g, CYL8, dark, 0, 1.45, 0.35, 0.22, 0.05, 0.22, Math.PI / 2.5); // wheel
+    part(g, BOX, dark, 0, 1.0, -2.75, 0.5, 1.1, 0.5); part(g, BOX, lamb(0xffb020), 0, 1.5, -2.75, 0.56, 0.2, 0.56); // outboard motor
+    const prop = new THREE.Group(); prop.position.set(0, 0.25, -2.9); g.add(prop); part(prop, BOX, dark, 0, 0, 0, 0.9, 0.12, 0.05); part(prop, BOX, dark, 0, 0, 0, 0.12, 0.9, 0.05);
+    part(g, ICO, glowM(0x6dff8a), 1.05, 1.05, 2.0, 0.08); part(g, ICO, glowM(0xff4a4a), -1.05, 1.05, 2.0, 0.08); // nav lights
+    g.userData.prop = prop;
+    return g;
+}
+function boatHome(fuelFloor = 0) {
+    const D = HARBOR5, p = D.pt(D.LEN - 7, 4.2);
+    B5.x = p.x; B5.z = p.z; B5.yaw = Math.atan2(D.DIR.x, D.DIR.z); B5.speed = 0; B5.docked = "haven";
+    save.boat.fuel = Math.max(save.boat.fuel, boatMaxFuel() * fuelFloor);
+    placeBoat();
+}
+function placeBoat() { if (!B5.mesh) return; B5.mesh.position.set(B5.x, -0.32, B5.z); B5.mesh.rotation.set(0, B5.yaw, 0); }
+const seatPos = new THREE.Vector3();
+function boatSeat() { return seatPos.set(B5.x + Math.sin(B5.yaw) * -0.5, 1.95 + B5.mesh.position.y + 0.32, B5.z + Math.cos(B5.yaw) * -0.5); }
+// where you'd step out onto land (a dock or a beach) from where the boat is
+function landingSpot() {
+    let best = null, bd = 1e9;
+    for (let r = 2.5; r <= 11; r += 1.5) for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2, x = B5.x + Math.cos(a) * r, z = B5.z + Math.sin(a) * r;
+        const dock = onDock5(x, z), I = archAt(x, z), inside = archIn(I, x, z);
+        if (!(dock || inside > 4.5)) continue;
+        if (r < bd) { bd = r; best = { x, z, I, dock }; }
+    }
+    return best;
+}
+function boatEnter() {
+    if (B5.on) return;
+    B5.on = true; B5.speed = 0; player.vel.set(0, 0, 0); mouseDown = false;
+    player.yaw = B5.yaw + Math.PI; player.pitch = -0.05;
+    sfx(90, 0.4, "sawtooth", 0.1, 1.6); setTimeout(() => sfx(70, 0.6, "sawtooth", 0.08, 1.3), 200);
+    if (!save.boatTip) { save.boatTip = 1; toast("W / S throttle · A / D steer · Shift to boost (burns fuel fast) · F to get out next to land", "good"); toast("Watch your fuel! Run dry out at sea and you'll lose everything you're carrying.", "bad"); }
+}
+function boatExit() {
+    const s = landingSpot(); if (!s) { toast("Too far from land to get out. Get closer to a dock or a beach.", "bad"); return; }
+    B5.on = false; B5.speed = 0; B5.strand = 0;
+    player.pos.set(s.x, groundY5(s.x, s.z) + 1.7, s.z); player.vel.set(0, 0, 0);
+    B5.docked = s.I.k;
+    sfx(140, 0.2, "square", 0.08, 0.5);
+    if (s.I.k !== arch5) setArch5(s.I.k);
+    writeSave();
+}
+function driveBoat(dt) {
+    const fuel = save.boat.fuel, can = fuel > 0;
+    let thr = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 0.45 : 0);
+    if (!can || panel) thr = 0;
+    const boost = can && thr > 0 && (keys.ShiftLeft || keys.ShiftRight);
+    const target = thr * boatTop() * (boost ? 1.45 : 1);
+    B5.speed += (target - B5.speed) * Math.min(1, (thr ? 0.7 : 0.35) * dt);
+    const steer = panel ? 0 : (keys.KeyA ? 1 : 0) - (keys.KeyD ? 1 : 0), turn = steer * 1.05 * clamp(Math.abs(B5.speed) / 7, 0.2, 1) * (B5.speed < -0.2 ? -1 : 1) * dt;
+    B5.yaw += turn; player.yaw += turn;
+    if (can && thr) save.boat.fuel = Math.max(0, fuel - Math.abs(thr) * (boost ? 6 : 2.8) * dt);
+    // move, unless that would beach us or hit a dock
+    const fx = Math.sin(B5.yaw), fz = Math.cos(B5.yaw), nx = B5.x + fx * B5.speed * dt, nz = B5.z + fz * B5.speed * dt;
+    const bowX = nx + fx * 3.2 * Math.sign(B5.speed || 1), bowZ = nz + fz * 3.2 * Math.sign(B5.speed || 1);
+    const hit = landH5(bowX, bowZ) > -0.85 || landH5(nx + fz * 1.1, nz - fx * 1.1) > -0.85 || landH5(nx - fz * 1.1, nz + fx * 1.1) > -0.85;
+    if (hit) { if (Math.abs(B5.speed) > 4) { sfx(60, 0.3, "square", 0.14, 0.5); shake = Math.min(0.6, shake + Math.abs(B5.speed) * 0.03); } B5.speed *= -0.25; }
+    else if (Math.hypot(nx, nz) > 760) B5.speed *= -0.3;
+    else { B5.x = nx; B5.z = nz; }
+    // ride the swell
+    const bob = Math.sin(time * 1.3) * 0.07 + Math.sin(time * 2.1 + B5.x * 0.05) * 0.04;
+    B5.mesh.position.set(B5.x, -0.32 + bob, B5.z);
+    B5.mesh.rotation.set(-Math.min(0.12, Math.abs(B5.speed) * 0.006) + Math.sin(time * 1.7) * 0.02, B5.yaw, -turn * 4 + Math.sin(time * 1.1) * 0.025);
+    B5.mesh.userData.prop.rotation.z += B5.speed * dt * 4;
+    player.pos.copy(boatSeat()); player.vel.set(0, 0, 0); player.onGround = true;
+    // wake and engine noise
+    if (Math.abs(B5.speed) > 2 && (B5.wakeT -= dt) <= 0) { B5.wakeT = 0.05; burst(V3(B5.x - fx * 2.8 + (Math.random() - 0.5), -0.3, B5.z - fz * 2.8 + (Math.random() - 0.5)), 1, 1.5, [wakeMat]); }
+    if ((B5.engT -= dt) <= 0 && can) { B5.engT = 0.11; sfx(55 + Math.abs(B5.speed) * 6 + (boost ? 30 : 0), 0.13, "sawtooth", 0.025 + Math.abs(thr) * 0.03, 1.05); }
+    // fuel: warnings, then the sea
+    const f = save.boat.fuel / boatMaxFuel();
+    if (f < 0.2 && f > 0 && B5.warned < 1) { B5.warned = 1; toast("LOW FUEL! Head for a fuel dock (Port Haven or Coral Key).", "bad"); }
+    if (f >= 0.2) B5.warned = 0;
+    if (save.boat.fuel <= 0) {
+        if ((save.boat.cans || 0) > 0) { save.boat.cans--; save.boat.fuel = boatMaxFuel() * 0.25; toast("You pour your spare fuel can into the tank. 25% fuel.", "good"); sfx(300, 0.4, "sine", 0.08, 1.5); return; }
+        const near = landingSpot();
+        if (near) { B5.strand = 0; if (B5.warned < 2) { B5.warned = 2; toast("Out of fuel! You're close enough to land: press F to get out.", "bad"); } }
+        else {
+            B5.strand += dt;
+            if (B5.warned < 3) { B5.warned = 3; toast("OUT OF FUEL in open water... the boat is drifting. Nobody is coming.", "bad"); sfx(90, 1.2, "sawtooth", 0.1, 0.4); }
+            const left = 14 - B5.strand;
+            say(left > 0 ? `OUT OF FUEL · DRIFTING · ${Math.ceil(left)}` : "");
+            hurtEl.style.opacity = Math.max(+hurtEl.style.opacity || 0, clamp(B5.strand / 14, 0, 0.8));
+            if (B5.strand >= 14) loseAtSea();
+        }
+    } else if (B5.strand) { B5.strand = 0; say(""); }
+}
+const wakeMat = new THREE.MeshBasicMaterial({ color: 0xe8f8ff, transparent: true, opacity: 0.8 });
+function loseAtSea() {
+    say("");
+    const lostN = Object.values(save.mats || {}).reduce((a, b) => a + (b || 0), 0);
+    save.mats = {};
+    B5.on = false; B5.speed = 0; B5.strand = 0; B5.warned = 0;
+    boatHome(0.3);
+    endFishing(); player.hp = 0; state = "dead"; deadT = 0; save.deaths++; mouseDown = false; panel = null;
+    $("deathLost").textContent = lostN ? `Lost at sea. ${lostN} materials went down with the boat.` : "Lost at sea. Good thing your pockets were empty.";
+    $("death").classList.add("show");
+    sfx(50, 1.4, "sawtooth", 0.3, 0.2); sfx(110, 1.0, "sine", 0.12, 0.3);
+    writeSave(); showPanels();
+}
+function boatRespawn() { // after any death on the Archipelago you wake at Port Haven; the harbor master tows your boat home
+    if (arch5 !== "haven") setArch5("haven", true);
+    if (B5.docked !== "haven" || Math.hypot(B5.x - HARBOR5.B.x, B5.z - HARBOR5.B.z) > 40) { boatHome(0.3); toast("The harbor master towed your boat back to Port Haven.", ""); }
+}
+function refuel() {
+    const need = boatMaxFuel() - save.boat.fuel;
+    if (need < 0.5) { toast("The tank is already full.", ""); return; }
+    const price = fuelPrice(), afford = Math.floor(save.money / price), units = Math.min(need, afford);
+    if (units < 1) { toast(`Fuel costs ${money(price)} a unit. You can't afford any.`, "bad"); return; }
+    save.money -= Math.round(units * price); save.boat.fuel += units;
+    toast(units < need ? `Filled ${Math.round(units)} units (that's all you could afford). -${money(Math.round(units * price))}` : `Tank full! -${money(Math.round(units * price))}`, "cash");
+    sfx(200, 0.6, "sine", 0.06, 2.4); writeSave();
+}
+function ringTow() {
+    const cost = Math.round(2500 * rebirthMult());
+    if (save.money < cost) { toast(`The harbor tow costs ${money(cost)}. You can't afford it.`, "bad"); return; }
+    save.money -= cost;
+    sfx(880, 1.2, "sine", 0.1, 1); setTimeout(() => sfx(880, 1.2, "sine", 0.08, 1), 600);
+    fadeTo(() => { boatHome(0.3); B5.on = false; const p = HARBOR5.pt(HARBOR5.LEN - 4); player.pos.set(p.x, 1.75, p.z); player.vel.set(0, 0, 0); setArch5("haven", true); });
+    toast(`The harbor tow hauls you and your boat back to Port Haven. -${money(cost)}`, "");
+}
+function boatItems() {
+    const m = rebirthMult(), lvl = k => save.boat[k] || 0;
+    return [
+        { name: "Bigger Fuel Tank", desc: `+45% fuel capacity (${lvl("tank")}/5) · now ${Math.round(boatMaxFuel())} units`, cost: Math.round([6000, 18000, 50000, 130000, 320000][lvl("tank")] * m || 0), maxed: lvl("tank") >= 5, buy() { save.boat.tank++; save.boat.fuel = Math.min(boatMaxFuel(), save.boat.fuel + 40); } },
+        { name: "Faster Engine", desc: `+13% top speed (${lvl("engine")}/5) · now ${boatTop().toFixed(1)} m/s`, cost: Math.round([8000, 24000, 65000, 160000, 400000][lvl("engine")] * m || 0), maxed: lvl("engine") >= 5, buy() { save.boat.engine++; } },
+        { name: "Spare Fuel Can", desc: `Pours itself in the moment your tank runs dry: +25% fuel. Carry up to 3. You have ${lvl("cans")}`, cost: Math.round(4000 * m), maxed: lvl("cans") >= 3, buy() { save.boat.cans = lvl("cans") + 1; } },
+        { name: "Fill the Tank", desc: `Fuel is ${money(fuelPrice())} a unit. You have ${Math.round(save.boat.fuel)} / ${Math.round(boatMaxFuel())}`, sell: true, value: 0, buy() { refuel(); } }
+    ];
+}
+
+// =========================== the islands (3D) ===========================
+const isle5G = new THREE.Group(); isle5G.visible = false; scene.add(isle5G);
+const isle5 = { waterGeo: null, terrain: {}, emit: [], fireLight: null, beam: null, lighthouse: null, boatArr: null, boatNext: null, labels: [], bells: [] };
+let isle5Built = false, ferryman5 = null, mapBg5 = null;
+const npcs5 = [];
+const ISLE_PAL = {
+    haven: (x, z, y, ny, inside, d, rn, c) => { if (inside < 12 && y < 1.6) c.setHSL(0.12, 0.5, 0.62 + rn * 0.06); else if (d < SAFE_R + 1) c.setHSL(0.09, 0.32, 0.32 + rn * 0.05); else if (ny < 0.8) c.setHSL(0.08, 0.2, 0.32 + rn * 0.06); else c.setHSL(0.3 + rn * 0.05, 0.48, 0.26 + rn * 0.06); },
+    coral: (x, z, y, ny, inside, d, rn, c) => { const v = fbm2(x * 0.08, z * 0.08, 2); if (v > 0.6 && inside > 10) c.setHSL(0.97, 0.45, 0.62 + rn * 0.05); else c.setHSL(0.11, 0.32, 0.78 + rn * 0.06); },
+    skull: (x, z, y, ny, inside, d, rn, c) => { if (inside < 10 && y < 1.4) c.setHSL(0.08, 0.06, 0.14 + rn * 0.04); else if (ny < 0.82 || y > 6) c.setHSL(0.07, 0.08, 0.24 + rn * 0.06 + Math.min(0.12, y * 0.006)); else c.setHSL(0.15, 0.25, 0.28 + rn * 0.05); },
+    frost: (x, z, y, ny, inside, d, rn, c) => { if (y > 7 || (y > 3 && ny > 0.8)) c.setHSL(0.58, 0.22, 0.72 + rn * 0.06); else if (ny < 0.8) c.setHSL(0.6, 0.12, 0.46 + rn * 0.06); else if (inside < 10) c.setHSL(0.58, 0.1, 0.62 + rn * 0.05); else c.setHSL(0.47, 0.22, 0.48 + rn * 0.05); },
+    storm: (x, z, y, ny, inside, d, rn, c) => { if (inside < 10 && y < 1.5) c.setHSL(0.7, 0.08, 0.2 + rn * 0.04); else if (ny < 0.8) c.setHSL(0.72, 0.14, 0.24 + rn * 0.05); else c.setHSL(0.76 + rn * 0.03, 0.34, 0.26 + rn * 0.05); }
+};
+function buildIsle5() {
+    isle5Built = true; curBuild = 5;
+    const prevAdd = addTgt; addTgt = isle5G;
+    colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
+    // ----- the land: one terrain per island -----
+    for (const I of ARCH) {
+        const S = Math.ceil((I.r + 22) * 2), seg = Math.round(S / 1.6), g = new THREE.PlaneGeometry(S, S, seg, seg);
+        g.rotateX(-Math.PI / 2);
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) pos.setY(i, archTerrain(I, pos.getX(i) + I.x, pos.getZ(i) + I.z));
+        g.computeVertexNormals();
+        const nor = g.attributes.normal, col = [], c = new THREE.Color();
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i) + I.x, z = pos.getZ(i) + I.z, y = pos.getY(i), inside = archIn(I, x, z), d = Math.hypot(x, z);
+            if (y < -0.5) c.setHSL(0.5, 0.35, 0.3 + Math.random() * 0.05); else ISLE_PAL[I.k](x, z, y, nor.getY(i), inside, d, Math.random(), c);
+            col.push(c.r, c.g, c.b);
+        }
+        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })); m.position.set(I.x, 0, I.z); scene.add(m);
+        isle5.terrain[I.k] = m;
+        // a floating name over every island, readable from far across the water
+        const l = label(I.name, I.col, 4.6, 1.0); l.position.set(I.x, I.k === "frost" ? 40 : 26, I.z); l.maxD = 900; l.blurK = 0.18; l.base = I.name; isle5.labels.push({ l, I });
+    }
+    terrainMesh[5] = isle5.terrain.haven;
+    // ----- the sea: shallow turquoise round every island, deep blue between -----
+    {
+        const wg = new THREE.PlaneGeometry(1600, 1600, 200, 200); wg.rotateX(-Math.PI / 2);
+        const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x5ae8e0), mid = new THREE.Color(0x2f96c8), deep = new THREE.Color(0x0e3a6a);
+        for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), I = archAt(x, z), k = clamp(-archIn(I, x, z) / 46, 0, 1); cc.copy(shallow).lerp(mid, clamp(k * 2, 0, 1)).lerp(deep, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
+        wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3)); isle5.waterGeo = wg;
+        const fp = [], idx = []; let base = 0;
+        for (const I of ARCH) { const N = Math.round(I.r * 3); for (let i = 0; i <= N; i++) { const th = (i / N) * Math.PI * 2, r = archR(I, th); fp.push(I.x + Math.cos(th) * (r - 3.5), -0.4, I.z + Math.sin(th) * (r - 3.5), I.x + Math.cos(th) * (r - 2.2), -0.4, I.z + Math.sin(th) * (r - 2.2)); if (i < N) { const a = base + i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } } base += (N + 1) * 2; }
+        const fg = new THREE.BufferGeometry(); fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3)); fg.setIndex(idx);
+        isle5.foam = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+        scene.add(isle5.foam);
+    }
+    // ----- docks -----
+    for (const D of DOCKS5) {
+        const yaw = Math.atan2(D.DIR.x, D.DIR.z);
+        const planks = batch(lamb(D.kind === "harbor" ? 0x8a6a4a : 0x6a5a4a)), posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(glowM(D.kind === "next" ? 0x9fe8ff : 0xffd890));
+        for (let i = 0; i < D.LEN; i++) { const p = D.pt(i + 0.5); planks.add(BOX, p.x, 0.22, p.z, 0, yaw, 0, 3.6, 0.14, 0.92); }
+        for (let i = 0; i <= D.LEN; i += 3) for (const sd of [-1.9, 1.9]) { const p = D.pt(i, sd); posts.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) bulbs.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
+        for (let i = 0; i < D.LEN; i++) for (const sd of [-1.9, 1.9]) { if (D.kind === "harbor" && sd > 0 && i > D.LEN - 12) continue; const p = D.pt(i + 0.5, sd, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
+        planks.build(); posts.build(); rails.build(); bulbs.build();
+        if (D.kind === "harbor") {
+            // a fuel pump (Port Haven and Coral Key) or a tow bell (everywhere else)
+            const p = pumpAt(D);
+            if (D.I.pump) {
+                const g = new THREE.Group(); g.position.set(p.x, 0.3, p.z); g.rotation.y = yaw; scene.add(g);
+                part(g, BOX, lamb(0xc8202a), 0, 0.75, 0, 0.6, 1.5, 0.45); part(g, BOX, glowM(0xffe070), 0, 1.25, 0.24, 0.4, 0.25, 0.02); part(g, CYL6, lamb(0x1a1a1a), 0.38, 0.9, 0, 0.05, 0.6, 0.05);
+                const l = label("FUEL", "#ffe070", 2, 0.6); l.position.set(p.x, 2.6, p.z); l.maxD = 60;
+            } else {
+                const g = new THREE.Group(); g.position.set(p.x, 0.3, p.z); scene.add(g);
+                part(g, CYL6, woodDark, -0.5, 1.1, 0, 0.07, 2.2, 0.07); part(g, CYL6, woodDark, 0.5, 1.1, 0, 0.07, 2.2, 0.07); part(g, BOX, woodDark, 0, 2.2, 0, 1.2, 0.1, 0.1);
+                const bell = part(g, CONE6, lamb(0xd8a840), 0, 1.85, 0, 0.32, 0.5, 0.32); isle5.bells.push(bell);
+                const l = label("TOW BELL", "#ffd040", 2.2, 0.6); l.position.set(p.x, 3.0, p.z); l.maxD = 50;
+            }
+            const sl = label(D.I.name + " HARBOR", D.I.col, 3, 0.7); const sp = D.pt(3.5, 0, 4.2); sl.position.copy(sp); sl.maxD = 90;
+        } else {
+            const [a1, a2, c1] = D.kind === "arr" ? ["WELCOME TO", "PORT HAVEN", "#ffd890"] : ["REBIRTH 5", "COMING SOON", "#9fe8ff"];
+            const s1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(a1, a2, c1) })); s1.position.copy(D.pt(3.5, 0, 3.3)); s1.rotation.y = D.kind === "arr" ? yaw : yaw + Math.PI; scene.add(s1);
+            const s2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(D.kind === "arr" ? "ARRIVALS" : "PORT HAVEN", D.kind === "arr" ? "FROM ASHFALL ISLE" : "THIS WAY ↑", c1) })); s2.position.copy(D.pt(3.5, 0, 3.3)); s2.rotation.y = D.kind === "arr" ? yaw + Math.PI : yaw; scene.add(s2);
+            for (const sd of [-2.0, 2.0]) { const p = D.pt(3.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
+            const b = makeBoat3(D.kind === "arr" ? 0x2a1a1a : 0x1a2a3a, D.kind === "arr" ? 0x7a3a2a : 0x4a7a9a, D.kind === "arr" ? 0xffa050 : 0x9fe8ff);
+            b.position.copy(D.pt(D.LEN - 7, 4.4, -0.15)); b.rotation.y = yaw; scene.add(b);
+            if (D.kind === "arr") isle5.boatArr = b; else isle5.boatNext = b;
+        }
+    }
+    // ----- Port Haven: camp, stalls, shipwright, ferryman, lanterns -----
+    {
+        const stones = batch(lamb(0x6a6460)); for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); } stones.build();
+        const lg = batch(woodDark); for (let i = 0; i < 4; i++) lg.add(CYL6, 0, 0.25, -3, Math.PI / 2, i * 0.8, 0, 0.12, 1.3, 0.12); lg.build();
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.7, 6), glowM(0xff8a2a)); flame.position.set(0, 1.05, -3);
+        const core = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 5), glowM(0xffe070)); core.position.set(0, 0.72, -3);
+        scene.add(flame, core); fires.push({ flame, core, ph: srand() * 6 });
+        const fl = new THREE.PointLight(0xff9a40, 18, 18, 1.6); fl.position.set(0, 2, -3); scene.add(fl); isle5.fireLight = fl;
+        circles.push({ x: 0, z: -3, r: 1.3 }); isle5.emit.push({ x: 0, y: 2.0, z: -3, rate: 1.0, acc: 0.3 });
+        const cl = label("PORT HAVEN", "#ffd890", 3.4, 0.8); cl.position.set(0, 4.6, -3); cl.maxD = 90;
+        // a beach hut to sleep in
+        const g = new THREE.Group(); g.position.set(BED5.x, groundY5(BED5.x, BED5.z), BED5.z); g.rotation.y = Math.atan2(-BED5.x, -BED5.z);
+        for (const [x, z] of [[-1.5, -1.2], [1.5, -1.2], [-1.5, 1.0], [1.5, 1.0]]) part(g, CYL6, lamb(0x8a6a4a), x, 1.2, z, 0.1, 2.4, 0.1);
+        const thatch = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.4, 4), lamb(0xc8a860)); thatch.position.set(0, 3.0, -0.1); thatch.rotation.y = Math.PI / 4; g.add(thatch);
+        part(g, BOX, wood, 0, 0.35, -0.2, 1.4, 0.3, 2.3); part(g, BOX, lamb(0x2a8ab0), 0, 0.58, -0.55, 1.3, 0.14, 1.5); part(g, BOX, lamb(0xf0ece0), 0, 0.58, 0.7, 1.0, 0.14, 0.5);
+        scene.add(g); circles.push({ x: BED5.x, z: BED5.z, r: 1.6 });
+        const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(BED5.x, 3.6, BED5.z);
+        const gS = stall3(SMITH5, "THE SEA FORGE", "CRAFT AXES · GUNS", "#7ad8ff", 0x2a4a5a);
+        const smith = makeHumanoid({ face: "smith", skin: 0xc8946a, shirt: 0x2a4a6a, pants: 0x1a2a3a, apron: 0x3a2a1a, beard: 0x5a3a1a, hat: "cap", hatCol: 0x1a3a5a, wide: 1.25, belly: true });
+        smith.g.position.set(0, 0, -0.6); gS.add(smith.g); smith.yaw = gS.rotation.y; npcs5.push(smith);
+        const hm = new THREE.Group(); hm.position.set(0, -0.64, 0.05); smith.armR.add(hm); part(hm, BOX, lamb(0x6a4a2a), 0, 0, 0.22, 0.05, 0.05, 0.5); smith.hammer = part(hm, BOX, lamb(0x2a2a30), 0, 0, 0.48, 0.24, 0.13, 0.13);
+        const l1 = label("THE SEA FORGE", "#7ad8ff", 3.2, 0.8); l1.position.set(SMITH5.x, 6.2, SMITH5.z);
+        const gD = stall3(DEPOT5, "TRADING POST", "SELL MATERIALS", "#ffd040", 0x5a3a20);
+        const clerk = makeHumanoid({ face: "clerk", skin: 0x8a5a3a, shirt: 0xf0e8d8, vest: 0x1a6ab0, pants: 0x3a2a20, hair: 0x101010, hat: "cap", hatCol: 0xf0f0f0 });
+        clerk.g.position.set(0, 0, -0.6); gD.add(clerk.g); clerk.yaw = gD.rotation.y; npcs5.push(clerk);
+        const l2 = label("TRADING POST", "#ffd040", 3.6, 0.8); l2.position.set(DEPOT5.x, 6.2, DEPOT5.z);
+        const gW = stall3(WITCH5, "SEA WITCH", "BREWS · TONICS", "#7affd8", 0x1a4a4a);
+        const witch = makeHumanoid({ face: "witch", skin: 0x7ac8b0, shirt: 0x1a3a4a, pants: 0x1a2a2a, hair: 0x2a6a6a, hat: "witch", hatCol: 0x1a3a3a });
+        witch.g.position.set(0, 0, -0.6); gW.add(witch.g); witch.yaw = gW.rotation.y; npcs5.push(witch);
+        const l3 = label("SEA WITCH", "#7affd8", 3.2, 0.8); l3.position.set(WITCH5.x, 6.2, WITCH5.z);
+        // the shipwright's shed by the harbor
+        const sw = new THREE.Group(), sy = groundY5(SHIPWRIGHT.x, SHIPWRIGHT.z); sw.position.set(SHIPWRIGHT.x, sy, SHIPWRIGHT.z); sw.rotation.y = Math.atan2(HARBOR5.DIR.x, HARBOR5.DIR.z) + Math.PI / 2; scene.add(sw);
+        part(sw, BOX, lamb(0x8a6a4a), 0, 0.55, 0, 3.4, 1.1, 1.2); part(sw, BOX, lamb(0xd8c8a0), 0, 1.14, 0, 3.5, 0.08, 1.3);
+        for (const x of [-1.6, 1.6]) part(sw, CYL6, woodDark, x, 1.6, -0.5, 0.08, 3.2, 0.08);
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(4, 0.14, 2.4), lamb(0x2a6a9a)); roof.position.set(0, 3.25, -0.2); roof.rotation.x = 0.15; sw.add(roof);
+        part(sw, CYL6, lamb(0xffb020), 1.2, 1.5, 0, 0.12, 0.6, 0.12, Math.PI / 2); // a life ring
+        const wright = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0xf2f2f2, pants: 0x1a2a4a, beard: 0xd8d0c0, hat: "cap", hatCol: 0x1a2a4a });
+        wright.g.position.set(0, 0, -0.9); sw.add(wright.g); wright.yaw = sw.rotation.y; npcs5.push(wright);
+        circles.push({ x: SHIPWRIGHT.x, z: SHIPWRIGHT.z, r: 1.8 });
+        const l4 = label("SHIPWRIGHT", "#9fe8ff", 3.2, 0.8); l4.position.set(SHIPWRIGHT.x, sy + 4.4, SHIPWRIGHT.z);
+        const l5 = label("boat upgrades · fuel cans", "#cfe8ff", 2.4, 0.5); l5.position.set(SHIPWRIGHT.x, sy + 3.6, SHIPWRIGHT.z); l5.maxD = 40;
+        // lanterns from camp to every dock
+        const lp = batch(woodDark), lgl = batch(glowM(0xffd890));
+        for (const D of DOCKS5.slice(0, 3)) { const land = Math.hypot(D.B.x, D.B.z); for (let s = 4, k = 0; s < land - 26; s += 9, k++) { const sd = k % 2 ? 3.2 : -3.2, x = D.B.x - D.DIR.x * s + D.PERP.x * sd, z = D.B.z - D.DIR.z * s + D.PERP.z * sd, y = groundY5(x, z); lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lgl.add(ICO, x, y + 2.5, z, 0, 0, 0, 0.18, 0.24, 0.18); } }
+        lp.build(); lgl.build();
+        // the Rebirth 5 ferryman (not sailing yet)
+        const yaw = Math.atan2(NEXT5.DIR.x, NEXT5.DIR.z);
+        ferryman5 = makeFerrymanFigure(0x1a2a3a, 0x3a7aaa, 0x9fe8ff); ferryman5.position.set(FERRYMAN5.x, 0.3, FERRYMAN5.z); ferryman5.rotation.y = yaw + Math.PI; scene.add(ferryman5);
+        const fm = label("FERRYMAN", "#9fe8ff", 2.6, 0.6); fm.position.set(FERRYMAN5.x, 4.7, FERRYMAN5.z); fm.maxD = 60;
+    }
+    // ----- landmarks you can see from the water -----
+    {   // Storm Isle's lighthouse, with a sweeping beam
+        const I = ARCH_BY.storm, y = archTerrain(I, I.x, I.z), g = new THREE.Group(); g.position.set(I.x, y, I.z); scene.add(g);
+        part(g, CYL8, lamb(0xf2f2f2), 0, 5, 0, 2.2, 10, 2.2); part(g, CYL8, lamb(0xc8202a), 0, 3.3, 0, 2.25, 1.4, 2.25); part(g, CYL8, lamb(0xc8202a), 0, 7.2, 0, 2.05, 1.4, 2.05);
+        part(g, CYL8, lamb(0x2a2a30), 0, 10.4, 0, 2.4, 0.4, 2.4); part(g, CYL8, glowM(0xfff4c0), 0, 11.4, 0, 1.4, 1.6, 1.4); part(g, CONE6, lamb(0xc8202a), 0, 12.9, 0, 1.8, 1.4, 1.8);
+        const beam = new THREE.Mesh(new THREE.ConeGeometry(5, 70, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff4c0, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false }));
+        beam.rotation.z = Math.PI / 2; beam.position.set(35, 0, 0); const piv = new THREE.Group(); piv.position.set(0, 11.4, 0); piv.add(beam); g.add(piv); isle5.beam = piv;
+        circles.push({ x: I.x, z: I.z, r: 2.6 });
+    }
+    {   // Skull Rock: a huge stone skull glaring at the sea
+        const I = ARCH_BY.skull, y = archTerrain(I, I.x, I.z), g = new THREE.Group(); g.position.set(I.x, y - 2, I.z); g.rotation.y = Math.atan2(-I.x, -I.z); scene.add(g);
+        const bone = lamb(0xd8d0c0), dark = new THREE.MeshBasicMaterial({ color: 0x0a0806 });
+        part(g, SPH, bone, 0, 9, 0, 8, 7, 7); part(g, BOX, bone, 0, 3.6, 2.6, 7, 4, 5);
+        for (const s of [-1, 1]) part(g, SPH, dark, s * 2.8, 9.5, 5.2, 2, 2.4, 1.6);
+        part(g, CONE6, dark, 0, 6.5, 6.4, 1, 2, 0.8, Math.PI);
+        for (let i = 0; i < 6; i++) part(g, BOX, bone, -2.5 + i, 2.6, 5.15, 0.7, 1.4, 0.4);
+        const l = label("☠", "#ffd8a0", 2, 1); l.position.set(I.x, y + 22, I.z); l.maxD = 600;
+        // a wrecked pirate ship on the beach
+        const wd = archR(I, 0.6) - 9, wx = I.x + Math.cos(0.6) * wd, wz = I.z + Math.sin(0.6) * wd, wg = new THREE.Group(); wg.position.set(wx, archTerrain(I, wx, wz) - 0.6, wz); wg.rotation.set(0.25, 1.2, 0.18); scene.add(wg);
+        part(wg, BOX, lamb(0x4a2a1a), 0, 1, 0, 3.4, 2, 9); part(wg, CYL6, lamb(0x3a2214), 0, 5, 0.5, 0.18, 8, 0.18, 0.2); part(wg, BOX, lamb(0xd8d0c0), 0.3, 5.5, 0.5, 0.06, 3, 3.2);
+        circles.push({ x: wx, z: wz, r: 4.5 });
+    }
+    {   // Coral Key: a big pink coral arch
+        const I = ARCH_BY.coral, g = new THREE.Group(), y = archTerrain(I, I.x + 6, I.z - 4); g.position.set(I.x + 6, y, I.z - 4); scene.add(g);
+        const cm = lamb(0xff7a9a), cm2 = lamb(0xffb0c0);
+        for (let k = 0; k <= 12; k++) { const a = (k / 12) * Math.PI, x = Math.cos(a) * 6, yy = Math.sin(a) * 7; part(g, SPH, k % 2 ? cm : cm2, x, yy, 0, 1.4, 1.4, 1.4); }
+        for (let k = 0; k < 14; k++) { const a = srand() * 6.28, d = srange(3, 10); part(g, CONE6, k % 2 ? cm : lamb(0xffa060), Math.cos(a) * d, 0.8, Math.sin(a) * d, 0.3, srange(1.2, 2.6), 0.3); }
+        circles.push({ x: I.x + 0, z: I.z - 4, r: 1.6 }, { x: I.x + 12, z: I.z - 4, r: 1.6 });
+    }
+    {   // Frostcap: an ice spire on the summit
+        const I = ARCH_BY.frost, y = archTerrain(I, I.x, I.z);
+        const ice = new THREE.MeshLambertMaterial({ color: 0xbff0ff, emissive: 0x1a4a6a, transparent: true, opacity: 0.9, flatShading: true });
+        for (let k = 0; k < 7; k++) { const a = (k / 7) * 6.28, m = new THREE.Mesh(CONE6, ice); m.scale.set(0.9, srange(4, 9), 0.9); m.position.set(I.x + Math.cos(a) * 2, y + 2, I.z + Math.sin(a) * 2); m.rotation.set(Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3); scene.add(m); }
+        const m = new THREE.Mesh(CONE6, ice); m.scale.set(1.4, 14, 1.4); m.position.set(I.x, y + 6, I.z); scene.add(m);
+    }
+    // ----- scenery on every island -----
+    {
+        const rocks = batch(lamb(0x6a6460)), palmT = batch(lamb(0xa8885a)), palmL = batch(lamb(0x3aa04a)), shells = batch(glowM(0xffe8d8)), ice = batch(lamb(0xe8f6ff)), dead = batch(lamb(0x2a2420)), heather = batch(lamb(0x7a4a9a));
+        for (const I of ARCH) {
+            const spots = (n, fn, minIn = 12) => { let made = 0, guard = 0; while (made < n && guard++ < n * 30) { const a = srand() * 6.283, d = srand() * (archR(I, a) - minIn), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (!archOK5(x, z, I)) continue; fn(x, z, archTerrain(I, x, z)); made++; } };
+            const beach = (n, fn) => { for (let i = 0; i < n; i++) { const a = srand() * 6.283, d = archR(I, a) - srange(2, 9), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (onDock5(x, z)) continue; fn(x, z, Math.max(-0.3, archTerrain(I, x, z))); } };
+            spots(I.k === "skull" ? 50 : 22, (x, z, y) => { const s = srange(0.4, 1.4); rocks.add(ICO, x, y + s * 0.4, z, srand() * 3, srand() * 3, 0, s, s * srange(0.6, 1), s); if (s > 1.1) circles.push({ x, z, r: s * 0.85 }); });
+            beach(I.r * 0.8, (x, z, y) => shells.add(ICO, x, y + 0.06, z, srand(), srand() * 3, 0, 0.14, 0.08, 0.14));
+            if (I.k === "haven" || I.k === "coral") beach(I.k === "haven" ? 26 : 14, (x, z, y) => { const h = srange(5, 8), lean = srange(0.15, 0.35), dir = Math.atan2(z - I.z, x - I.x); palmT.add(CYL6, x + Math.cos(dir) * lean * h * 0.5, y + h / 2, z + Math.sin(dir) * lean * h * 0.5, Math.sin(dir) * -lean, 0, Math.cos(dir) * lean, 0.22, h, 0.22);
+                for (let k = 0; k < 6; k++) { const a = (k / 6) * 6.28; palmL.add(BOX, x + Math.cos(dir) * lean * h + Math.cos(a) * 1.3, y + h - 0.2, z + Math.sin(dir) * lean * h + Math.sin(a) * 1.3, 0, -a, 0.35, 2.6, 0.06, 0.6); } });
+            if (I.k === "frost") spots(40, (x, z, y) => ice.add(CONE6, x, y + 0.5, z, srand() * 0.4, 0, srand() * 0.4, 0.25, srange(0.8, 2), 0.25));
+            if (I.k === "skull") spots(30, (x, z, y) => dead.add(CYL6, x, y + 1.5, z, srange(-0.2, 0.2), 0, srange(-0.2, 0.2), 0.12, srange(2, 4), 0.12));
+            if (I.k === "storm") spots(60, (x, z, y) => heather.add(ICO, x, y + 0.15, z, 0, srand() * 3, 0, srange(0.3, 0.6), 0.25, srange(0.3, 0.6)));
+            // treasure chests on every island
+            const nC = I.k === "haven" ? 4 : 3;
+            for (let i = 0; i < nC; i++) { let guard = 0; while (guard++ < 60) { const a = srand() * 6.283, d = srange(I.k === "haven" ? 34 : 8, archR(I, a) - 14), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (!archOK5(x, z, I)) continue; const c = makeChest(x, z, srand() * 6, I.k !== "haven" && i === 0); const y = archTerrain(I, x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; break; } }
+        }
+        rocks.build(); palmT.build(); palmL.build(); shells.build(); ice.build(); dead.build(); heather.build();
+    }
+    isle5.emit.forEach(e => smokeEmit.push(e));
+    // your boat, waiting at the harbor
+    B5.mesh = makeSpeedboat(); scene.add(B5.mesh);
+    addTgt = prevAdd; curBuild = 1;
+}
+function enterIsle5() {
+    leaveWorld();
+    if (!isle5Built) { buildIsle5(); buildCasino(5); snapWorld(5); } else loadWorld(5);
+    isle = 5; save.isle = 5;
+    showWorld(5);
+    if (casinos[5]) casino = casinos[5];
+    groundFn = groundY5;
+    waterMesh.geometry = isle5.waterGeo; waterMesh.material.needsUpdate = true;
+    smokeEmit.length = 0; isle5.emit.forEach(e => smokeEmit.push(e));
+    RESPAWN.x = 2; RESPAWN.z = 4;
+    arch5 = "haven"; terrainMesh[5] = isle5.terrain.haven;
+    boatHome(0); B5.on = false;
+    syncGhosts();
+    resetIsleTrees(archTreeTarget());
+    resetChests();
+}
+function updateIsle5(dt, animOnly) {
+    if (!isle5Built || isle !== 5) return;
+    updateNpcs(dt, npcs5);
+    if (isle5.foam) isle5.foam.material.opacity = 0.42 + Math.sin(time * 0.8) * 0.14;
+    if (isle5.fireLight) isle5.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
+    if (isle5.beam) isle5.beam.rotation.y = time * 0.8;
+    for (const [b, ph] of [[isle5.boatArr, 0], [isle5.boatNext, 1.3]]) if (b) { b.position.y = -0.15 + Math.sin(time * 1.1 + ph) * 0.07; b.rotation.z = Math.sin(time * 0.9 + ph) * 0.03; }
+    if (!B5.on && B5.mesh) { B5.mesh.position.y = -0.32 + Math.sin(time * 1.2) * 0.05; B5.mesh.rotation.z = Math.sin(time * 0.9) * 0.025; }
+    if (ferryman5) { ferryman5.position.y = 0.3 + Math.sin(time * 1.2) * 0.02; const base = Math.atan2(NEXT5.DIR.x, NEXT5.DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN5.x, player.pos.z - FERRYMAN5.z) < 14; ferryman5.rotation.y += angDiff(near ? Math.atan2(player.pos.x - FERRYMAN5.x, player.pos.z - FERRYMAN5.z) : base, ferryman5.rotation.y) * Math.min(1, 3 * dt); }
+    // island names show how far away they are
+    if ((time * 2 | 0) !== ((time - dt) * 2 | 0)) for (const { l, I } of isle5.labels) { const d = Math.round(Math.hypot(player.pos.x - I.x, player.pos.z - I.z) - I.r); const t = d > 30 ? `${I.name} · ${d}m` : I.name; if (l.el.textContent !== t) l.el.textContent = t; }
+    if (animOnly || state !== "playing") return;
+    // walking onto another island (from a dock) moves the trees there too
+    if (!B5.on) { const I = archAt(player.pos.x, player.pos.z); if (I.k !== arch5 && archIn(I, player.pos.x, player.pos.z) > 0) setArch5(I.k); }
+}
+function nearest5() {
+    const px = player.pos.x, pz = player.pos.z, near = (p, r) => Math.hypot(px - p.x, pz - p.z) < r;
+    if (B5.on) return landingSpot() ? { k: "boatout" } : null;
+    if (near(SMITH5_AT, 3.4)) return { k: "smith" };
+    if (near(DEPOT5_AT, 3.4)) return { k: "depot" };
+    if (near(WITCH5_AT, 3.4)) return { k: "witch" };
+    if (near(BED5, 3.2)) return { k: "bed" };
+    if (near(SHIPWRIGHT, 3.6)) return { k: "ship" };
+    if (near(FERRYMAN5, 3.4)) return { k: "ferry5" };
+    for (const D of DOCKS5) if (D.kind === "harbor" && near(pumpAt(D), 2.4)) return D.I.pump ? { k: "fuel", D } : { k: "bell", D };
+    if (B5.mesh && near({ x: B5.x, z: B5.z }, 5.2)) return { k: "boatin" };
+    for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
+    return null;
+}
+const PROMPTS5 = {
+    boatin: () => `[F] Drive the boat · fuel ${Math.round((save.boat.fuel / boatMaxFuel()) * 100)}%`, boatout: () => "[F] Get out",
+    fuel: () => (save.boat.fuel >= boatMaxFuel() - 0.5 ? "The tank is full" : `[F] Refuel the boat · ${money(Math.round((boatMaxFuel() - save.boat.fuel) * fuelPrice()))}`),
+    bell: () => `[F] Ring for the harbor tow back to Port Haven · ${money(Math.round(2500 * rebirthMult()))}`, ship: () => "[F] Talk to the Shipwright", ferry5: () => "[F] Talk to the Ferryman"
+};
+const ISLE5_ACT = { boatin: () => boatEnter(), boatout: () => boatExit(), fuel: () => refuel(), bell: () => ringTow(), ship: () => openShop("ship", ["She's fast, but she's thirsty. Mind the gauge.", "Bigger tank, bigger trips.", "I've pulled a lot of sailors out of the water. Most of them were already empty-handed.", "Spare cans. Cheapest life insurance there is."][Math.floor(Math.random() * 4)]), ferry5: () => openFerry5() };
+function openFerry5() { ferryConfirm = 0; $("ferrySay").textContent = "“Beyond the storm there's something else. I can hear it at night. I'm not ready to sail there yet.”"; openPanel("ferry"); }
+function renderFerry5() {
+    document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
+    const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage, +${(save.rebirths || 0) * 50} max HP)</span></div>
+      <div class="flist"><div class="gain"><h4>REBIRTH 5</h4>Something waits past Storm Isle. The Ferryman won't sail there yet. Coming in a future update.</div></div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    const b = $("ferryBuy"); b.disabled = true; b.classList.remove("danger"); b.textContent = "REBIRTH 5: COMING SOON";
+}
+// ---- getting there: Ashfall's Rebirth 4 ferry ----
+const REBIRTH4_COST = 5000000, REBIRTH4_CORE = 2;
+const rebirth4Ready = () => (save.kingKills || 0) > 0 && (save.mats.molten || 0) >= REBIRTH4_CORE && save.money >= REBIRTH4_COST;
+function renderFerry4v2() {
+    document.querySelector("#panelFerry h2").textContent = "REBIRTH 4: THE FERRY TO THE ARCHIPELAGO";
+    const k = save.kingKills || 0, mc = save.mats.molten || 0, cashOk = save.money >= REBIRTH4_COST, ok = rebirth4Ready();
+    const html = `<div class="fprice">Rebirth 4 ticket: <b>${money(REBIRTH4_COST)}</b> + <b>${REBIRTH4_CORE} Molten Cores</b></div>
+      <div class="flist">
+        <div class="${k ? "keep" : "lose"}"><h4>${k ? "✔" : "✘"} THE CINDER KING</h4>${k ? `felled ${k} time${k === 1 ? "" : "s"}` : "still burning in the crater. Fell him at least once"}</div>
+        <div class="${mc >= REBIRTH4_CORE ? "keep" : "lose"}"><h4>${mc >= REBIRTH4_CORE ? "✔" : "✘"} MOLTEN CORES</h4>${mc} / ${REBIRTH4_CORE} (they drop from the Cinder King)</div>
+        <div class="${cashOk ? "keep" : "lose"}"><h4>${cashOk ? "✔" : "✘"} CASH</h4>${money(save.money)} of ${money(REBIRTH4_COST)}</div>
+        <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and materials · every axe and gun · all upgrades and potions · the day count</div>
+        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ +50 max health · ★ THE ARCHIPELAGO: five islands, your own speedboat, and an ocean that will kill you if you run out of fuel</div>
+      </div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    const b = $("ferryBuy"); b.disabled = !ok; b.classList.toggle("danger", ok && !!ferryConfirm);
+    b.textContent = !k ? "FELL THE CINDER KING FIRST" : mc < REBIRTH4_CORE ? `BRING ${REBIRTH4_CORE - mc} MORE MOLTEN CORE${REBIRTH4_CORE - mc === 1 ? "" : "S"}` : !cashOk ? "NEED " + money(REBIRTH4_COST - save.money) + " MORE" : ferryConfirm ? "CLICK AGAIN TO CONFIRM" : "SAIL TO THE ARCHIPELAGO";
+}
+function finishRebirth4() {
+    save.rebirths = 4; // the Archipelago is Rebirth 4
+    resetForRebirth();
+    save.boat = { fuel: 100, tank: 0, engine: 0, cans: 1, hull: 0 };
+    enterIsle5(); newContract();
+    holdingReset();
+    player.maxHp = maxHpNow(); player.hp = player.maxHp;
+    const a = ARR5.pt(ARR5.LEN - 9, 0);
+    player.pos.set(a.x, 1.75, a.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(ARR5.DIR.x, ARR5.DIR.z); player.pitch = 0;
+    player.invuln = 6;
+    ride = null;
+    writeSave();
+    say("");
+    setTimeout(() => {
+        $("rebirthFx").classList.remove("show"); say("THE ARCHIPELAGO"); setTimeout(() => say(""), 3600);
+        toast("You are reborn. ★4  +200% cash, +40% damage, +200 max HP.", "cash");
+        toast("Port Haven is home. Your speedboat waits at the harbor: every other island is a boat ride away.", "good");
+        toast("Watch the fuel gauge. Run dry out at sea and you lose every material you're carrying.", "bad");
+    }, 2200);
+}
+function drawMap5() {
+    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 470;
+    if (!mapBg5) {
+        const N = 360, oc = document.createElement("canvas"); oc.width = oc.height = N;
+        const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color();
+        for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+            const x = ((px + 0.5) / N - 0.5) * 940, z = ((py + 0.5) / N - 0.5) * 940, I = archAt(x, z), inside = archIn(I, x, z), i = (py * N + px) * 4;
+            if (inside < 0) { const k = clamp(-inside / 40, 0, 1); col.setRGB(lerp(0.3, 0.05, k), lerp(0.75, 0.2, k), lerp(0.8, 0.4, k)); }
+            else { const y = archTerrain(I, x, z); if (inside < 8) col.setRGB(0.9, 0.82, 0.6); else if (I.k === "frost") col.setRGB(0.85, 0.92, 1); else if (I.k === "skull") col.setRGB(0.35, 0.32, 0.3); else if (I.k === "storm") col.setRGB(0.42, 0.3, 0.55); else if (I.k === "coral") col.setRGB(0.95, 0.75, 0.75); else col.setRGB(0.3, 0.6, 0.3); col.multiplyScalar(0.85 + clamp(y / 30, 0, 0.3)); }
+            img.data[i] = col.r * 255; img.data[i + 1] = col.g * 255; img.data[i + 2] = col.b * 255; img.data[i + 3] = 255;
+        }
+        og.putImageData(img, 0, 0); mapBg5 = oc;
+    }
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#0a1a2a"; g.beginPath(); g.arc(c, c, c - 6, 0, 7); g.fill(); g.strokeStyle = "rgba(120,200,255,.5)"; g.lineWidth = 3; g.stroke();
+    g.save(); g.beginPath(); g.arc(c, c, c - 8, 0, 7); g.clip(); g.drawImage(mapBg5, c - 470 * sc, c - 470 * sc, 940 * sc, 940 * sc); g.restore();
+    const X = x => c + x * sc, Z = z => c + z * sc;
+    g.textAlign = "center"; g.font = "bold 12px Consolas";
+    for (const I of ARCH) { g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(I.name, X(I.x), Z(I.z) - I.r * sc - 6); g.fillStyle = I.col; g.fillText(I.name, X(I.x), Z(I.z) - I.r * sc - 6); }
+    for (const D of DOCKS5) { const e = D.pt(D.LEN); g.strokeStyle = D.kind === "next" ? "#9fe8ff" : "#ffd890"; g.lineWidth = 3; g.beginPath(); g.moveTo(X(D.B.x), Z(D.B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); if (D.kind === "harbor") { const p = pumpAt(D); g.font = "bold 10px Consolas"; g.fillStyle = D.I.pump ? "#ffe070" : "#d8c8a0"; g.fillText(D.I.pump ? "⛽ FUEL" : "🔔 TOW", X(p.x), Z(p.z) + 14); } }
+    for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 3, Z(ch.z) - 3, 6, 6); }
+    g.font = "bold 18px Segoe UI Emoji, sans-serif"; g.fillText("⛵", X(B5.x), Z(B5.z) + 6);
+    const f = save.boat.fuel / boatMaxFuel(), range = save.boat.fuel / 2.8 * boatTop();
+    g.setLineDash([5, 6]); g.strokeStyle = f < 0.2 ? "rgba(255,90,90,.7)" : "rgba(160,230,255,.45)"; g.lineWidth = 1.5; g.beginPath(); g.arc(X(B5.x), Z(B5.z), range * sc, 0, 7); g.stroke(); g.setLineDash([]);
+    g.font = "bold 11px Consolas"; g.fillStyle = "#cfefff"; g.fillText(`fuel range ~${Math.round(range)}m`, X(B5.x), Z(B5.z) - 10);
+    g.fillStyle = "#fff"; g.font = "bold 12px Consolas"; g.fillText("N", c, 22);
+    g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw); g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke(); g.restore();
+}
+// the boat's dashboard (bottom right, while you're driving)
+function boatHud() {
+    const e = $("boatHud"); if (!e) return;
+    e.style.display = B5.on ? "" : "none";
+    if (!B5.on) return;
+    const f = save.boat.fuel / boatMaxFuel(), kts = Math.abs(B5.speed) * 1.94;
+    e.innerHTML = `<small>SPEEDBOAT</small><div class="bspd"><b>${Math.round(kts)}</b> knots</div>
+      <div class="bfuel ${f < 0.2 ? "low" : ""}"><span>FUEL</span><div><i style="width:${Math.round(f * 100)}%"></i></div><em>${Math.round(f * 100)}%</em></div>
+      <div class="bhint">${save.boat.cans ? `${save.boat.cans} spare can${save.boat.cans === 1 ? "" : "s"} · ` : ""}W/S throttle · A/D steer · Shift boost · F out by land</div>`;
+}
+const SMITH5_SAY = ["Salt in the steel keeps it hungry.", "Stormglass hums when lightning's near. Don't hold it in the rain.", "Pearls polish an edge like nothing else.", "Bring me tar and I'll make you something that floats AND cuts."];
+const DEPOT5_SAY = ["Driftwood by the ton, pearls by the one. I buy it all.", "Stormglass? You went out THAT far? Name your price.", "Coral's up today. The tourists love it."];
+
+// =====================================================================
+//  1.6.1: axe abilities. Every axe has its own special move on [Z]
+// =====================================================================
+const ABIL = [
+    { name: "Heavy Chop", cd: 7, mult: 3, col: 0xffe0a0, desc: "One huge overhead chop on the tree in front of you (3x damage)." },
+    { name: "Cleave", cd: 8, mult: 2, col: 0xd8e4ff, desc: "A wide sweep that hits every tree in front of you (2x damage)." },
+    { name: "Whirlwind", cd: 9, mult: 2.2, col: 0x9fe8ff, desc: "Spin and hit every tree around you (2.2x damage)." },
+    { name: "Frost Nova", cd: 13, mult: 1.6, col: 0x8fe8ff, desc: "A blast of ice that freezes every tree near you for 4 seconds." },
+    { name: "Shadow Step", cd: 10, mult: 3, col: 0xc07aff, desc: "Blink forward through the trees, slashing everything you pass (3x)." },
+    { name: "Fire Line", cd: 11, mult: 4, col: 0xff8a2a, desc: "A long slash of fire straight ahead: 4x damage and sets trees burning." },
+    { name: "Crescent Wave", cd: 11, mult: 4, col: 0xd8e4ff, desc: "Throws a moonlit wave that cuts every tree in a line (4x, 6x at night)." },
+    { name: "Soul Harvest", cd: 13, mult: 3, col: 0x6dffa0, desc: "Rips the souls out of the trees around you (3x) and heals you for each one." },
+    { name: "Avalanche", cd: 13, mult: 4, col: 0xbff4ff, desc: "Ice spikes burst out in a cone (4x) and freeze what they hit." },
+    { name: "Eruption", cd: 14, mult: 5, col: 0xff6a1a, desc: "Slam the ground: a ring of lava bursts out (5x) and sets trees burning." },
+    { name: "Earthsplitter", cd: 14, mult: 6, col: 0xff7aea, desc: "Tears the ground open in a long straight line (6x)." },
+    { name: "Starfall", cd: 15, mult: 5, col: 0xe8f0ff, desc: "Stars rain down on up to 6 trees around you (5x each)." },
+    { name: "Black Hole", cd: 17, mult: 1.3, col: 0xa070ff, desc: "Opens a vortex that drags trees in and grinds them for 3 seconds." },
+    { name: "Thorn Burst", cd: 15, mult: 6, col: 0xff5a8a, desc: "Roots erupt under every tree around you (6x) and hold them still." },
+    { name: "Meteor", cd: 16, mult: 10, col: 0xff9a4a, desc: "Calls a meteor down where you're looking (10x in a big blast)." },
+    { name: "Cataclysm", cd: 18, mult: 9, col: 0xffd040, desc: "Lava fissures split out in every direction (9x) and burn everything." }
+];
+const abCd = {}; // cooldown left, per axe
+const abFx = []; // live effect objects
+const abMat = (c, o = 0.9, add = true) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, depthWrite: false, side: THREE.DoubleSide, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending });
+const AB_CONE = new THREE.ConeGeometry(0.5, 1, 6), AB_ICO = new THREE.IcosahedronGeometry(0.5, 1), AB_BOX = new THREE.BoxGeometry(1, 1, 1), AB_SHARED = new Set([AB_CONE, AB_ICO, AB_BOX]);
+const abPMs = {}, abPM = c => abPMs[c] || (abPMs[c] = abMat(c, 1, false)); // shared particle materials
+function abAdd(o, life, upd) { scene.add(o); const f = { o, t: 0, life, upd }; abFx.push(f); return f; }
+const abAlive = () => trees.filter(t => !t.gone && !t.dying && !t.burn);
+const abIn = {
+    circle: (t, x, z, r) => Math.hypot(t.x - x, t.z - z) - t.r < r,
+    line(t, x, z, dx, dz, len, w) { const px = t.x - x, pz = t.z - z, al = px * dx + pz * dz; return al > -t.r && al < len + t.r && Math.abs(px * dz - pz * dx) < w + t.r; },
+    cone(t, x, z, dx, dz, range, cosA) { const px = t.x - x, pz = t.z - z, d = Math.hypot(px, pz); if (d - t.r > range) return false; return d < t.r + 1.2 || (px * dx + pz * dz) / d > cosA; }
+};
+// hit one tree with the ability: damage, then freeze / root / burn on top
+function abHit(t, mult, o = {}) {
+    if (t.gone || t.dying || t.burn) return;
+    const dmg = Math.max(1, Math.round(axeDmg() * mult * (t.boss ? 1 + 0.25 * enchLv("bane") : 1)));
+    hitTree(t, dmg, false);
+    if (t.dying || t.gone) return;
+    if (o.stun && !t.boss) { t.stun = Math.max(t.stun || 0, o.stun); t.stunCol = o.stunCol || 0x9fe8ff; t.atk = "idle"; }
+    if (o.burn) t.dot = { left: o.burn, tick: 0.25, dmg: Math.max(1, Math.round(axeDmg() * 0.5)) };
+    if (o.heal) player.hp = Math.min(player.maxHp, player.hp + Math.max(2, Math.round(player.maxHp * o.heal)));
+}
+// ---- effect builders ----
+function abRing(x, z, col, r1, life, y = 0.15) {
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 48), abMat(col, 0.9)); m.rotation.x = -Math.PI / 2; m.position.set(x, groundY(x, z) + y, z);
+    abAdd(m, life, f => { const k = f.t / f.life; m.scale.setScalar(0.5 + r1 * Math.sqrt(k)); m.material.opacity = 0.9 * (1 - k); });
+}
+function abArc(col, start, len, r, life, tilt = 0) { // a slash arc around the player at chest height
+    const m = new THREE.Mesh(new THREE.RingGeometry(r * 0.55, r, 40, 1, start, len), abMat(col, 0.85));
+    const g = new THREE.Group(); g.add(m); m.rotation.x = -Math.PI / 2 + tilt;
+    g.position.set(player.pos.x, player.pos.y - 0.5, player.pos.z); g.rotation.y = player.yaw + Math.PI / 2;
+    abAdd(g, life, f => { const k = f.t / f.life; m.material.opacity = 0.85 * (1 - k); g.scale.setScalar(1 + k * 0.3); });
+}
+function abSpike(x, z, col, h, life, delay = 0, w = 0.5) { // a cone that bursts up out of the ground, then sinks
+    const m = new THREE.Mesh(AB_CONE, abMat(col, 0.95, false)); const gy = groundY(x, z);
+    m.position.set(x, gy - h, z); m.scale.set(w, h, w); m.rotation.set((Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4);
+    abAdd(m, life + delay, f => { const k = Math.max(0, f.t - delay) / life, up = k < 0.15 ? k / 0.15 : k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1; m.position.y = gy - h * 0.5 + (up - 0.5) * h; m.visible = f.t >= delay; });
+}
+// soft additive sprites for fire and glows (they always face you, so fire looks like fire from every angle)
+const abTex = (() => {
+    const mk = (w, h, draw) => { const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; };
+    const flame = mk(64, 128, (g, w, h) => {
+        const grd = g.createRadialGradient(w / 2, h * 0.72, 2, w / 2, h * 0.6, h * 0.55);
+        grd.addColorStop(0, "rgba(255,255,255,1)"); grd.addColorStop(0.25, "rgba(255,240,180,.95)"); grd.addColorStop(0.55, "rgba(255,170,60,.6)"); grd.addColorStop(1, "rgba(255,80,0,0)");
+        g.fillStyle = grd; g.beginPath(); g.moveTo(w / 2, 2); g.bezierCurveTo(w * 0.95, h * 0.45, w * 0.98, h * 0.9, w / 2, h - 2); g.bezierCurveTo(w * 0.02, h * 0.9, w * 0.05, h * 0.45, w / 2, 2); g.fill();
+    });
+    const glow = mk(64, 64, (g, w) => { const grd = g.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2); grd.addColorStop(0, "rgba(255,255,255,1)"); grd.addColorStop(0.3, "rgba(255,255,255,.55)"); grd.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = grd; g.fillRect(0, 0, w, w); });
+    return { flame, glow };
+})();
+const abSprite = (tex, col, o = 1) => new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: col, transparent: true, opacity: o, depthWrite: false, blending: THREE.AdditiveBlending }));
+function abFlame(x, z, col, h, life, delay = 0) { // a flickering tongue of fire, with a hot glow at its root
+    const g = new THREE.Group(), gy = groundY(x, z), w = h * (0.5 + Math.random() * 0.15);
+    const fl = abSprite(abTex.flame, col), core = abSprite(abTex.flame, 0xfff0c0, 0.8), glow = abSprite(abTex.glow, col, 0.6);
+    g.add(glow, fl, core); g.visible = false; g.position.set(x, gy, z);
+    const ph = Math.random() * 6;
+    abAdd(g, life + delay, f => {
+        const k = Math.max(0, f.t - delay) / life; g.visible = f.t >= delay;
+        const s = Math.sin(Math.min(1, k * 4) * Math.PI / 2) * (1 - k * k), fk = 0.85 + 0.2 * Math.sin(f.t * 26 + ph) + 0.1 * Math.sin(f.t * 47 + ph * 2);
+        fl.scale.set(w * s, h * s * fk, 1); fl.position.y = h * s * fk * 0.45;
+        core.scale.set(w * 0.45 * s, h * 0.5 * s * fk, 1); core.position.y = h * 0.25 * s * fk;
+        glow.scale.setScalar(w * 2.2 * s); glow.position.y = 0.3;
+        fl.material.opacity = 1 - k; core.material.opacity = 0.8 * (1 - k); glow.material.opacity = 0.55 * (1 - k);
+        if (Math.random() < 0.15 * (1 - k)) burst(V3(x, gy + h * s * 0.8, z), 1, 1.5, [abPM(col)]);
+    });
+}
+function abOrb(from, to, col, life, size = 0.35, onEnd) { // a glowing ball flying from one point to another
+    const m = new THREE.Mesh(AB_ICO, abMat(col, 1)); m.scale.setScalar(size);
+    const halo = abSprite(abTex.glow, col, 0.9); halo.scale.setScalar(6); m.add(halo);
+    abAdd(m, life, f => { const k = f.t / f.life; m.position.lerpVectors(from, to, k); m.position.y += Math.sin(k * Math.PI) * 1.2; if (Math.random() < 0.5) burst(m.position.clone(), 1, 1, [abPM(col)]); if (f.t + 0.0001 >= f.life && onEnd) onEnd(); });
+}
+function abBoom(strength = 0.35) { shake = Math.min(0.8, shake + strength); fovKick = 1.4; hitstop = 0.05; }
+
+function useAbility() {
+    if (state !== "playing" || panel || ride || fishing.on || boating()) return;
+    if (holdingGun()) { toast("Abilities come from axes: switch to an axe first.", "bad"); return; }
+    if (inCasino()) { toast("No fighting in the casino.", "bad"); return; }
+    if (insideBuilding()) { toast("There's no room for that in here.", "bad"); return; }
+    const i = save.equipped, A = ABIL[i];
+    if ((abCd[i] || 0) > 0) { sfx(150, 0.1, "square", 0.05, 0.8); return; }
+    abCd[i] = A.cd * (1 - 0.06 * enchLv("swift"));
+    swing.t = 0; swing.hit = true; // swing the axe, without the normal hit
+    camera.getWorldDirection(fwd);
+    const fl = Math.hypot(fwd.x, fwd.z) || 1, dx = fwd.x / fl, dz = fwd.z / fl, px = player.pos.x, pz = player.pos.z, all = abAlive();
+    let n = 0;
+    const hitWhere = (test, o) => { for (const t of all) if (test(t)) { abHit(t, A.mult, o); n++; } };
+    switch (i) {
+        case 0: { // Heavy Chop
+            let best = null, bd = 1e9; for (const t of all) { if (!abIn.cone(t, px, pz, dx, dz, 4.5, 0.6)) continue; const d = Math.hypot(t.x - px, t.z - pz); if (d < bd) { bd = d; best = t; } }
+            if (best) { abHit(best, A.mult); n = 1; abRing(best.x, best.z, A.col, 4, 0.45); }
+            abArc(A.col, -0.6, 1.2, 3.2, 0.3, 1.2); abBoom(0.4); sfx(90, 0.35, "square", 0.22, 0.3); sfx(400, 0.2, "sawtooth", 0.08, 0.3);
+            break;
+        }
+        case 1: hitWhere(t => abIn.cone(t, px, pz, dx, dz, 5.5, 0.35)); abArc(A.col, -1.1, 2.2, 5, 0.35); abBoom(0.3); sfx(300, 0.25, "sawtooth", 0.1, 0.3); break;
+        case 2: hitWhere(t => abIn.circle(t, px, pz, 5.5)); for (let k = 0; k < 3; k++) setTimeout(() => abArc(A.col, 0, Math.PI * 2, 5.2, 0.3), k * 110); abBoom(0.3); sfx(250, 0.4, "sawtooth", 0.09, 2.2); break;
+        case 3: hitWhere(t => abIn.circle(t, px, pz, 9), { stun: 4, stunCol: 0x9fe8ff }); abRing(px, pz, A.col, 10, 0.6); abRing(px, pz, 0xffffff, 7, 0.4);
+            for (let k = 0; k < 14; k++) { const a = (k / 14) * 6.283, r = 3 + Math.random() * 5; abSpike(px + Math.cos(a) * r, pz + Math.sin(a) * r, 0xbff4ff, 1.2 + Math.random(), 1.2, 0.05 * k / 3, 0.35); }
+            abBoom(0.3); sfx(1200, 0.5, "triangle", 0.07, 0.3); sfx(200, 0.4, "sine", 0.1, 0.5); break;
+        case 4: { // Shadow Step: a dash forward that slashes through the line
+            hitWhere(t => abIn.line(t, px, pz, dx, dz, 10, 1.4));
+            player.vel.x += dx * 40; player.vel.z += dz * 40; fovKick = 2.4;
+            for (let k = 0; k < 10; k++) { const x = px + dx * k, z = pz + dz * k; burst(V3(x, groundY(x, z) + 1, z), 2, 2, [abPM(A.col)]); }
+            sfx(160, 0.3, "sawtooth", 0.08, 3); sfx(700, 0.2, "triangle", 0.05, 0.3); break;
+        }
+        case 5: { // Fire Line: a wall of fire races forward
+            hitWhere(t => abIn.line(t, px, pz, dx, dz, 18, 1.6), { burn: 3 });
+            for (let k = 0; k < 26; k++) { const d = 1.5 + k * 0.65, j = (Math.random() - 0.5) * 0.9, x = px + dx * d - dz * j, z = pz + dz * d + dx * j; abFlame(x, z, k % 3 ? 0xff7a1a : 0xffd040, 1.6 + Math.random() * 1.6, 1.1, k * 0.022); }
+            abArc(A.col, -0.5, 1.0, 4, 0.3); abBoom(0.35); sfx(120, 0.6, "sawtooth", 0.12, 0.4); sfx(60, 0.7, "square", 0.1, 0.5); break;
+        }
+        case 6: { // Crescent Wave: a moving blade that cuts what it passes
+            const mult = A.mult * (isNight() ? 1.5 : 1), hit = new Set(), g = new THREE.Group();
+            const m = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.16, 6, 28, Math.PI), abMat(A.col, 0.95)); m.rotation.x = Math.PI / 2; g.add(m);
+            g.position.set(px + dx, player.pos.y - 0.6, pz + dz); g.rotation.y = Math.atan2(dx, dz);
+            abAdd(g, 0.9, (f, dt) => {
+                g.position.x += dx * 30 * dt; g.position.z += dz * 30 * dt; m.material.opacity = 0.95 * (1 - f.t / f.life);
+                for (const t of abAlive()) if (!hit.has(t) && Math.hypot(t.x - g.position.x, t.z - g.position.z) < t.r + 2.2) { hit.add(t); abHit(t, mult); }
+            });
+            sfx(900, 0.4, "triangle", 0.07, 0.4); sfx(300, 0.3, "sine", 0.08, 0.5); n = 1; break;
+        }
+        case 7: { // Soul Harvest
+            for (const t of all) if (abIn.circle(t, px, pz, 10)) { const from = V3(t.x, t.gy + Math.min(t.h * 0.5, 3), t.z); abHit(t, A.mult, { heal: 0.05 }); abOrb(from, V3(px, player.pos.y - 0.3, pz), A.col, 0.6, 0.3); n++; }
+            abRing(px, pz, A.col, 11, 0.6); abBoom(0.25); sfx(220, 0.6, "sine", 0.1, 2); sfx(110, 0.5, "triangle", 0.08, 0.5); break;
+        }
+        case 8: { // Avalanche: a cone of ice spikes
+            hitWhere(t => abIn.cone(t, px, pz, dx, dz, 15, 0.7), { stun: 3, stunCol: 0xbff4ff });
+            for (let k = 0; k < 36; k++) { const d = 2 + Math.random() * 13, a = Math.atan2(dx, dz) + (Math.random() - 0.5) * 1.4, x = px + Math.sin(a) * d, z = pz + Math.cos(a) * d; abSpike(x, z, k % 2 ? 0xbff4ff : 0xffffff, 1.5 + Math.random() * 2, 1.4, d * 0.03, 0.45); }
+            abBoom(0.35); sfx(1500, 0.5, "triangle", 0.06, 0.25); sfx(150, 0.5, "square", 0.1, 0.4); break;
+        }
+        case 9: { // Eruption: a ring of lava rushes out from you
+            hitWhere(t => abIn.circle(t, px, pz, 10), { burn: 4 });
+            abRing(px, pz, 0xff4a0a, 11, 0.7); abRing(px, pz, 0xffd040, 8, 0.5);
+            for (let k = 0; k < 24; k++) { const a = (k / 24) * 6.283, r = 4 + (k % 3) * 2.5; abFlame(px + Math.cos(a) * r, pz + Math.sin(a) * r, k % 2 ? 0xff5a0a : 0xffb030, 2 + Math.random() * 1.5, 1.2, r * 0.03); }
+            abBoom(0.5); sfx(60, 0.8, "sawtooth", 0.16, 0.4); sfx(40, 0.9, "square", 0.12, 0.5); break;
+        }
+        case 10: { // Earthsplitter: a glowing crack in the ground, then rock spikes along it
+            hitWhere(t => abIn.line(t, px, pz, dx, dz, 26, 1.8));
+            const L = 26, crack = new THREE.Mesh(AB_BOX, abMat(A.col, 0.9)); crack.scale.set(0.5, 0.05, L); crack.rotation.y = Math.atan2(dx, dz);
+            crack.position.set(px + dx * L / 2, groundY(px + dx * L / 2, pz + dz * L / 2) + 0.06, pz + dz * L / 2);
+            abAdd(crack, 1.4, f => { const k = f.t / f.life; crack.scale.x = 0.2 + Math.min(1, k * 5) * 0.9; crack.material.opacity = 0.9 * (1 - k); });
+            for (let k = 0; k < 20; k++) { const d = 1.5 + k * 1.25, s = (k % 2 ? 1 : -1) * 0.9, x = px + dx * d - dz * s, z = pz + dz * d + dx * s; abSpike(x, z, 0x5a4a5a, 1.4 + Math.random() * 1.6, 1.3, k * 0.025, 0.7); }
+            abBoom(0.55); sfx(50, 0.9, "sawtooth", 0.18, 0.5); sfx(90, 0.6, "square", 0.12, 0.4); break;
+        }
+        case 11: { // Starfall: stars drop onto the nearest trees
+            const tgts = all.filter(t => abIn.circle(t, px, pz, 20)).sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz)).slice(0, 6);
+            if (!tgts.length) for (let k = 0; k < 4; k++) tgts.push({ x: px + dx * 6 + (Math.random() - 0.5) * 8, z: pz + dz * 6 + (Math.random() - 0.5) * 8, fake: 1 });
+            tgts.forEach((t, k) => { const to = V3(t.x, groundY(t.x, t.z) + 0.5, t.z), from = to.clone().add(V3((Math.random() - 0.5) * 8, 30, (Math.random() - 0.5) * 8));
+                setTimeout(() => abOrb(from, to, A.col, 0.45, 0.6, () => { if (!t.fake) abHit(t, A.mult); abRing(t.x, t.z, A.col, 4, 0.4); burst(to, 10, 6, [abPM(0xffffff), abPM(A.col)]); sfx(900 - k * 60, 0.3, "triangle", 0.07, 0.3); shake = Math.min(0.6, shake + 0.15); }), k * 140); });
+            n = tgts.length; sfx(1400, 0.6, "sine", 0.05, 0.5); break;
+        }
+        case 12: { // Black Hole: a vortex in front of you pulls trees in and grinds them
+            const cx = px + dx * 8, cz = pz + dz * 8, cy = groundY(cx, cz) + 1.6, g = new THREE.Group(); g.position.set(cx, cy, cz);
+            const core = new THREE.Mesh(AB_ICO, new THREE.MeshBasicMaterial({ color: 0x050008 })); core.scale.setScalar(1.6); g.add(core);
+            const rings = [0, 1, 2].map(k => { const r = new THREE.Mesh(new THREE.TorusGeometry(2 + k * 0.9, 0.08, 6, 40), abMat(k === 1 ? 0xff7ae8 : A.col, 0.8)); r.rotation.x = Math.PI / 2 + (k - 1) * 0.3; g.add(r); return r; });
+            let tick = 0;
+            abAdd(g, 3.2, (f, dt) => {
+                const k = f.t / f.life; rings.forEach((r, j) => { r.rotation.z += (0.08 + j * 0.04); r.material.opacity = 0.8 * (1 - k * k); }); g.scale.setScalar(Math.min(1, f.t * 4) * (1 - k * k * k));
+                for (const t of abAlive()) { if (t.boss) continue; const ox = cx - t.x, oz = cz - t.z, d = Math.hypot(ox, oz); if (d < 13 && d > 1.4) { const s = Math.min(d - 1.4, 5 * dt); t.x += ox / d * s; t.z += oz / d * s; } }
+                if ((tick -= dt) <= 0) { tick = 0.5; for (const t of abAlive()) if (abIn.circle(t, cx, cz, 4)) abHit(t, A.mult); }
+                if (Math.random() < 0.6) { const a = Math.random() * 6.283, r = 6; burst(V3(cx + Math.cos(a) * r, cy + (Math.random() - 0.5) * 2, cz + Math.sin(a) * r), 1, 1, [abPM(A.col)]); }
+            });
+            n = 1; sfx(60, 1.5, "sine", 0.18, 0.3); sfx(30, 2, "sawtooth", 0.06, 0.5); break;
+        }
+        case 13: { // Thorn Burst
+            for (const t of all) if (abIn.circle(t, px, pz, 14)) { abHit(t, A.mult, { stun: 3, stunCol: 0xff5a8a }); n++; for (let k = 0; k < 5; k++) { const a = (k / 5) * 6.283, r = t.r + 0.4; abSpike(t.x + Math.cos(a) * r, t.z + Math.sin(a) * r, k % 2 ? 0x2a6a2a : 0x8a1a3a, 2.2 + Math.random(), 1.6, Math.random() * 0.15, 0.35); } }
+            for (let k = 0; k < 12; k++) { const a = Math.random() * 6.283, r = 2 + Math.random() * 10; abSpike(px + Math.cos(a) * r, pz + Math.sin(a) * r, 0x2a6a2a, 1 + Math.random(), 1.2, Math.random() * 0.2, 0.3); }
+            abRing(px, pz, A.col, 14, 0.6); abBoom(0.35); sfx(180, 0.5, "sawtooth", 0.1, 0.4); sfx(90, 0.6, "square", 0.08, 0.6); break;
+        }
+        case 14: { // Meteor: lands where you aim (up to 32m away)
+            let tx = px + dx * 14, tz = pz + dz * 14;
+            if (fwd.y < -0.05) { const d = Math.min(32, (player.pos.y - groundY(px, pz)) / -fwd.y); tx = px + dx * d; tz = pz + dz * d; } else { tx = px + dx * 24; tz = pz + dz * 24; }
+            const to = V3(tx, groundY(tx, tz) + 0.4, tz), from = to.clone().add(V3(-dx * 14 + 6, 40, -dz * 14));
+            const mark = new THREE.Mesh(new THREE.RingGeometry(6.2, 7, 40), abMat(0xff3a1a, 0.7)); mark.rotation.x = -Math.PI / 2; mark.position.set(tx, to.y - 0.25, tz);
+            abAdd(mark, 0.85, f => { mark.material.opacity = 0.4 + 0.4 * Math.sin(f.t * 30); });
+            const rock = new THREE.Mesh(AB_ICO, abMat(0xff7a2a, 1)); rock.scale.setScalar(2.2);
+            abAdd(rock, 0.85, f => { rock.position.lerpVectors(from, to, Math.pow(f.t / f.life, 1.6)); rock.rotation.x += 0.2; burst(rock.position.clone(), 2, 2, [abPM(0xffd040), abPM(0xff4a0a)]);
+                if (f.t + 0.0001 >= f.life) { for (const t of abAlive()) if (abIn.circle(t, tx, tz, 7)) abHit(t, A.mult, { burn: 3 }); abRing(tx, tz, 0xffd040, 9, 0.6); abRing(tx, tz, 0xff3a0a, 12, 0.9);
+                    for (let k = 0; k < 14; k++) { const a = (k / 14) * 6.283, r = 2 + Math.random() * 4; abFlame(tx + Math.cos(a) * r, tz + Math.sin(a) * r, k % 2 ? 0xff5a0a : 0xffc040, 2 + Math.random() * 2, 1.3); }
+                    burst(to, 24, 9, [abPM(0xffd040), abPM(0xff4a0a), chipMats[0]]); shake = Math.min(0.9, shake + 0.6); sfx(40, 1, "sawtooth", 0.22, 0.4); sfx(70, 0.8, "square", 0.16, 0.3); } });
+            n = 1; sfx(300, 0.9, "sawtooth", 0.05, 0.2); break;
+        }
+        case 15: { // Cataclysm: 8 fissures of lava burst out from you
+            for (let s = 0; s < 8; s++) {
+                const a = (s / 8) * 6.283 + player.yaw, ux = Math.sin(a), uz = Math.cos(a);
+                for (const t of all) if (!t._cata && abIn.line(t, px, pz, ux, uz, 22, 1.8)) { t._cata = 1; abHit(t, A.mult, { burn: 4 }); n++; }
+                for (let k = 0; k < 11; k++) { const d = 1.5 + k * 1.9; abFlame(px + ux * d, pz + uz * d, k % 2 ? 0xff4a0a : 0xffd040, 2 + Math.random() * 2.5, 1.3, k * 0.04); }
+            }
+            for (const t of all) delete t._cata;
+            abRing(px, pz, 0xffd040, 16, 0.8); abBoom(0.7); sfx(35, 1.2, "sawtooth", 0.22, 0.4); sfx(55, 1, "square", 0.16, 0.5); break;
+        }
+    }
+    flash = Math.max(flash, 0.25);
+}
+// per frame: effects, cooldowns, burning and frozen trees
+function updateAbilities(dt) {
+    for (const k in abCd) if (abCd[k] > 0) abCd[k] = Math.max(0, abCd[k] - dt);
+    for (let i = abFx.length - 1; i >= 0; i--) {
+        const f = abFx[i]; f.t = Math.min(f.life, f.t + dt);
+        try { f.upd(f, dt); } catch (e) { f.t = f.life; }
+        if (f.t >= f.life) { scene.remove(f.o); f.o.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry && !AB_SHARED.has(o.geometry)) o.geometry.dispose(); }); abFx.splice(i, 1); }
+    }
+    for (const t of trees) {
+        if (t.gone || t.dying || t.burn) { if (t.dot) t.dot = null; continue; }
+        if (t.stun > 0) { t.stun -= dt; if (Math.random() < dt * 8) burst(V3(t.x + (Math.random() - 0.5) * t.r * 2, t.gy + Math.random() * Math.min(t.h, 4), t.z + (Math.random() - 0.5) * t.r * 2), 1, 1, [abPM(t.stunCol || 0x9fe8ff)]); }
+        if (t.dot) {
+            const d = t.dot; d.left -= dt; d.tick -= dt;
+            if (Math.random() < dt * 10) burst(V3(t.x + (Math.random() - 0.5) * t.r * 2, t.gy + Math.random() * Math.min(t.h, 4), t.z + (Math.random() - 0.5) * t.r * 2), 1, 2, [abPM(0xff7a1a), abPM(0xffd040)]);
+            if (d.tick <= 0) { d.tick = 0.5; hitTree(t, d.dmg, false); }
+            if (d.left <= 0) t.dot = null;
+        }
+    }
+}
+
 // a save that's already on another island starts there (this must run after everything above is defined)
-if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
+if (save.isle === 5) enterIsle5(); else if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
 placeEnchTable();
 if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1, Mooncap Isle = Rebirth 2, Ashfall Isle = Rebirth 3
 
@@ -8761,11 +10670,12 @@ if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1,
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
+    ...PROMPTS5,
     shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => "[F] Enter the Casino", ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
-    witch: () => (isle === 4 ? "[F] Visit the Alchemist" : "[F] Visit the Apothecary"), ferry3: () => "[F] Talk to the Ferryman", ferry4: () => "[F] Talk to the Ferryman", star: () => "[F] Take the fallen star",
+    witch: () => (isle === 5 ? "[F] Visit the Sea Witch" : isle === 4 ? "[F] Visit the Alchemist" : "[F] Visit the Apothecary"), ferry3: () => "[F] Talk to the Ferryman", ferry4: () => "[F] Talk to the Ferryman", star: () => "[F] Take the fallen star",
     well: () => (save.wellDay === save.day ? "The Moonwell is still. It refills at dawn" : "[F] Drink from the Moonwell"),
     scope: () => (!isNight() ? "The Observatory: come back at night" : save.scopeDay === save.day ? "You already watched the sky tonight" : "[F] Look through the telescope"),
     fish: n => (n.spot.blocked ? "Face the water to fish" : "[F] Cast your line"),
@@ -8788,7 +10698,7 @@ function hud(dt) {
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
     if (isle >= 2) { const mh = isleMats().filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
     else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = inCasino() ? "THE CASINO · SAFE" : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    el.zone.textContent = inCasino() ? "THE CASINO · SAFE" : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : "AT SEA") : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
     { // active potions and blessings, with time left
         const bh = Object.keys(BUFFS).filter(buffOn).map(k => `<span style="color:${BUFFS[k].col};border-color:${BUFFS[k].col}">${BUFFS[k].icon} ${BUFFS[k].name} ${mmss(buffLeft(k))}</span>`).join("") + (save.phoenix > 0 ? `<span style="color:#ffb060;border-color:#ffb060">🔥 PHOENIX ×${save.phoenix}</span>` : "");
         const be = $("buffs"); if (be.dataset.h !== bh) { be.innerHTML = bh; be.dataset.h = bh; }
@@ -8813,6 +10723,17 @@ function hud(dt) {
     }).join("");
     { const am = holdingGun() ? gunAm(save.gunEq) : null, ae = $("ammo"); ae.style.display = am ? "" : "none"; if (am) ae.innerHTML = `<small>${GUNS[save.gunEq].name.toUpperCase()}</small><b>${am.mag}</b> / ${am.res}${reloading ? "<em>RELOADING</em>" : am.mag === 0 && am.res === 0 ? "<em>NO AMMO</em>" : ""}`; }
     if (el.hot.dataset.h !== hot) { el.hot.innerHTML = hot; el.hot.dataset.h = hot; }
+    { // the equipped axe's ability, with its cooldown
+        const ae = $("ability"), on = !holdingGun() && !boating();
+        ae.style.display = on ? "flex" : "none";
+        if (on) {
+            const i = save.equipped, A = ABIL[i], cd = abCd[i] || 0, full = A.cd * (1 - 0.06 * enchLv("swift"));
+            if (ae.dataset.i !== String(i)) { ae.dataset.i = i; ae.style.setProperty("--c", AXES[i].rarity); ae.innerHTML = `<div class="ic"><img src="${iconURL("a" + i)}"><div class="cdw"></div><kbd>Z</kbd></div><div class="tx"><b>${A.name}</b><small>${A.desc}</small></div>`; }
+            const w = ae.querySelector(".cdw"); w.style.setProperty("--p", (cd > 0 ? (cd / full) * 100 : 0) + "%"); w.textContent = cd > 0 ? Math.ceil(cd) : "";
+            ae.classList.toggle("ready", cd <= 0);
+        }
+    }
+    boatHud();
     { const en = !holdingGun() && enchTotal(save.equipped) ? "✦ " + enchShort(save.equipped) + " ✦" : "", e = $("enchLine"); if (e.textContent !== en) e.textContent = en; e.style.display = en ? "" : "none"; }
     if (panel === "inv") renderInv();
     if (panel === "shop") renderShop();
@@ -8852,7 +10773,7 @@ function frameBody(now) {
         camera.position.set(Math.cos(orbit) * 15, 4.5, Math.sin(orbit) * 15 - 4);
         camera.lookAt(0, 2.2, -3);
         camera.fov = 70; camera.updateProjectionMatrix();
-        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateWeather(real); updateEcosystem(real);
+        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateWeather(real); updateEcosystem(real);
         applySky();
     }
     camera.updateMatrixWorld();
@@ -8860,6 +10781,8 @@ function frameBody(now) {
     if (state === "playing" && panel !== "inv" && panel !== "map") updateNameplates(); else hidePlates();
     if (panel === "talk") updateTalk(real);
     hud(real);
+    lightsFrame();
+    if (FX) { gfxFrame(real); FX.render(state === "playing" || state === "paused" || state === "dead"); return; }
     renderer.clear();
     renderer.render(scene, camera);
     if (state === "playing" || state === "paused" || state === "dead") {
@@ -8872,10 +10795,11 @@ player.maxHp = maxHpNow(); player.hp = player.maxHp;
 renderMenu();
 applySky();
 requestAnimationFrame(frame);
+$("gfxPick").classList.remove("show");
 
 // debug/test handle (used by automated checks, harmless in play)
 if (DEBUG) window.__ts4 = {
-    save, player, trees, camera, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,
+    save, player, trees, camera, renderer, gfx: { GQ, FX, sunL, grass, TSU, MODERN, hemiL, skyDome }, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,
     get state() { return state; },
     get hour() { return hourNow(); },
     play() { state = "playing"; renderMenu(); },
@@ -8890,7 +10814,7 @@ if (DEBUG) window.__ts4 = {
     setState(s) { state = s; renderMenu(); },
     interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, enterIsle4, startFight4, fight4, startEruption, getKing: () => king, VOLC, syncKing, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
     // the dev panel (dev.js) drives the game through these
-    enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
+    lightPool, vLights, openShop, enterIsle5, B5, ARCH, setArch5, boatEnter, boatExit, loseAtSea, rebirth4Ready, finishRebirth4, getArch: () => arch5, landingSpot, useAbility, ABIL, abCd, CSG, DB, CR, MN, VP, SC, PL, enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
     FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z }, FERRYMAN3: { x: FERRYMAN3.x, z: FERRYMAN3.z },
     setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
     freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)

@@ -164,3 +164,6 @@ timers.push(setTimeout(() => {
     slash.style.opacity = "0";
 }, drawEnd + 740));
 timers.push(setTimeout(finish, drawEnd + 1900));
+
+// restarting after a graphics change: no studio intro, straight back in
+try { if (sessionStorage.getItem("ts4_skipIntro")) { sessionStorage.removeItem("ts4_skipIntro"); finish(); intro.remove(); } } catch (e) { /* ignore */ }

@@ -126,6 +126,15 @@
   .btn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.6); box-shadow: none; transform: none; }
   .btn.danger { background: linear-gradient(#ff6a5a, #d02a2a); box-shadow: 0 6px 0 #6a0a0a, 0 0 30px rgba(255,60,40,.5); color: #fff; }
   #ammo { position: fixed; right: 26px; bottom: 26px; background: var(--bg); border: 2px solid var(--line); border-radius: 12px; padding: 8px 18px; text-align: right; font: 700 20px Consolas, monospace; color: #ddd; display: none; }
+  #ability { position: fixed; right: 22px; bottom: 34px; width: 270px; display: none; align-items: center; gap: 12px; background: var(--bg); border: 2px solid var(--line); border-radius: 12px; padding: 8px 12px 8px 8px; }
+  #ability .ic { position: relative; width: 60px; height: 60px; flex: none; border-radius: 10px; background: rgba(255,255,255,.05); border: 2px solid var(--c); overflow: hidden; }
+  #ability .ic img { width: 100%; height: 100%; object-fit: contain; }
+  #ability .cdw { position: absolute; inset: 0; background: conic-gradient(rgba(0,0,0,.75) var(--p, 0%), transparent 0); display: flex; align-items: center; justify-content: center; font: 800 22px Consolas, monospace; color: #fff; text-shadow: 0 2px 0 #000; }
+  #ability kbd { position: absolute; left: 3px; bottom: 3px; font-size: 11px; padding: 0 5px; background: rgba(0,0,0,.7); }
+  #ability .tx { min-width: 0; } #ability b { display: block; font: 800 15px "Segoe UI"; letter-spacing: 1px; color: var(--c); }
+  #ability small { display: block; font: 11.5px/1.3 "Segoe UI"; opacity: .7; }
+  #ability.ready .ic { box-shadow: 0 0 16px var(--c); animation: abReady 1.6s ease-in-out infinite; }
+  @keyframes abReady { 50% { box-shadow: 0 0 4px var(--c); } }
   #ammo small { display: block; font: 700 10px Consolas; letter-spacing: 2px; opacity: .6; } #ammo b { font-size: 38px; color: var(--amber); } #ammo em { display: block; font: 800 11px Consolas; color: #ff8a7a; font-style: normal; letter-spacing: 2px; }
   #hotbar.tight { gap: 5px; } #hotbar.tight .slot { width: 66px; height: 80px; } #hotbar.tight .nm { display: none; } #hotbar.tight .ic { font-size: 26px; }
   #invLeft { flex: 1; min-width: 0; max-height: 68vh; overflow-y: auto; padding-right: 6px; }
@@ -214,6 +223,46 @@
   .rhint { margin-top: 8px; font: 12px Consolas; color: #e8d8a0; text-align: center; } .rhint b { color: #ffd040; }
   .roulHist { text-align: center; margin-top: 10px; font: 800 12px Consolas; letter-spacing: 2px; color: #d8a840; } .roulHist span { display: inline-block; min-width: 26px; padding: 3px 4px; margin: 0 2px; border-radius: 4px; color: #fff; }
   .wheelWrap { display: flex; gap: 20px; align-items: center; justify-content: center; flex-wrap: wrap; } .wheelInfo { max-width: 320px; font-size: 14px; line-height: 1.5; } .wheelInfo .gold { color: #ffd040; } .wheelInfo .green { color: #6dffa0; }
+  /* ---- the High Roller Wing ---- */
+  .pill { cursor: pointer; background: rgba(255,255,255,.06); color: #ffe0a0; border: 1px solid rgba(216,168,64,.6); border-radius: 16px; padding: 5px 12px; font: 800 12px Consolas; letter-spacing: 1px; margin: 2px; }
+  .pill.on { background: #d8a840; color: #2a1200; } .pill:disabled { opacity: .4; cursor: default; }
+  .lbl { font: 800 11px Consolas; letter-spacing: 2px; opacity: .7; margin-right: 6px; }
+  .csbtn.green { background: linear-gradient(#2ac06a, #128a42); color: #031a0a; border-color: #6dffa0; }
+  .crWrap canvas, #dbC { width: 100%; border-radius: 10px; border: 2px solid rgba(216,168,64,.5); display: block; background: #0c0612; }
+  .crRow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+  .crHist { text-align: center; margin-top: 8px; font: 700 12px Consolas; opacity: .9; } .crHist span { display: inline-block; margin: 2px 3px; padding: 2px 7px; border-radius: 8px; background: rgba(255,255,255,.07); } .crHist span.hi { color: #6dffa0; } .crHist span.lo { color: #ff8a7a; }
+  .plWrap { display: flex; gap: 16px; align-items: flex-start; justify-content: center; flex-wrap: wrap; } .plWrap canvas { border-radius: 10px; border: 2px solid rgba(216,168,64,.5); max-width: 100%; }
+  .plSide { max-width: 250px; font-size: 13px; line-height: 1.5; } .plSide p { opacity: .8; }
+  .mnWrap { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; align-items: flex-start; }
+  .mnGrid { display: grid; grid-template-columns: repeat(5, 62px); gap: 7px; }
+  .mt { width: 62px; height: 62px; border-radius: 10px; border: 2px solid #3a5a8a; background: linear-gradient(#2a4a7a, #1a2e52); color: #fff; font: 900 26px "Segoe UI Symbol", sans-serif; cursor: pointer; transition: transform .1s; }
+  .mt:hover:not(:disabled) { transform: translateY(-3px); border-color: #9fe8ff; } .mt:disabled { cursor: default; }
+  .mt.gem { background: radial-gradient(#3aa86a, #145a34); border-color: #6dffa0; color: #b8ffd0; animation: csPop .3s; } .mt.mine { background: radial-gradient(#8a2a3a, #3a0a14); border-color: #ff5a6a; color: #ffb0a0; } .mt.boom { background: radial-gradient(#ffb020, #c82a0a); border-color: #fff; animation: csPop .3s; } .mt.dim { opacity: .45; }
+  .mnSide { max-width: 260px; font-size: 14px; line-height: 1.5; } .mnSide .gold { color: #ffd040; }
+  .dbCard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+  .dbR { cursor: pointer; background: rgba(255,255,255,.05); border: 2px solid rgba(255,255,255,.15); border-radius: 10px; padding: 8px 4px; color: var(--c); display: flex; flex-direction: column; gap: 3px; align-items: center; }
+  .dbR b { font: 800 13px "Segoe UI"; } .dbR span { font: 900 20px Consolas; color: #ffd040; } .dbR small { font-size: 10px; color: #ffd040; opacity: .7; letter-spacing: 1px; }
+  .dbR.on { border-color: var(--c); box-shadow: 0 0 14px var(--c); background: rgba(255,255,255,.1); } .dbR.won { animation: jackGlow .5s infinite alternate; } .dbR:disabled { cursor: default; }
+  .vpPay { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 14px; max-width: 640px; margin: 0 auto 12px; font: 700 13px Consolas; }
+  .vpPay div { display: flex; justify-content: space-between; padding: 3px 8px; border-radius: 6px; background: rgba(0,0,40,.35); color: #ffe0a0; } .vpPay div.hit { background: #ffd040; color: #2a1200; }
+  .vpHand { display: flex; gap: 10px; justify-content: center; } .vpSlot { display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; }
+  .vpSlot .pcard { width: 84px; height: 120px; } .vpSlot.held .pcard { box-shadow: 0 0 0 3px #ffd040, 0 0 18px #ffb020; transform: translateY(-6px); }
+  .vpSlot em { font: 800 11px Consolas; font-style: normal; letter-spacing: 1px; color: #ffd040; min-height: 14px; opacity: .85; }
+  .scWrap { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; align-items: flex-start; }
+  .scShop { display: flex; flex-direction: column; gap: 8px; max-width: 250px; } .scShop p { font-size: 13px; opacity: .75; }
+  .scBuy { cursor: pointer; text-align: left; background: rgba(255,255,255,.05); border: 2px solid var(--c); border-radius: 10px; padding: 8px 12px; color: var(--c); display: flex; flex-direction: column; }
+  .scBuy b { font: 800 15px "Segoe UI"; } .scBuy span { font: 900 17px Consolas; color: #fff; } .scBuy small { font-size: 11px; opacity: .7; } .scBuy:hover { background: rgba(255,255,255,.12); }
+  .scCard { background: linear-gradient(135deg, #2a1a3a, #140a1e); border: 3px solid var(--c); border-radius: 14px; padding: 10px; box-shadow: 0 0 20px rgba(0,0,0,.5); }
+  .scHead { text-align: center; font: 900 18px "Segoe UI Black", sans-serif; letter-spacing: 3px; color: var(--c); margin-bottom: 8px; }
+  .scBox { position: relative; width: 330px; height: 330px; } .scBox canvas { position: absolute; inset: 0; border-radius: 8px; } #scFoil { cursor: crosshair; touch-action: none; }
+  .scEmpty { width: 330px; height: 200px; display: flex; align-items: center; justify-content: center; opacity: .5; font: 700 16px Consolas; }
+  .vipWrap { text-align: center; } .vipBadge { display: inline-flex; flex-direction: column; padding: 10px 34px; border: 3px solid var(--c); border-radius: 14px; color: var(--c); box-shadow: 0 0 24px var(--c); background: rgba(0,0,0,.3); }
+  .vipBadge small { font: 800 11px Consolas; letter-spacing: 3px; opacity: .7; } .vipBadge b { font: 900 34px "Segoe UI Black", sans-serif; letter-spacing: 6px; }
+  .vipBar { height: 10px; border-radius: 6px; background: rgba(255,255,255,.1); margin: 14px auto 6px; max-width: 520px; overflow: hidden; } .vipBar div { height: 100%; border-radius: 6px; }
+  .vipNext { font-size: 13px; opacity: .85; margin: 4px 0 12px; }
+  .vipTiers { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 8px; } .vipTiers div { border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: 8px 6px; display: flex; flex-direction: column; gap: 3px; color: var(--c); }
+  .vipTiers div.on { border: 2px solid var(--c); box-shadow: 0 0 14px var(--c); } .vipTiers b { font: 900 13px Consolas; letter-spacing: 1px; } .vipTiers span { font-size: 11px; color: #fff; opacity: .7; } .vipTiers small { font-size: 10.5px; color: #fff; opacity: .65; line-height: 1.35; }
+  .pjack { text-align: center; margin: 4px 0 10px; font: 900 15px Consolas; letter-spacing: 2px; color: #ff8a3a; text-shadow: 0 0 10px rgba(255,120,40,.6); } .pjack b { color: #6dffa0; font-size: 20px; }
   .barList { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .drink { background: rgba(255,255,255,.05); border: 1px solid rgba(216,168,64,.5); border-radius: 10px; padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; } .drink:hover { background: rgba(255,200,90,.12); border-color: #ffd040; }
   .drink b { color: #ffd040; font-size: 16px; } .drink small { opacity: .75; } .drink span { font: 800 14px Consolas; color: #6dffa0; }
@@ -242,6 +291,15 @@
   #buffs { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; max-width: 290px; }
   #buffs span { font: 700 11px Consolas; letter-spacing: 1px; background: var(--bg); border: 1px solid; border-radius: 10px; padding: 2px 8px; }
   #rebirthFx.ember { background: radial-gradient(circle, #fff0d0, #ff9a3a 60%, #a02a0a); }
+  #rebirthFx.ocean { background: radial-gradient(circle, #f0fffe, #5ae8e0 60%, #1a6ab0); }
+  #boatHud { position: fixed; right: 22px; bottom: 34px; width: 290px; background: var(--bg); border: 2px solid #5ad8ff; border-radius: 12px; padding: 10px 14px; box-shadow: 0 0 18px rgba(90,216,255,.25); }
+  #boatHud small { font: 800 11px Consolas; letter-spacing: 3px; color: #9fe8ff; opacity: .8; }
+  #boatHud .bspd { font: 13px Consolas; opacity: .85; } #boatHud .bspd b { font: 900 34px Consolas; color: #fff; margin-right: 4px; }
+  #boatHud .bfuel { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; font: 800 12px Consolas; letter-spacing: 1px; }
+  #boatHud .bfuel div { flex: 1; height: 12px; border-radius: 6px; background: rgba(255,255,255,.1); overflow: hidden; } #boatHud .bfuel i { display: block; height: 100%; background: linear-gradient(90deg, #ffb020, #6dffa0); border-radius: 6px; }
+  #boatHud .bfuel.low { color: #ff6a5a; animation: lowFuel .6s infinite alternate; } #boatHud .bfuel.low i { background: #ff4a3a; }
+  @keyframes lowFuel { to { opacity: .45; } }
+  #boatHud .bhint { font: 11px "Segoe UI"; opacity: .65; }
   #rebirthFx.violet { background: radial-gradient(circle, #f4eaff, #b88aff 60%, #6a3ad8); }
   #bossBar { position: fixed; top: 18px; left: 50%; transform: translate(-50%, -20px); width: min(640px, 60vw); z-index: 4; opacity: 0; pointer-events: none; transition: opacity .4s, transform .4s; text-align: center; text-shadow: 0 2px 0 #000; }
   #bossBar.show { opacity: 1; transform: translate(-50%, 0); }
@@ -359,6 +417,25 @@
   #deathLost { font: 600 20px "Segoe UI"; color: #ffb0a0; } #death small { font: 14px Consolas; opacity: .6; letter-spacing: 3px; }
 
   /* ---------- studio intro ---------- */
+  /* ---------- first-launch graphics chooser ---------- */
+  #gfxPick { position: fixed; inset: 0; z-index: 90; display: none; align-items: center; justify-content: center; background: radial-gradient(ellipse at 50% 40%, #1c0f36, #07040f 70%); }
+  #gfxPick.show { display: flex; }
+  .gpBox { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 20px; text-align: center; max-width: 1100px; }
+  .gpBox h2 { margin: 0; font: 900 clamp(28px, 4vw, 46px) "Segoe UI Black", "Segoe UI"; color: var(--amber); letter-spacing: 6px; text-shadow: 0 4px 0 #5a2a8a, 0 0 30px rgba(255,176,32,.4); }
+  .gpBox p { margin: -6px 0 4px; font: 600 16px "Segoe UI"; opacity: .75; letter-spacing: 1px; }
+  .gpCards { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
+  .gpCard { position: relative; cursor: pointer; width: min(440px, 42vw); padding: 0 0 16px; background: rgba(255,255,255,.04); border: 2px solid rgba(255,255,255,.15); border-radius: 14px; color: var(--ink); text-align: left; overflow: hidden; transition: transform .12s, border-color .12s, box-shadow .12s; }
+  .gpCard:hover { transform: translateY(-3px); border-color: rgba(255,208,64,.5); }
+  .gpCard.on { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber), 0 0 40px rgba(255,176,32,.35); }
+  .gpCard img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #120a1e; }
+  .gpCard.retro img { image-rendering: pixelated; }
+  .gpCard b { display: block; margin: 14px 18px 4px; font: 900 24px "Segoe UI Black", "Segoe UI"; letter-spacing: 5px; color: var(--amber); }
+  .gpCard small { display: block; margin: 0 18px; font: 14px/1.45 "Segoe UI"; opacity: .8; }
+  .gpCard em { position: absolute; top: 12px; left: 12px; font: 800 11px "Segoe UI"; font-style: normal; letter-spacing: 3px; color: #1a0e00; background: var(--amber); padding: 4px 9px; border-radius: 6px; }
+  .gpCard .tick { position: absolute; top: 10px; right: 12px; width: 30px; height: 30px; border-radius: 50%; display: none; align-items: center; justify-content: center; background: var(--amber); color: #1a0e00; font: 900 18px "Segoe UI"; }
+  .gpCard.on .tick { display: flex; }
+  #gfxPick.busy .gpCards { opacity: .5; pointer-events: none; }
+  .snote { padding: 10px 4px 2px; font: 13px "Segoe UI"; opacity: .6; }
   #intro { position: fixed; inset: 0; z-index: 100; background: #07040f; display: flex; align-items: center; justify-content: center; transition: opacity 1.1s ease, transform 1.1s ease; }
   #intro.out { opacity: 0; pointer-events: none; }
   #intro.out svg { transform: scale(1.12); }
@@ -397,6 +474,8 @@
   <div id="hotbar" class="hud"></div>
   <div id="enchLine" class="hud" style="display:none"></div>
   <div id="ammo" class="hud"></div>
+  <div id="ability" class="hud"></div>
+  <div id="boatHud" class="hud" style="display:none"></div>
   <div id="fps" class="hud"></div>
 </div>
 <div id="toasts"></div>
@@ -510,6 +589,18 @@
 </div>
 
 <div id="death"><h1>YOU DIED</h1><div id="deathLost"></div><small>click or press space to wake up in the safehouse</small></div>
+
+<div id="gfxPick">
+  <div class="gpBox">
+    <h2>PICK YOUR GRAPHICS</h2>
+    <p>You can change this any time in Settings.</p>
+    <div class="gpCards">
+      <button class="gpCard on" data-g="modern"><img src="assets/gfx_modern.jpg" alt=""><em>RECOMMENDED</em><span class="tick">✓</span><b>MODERN</b><small>Sharp and smooth, with real shadows, a glowing sky, swaying grass and trees, shimmering water and glowing lava and neon.</small></button>
+      <button class="gpCard retro" data-g="retro"><img src="assets/gfx_retro.jpg" alt=""><span class="tick">✓</span><b>RETRO</b><small>The original chunky-pixel look, like an old 90s shooter. The lightest on your PC.</small></button>
+    </div>
+    <button id="gpGo" class="btn">CONTINUE</button>
+  </div>
+</div>
 
 <div id="intro"><svg id="introSvg"></svg><div id="introFlash"></div><div id="introSkip">click or press any key to skip</div></div>
 
