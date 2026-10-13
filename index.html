@@ -300,6 +300,18 @@
   #boatHud .bfuel.low { color: #ff6a5a; animation: lowFuel .6s infinite alternate; } #boatHud .bfuel.low i { background: #ff4a3a; }
   @keyframes lowFuel { to { opacity: .45; } }
   #boatHud .bhint { font: 11px "Segoe UI"; opacity: .65; }
+  #boatHud .brace { margin: 4px 0 6px; padding: 4px 8px; border-radius: 6px; background: rgba(255,224,96,.12); color: #ffe060; font: 800 12px Consolas; letter-spacing: .5px; } #boatHud .brace b { color: #fff; font-size: 14px; }
+  #mapLog { max-width: min(68vh, 600px); margin-top: 8px; font: 12px Consolas; color: #cfe8ff; line-height: 1.5; } #mapLog b { color: #fff; }
+  #panelCrew { width: min(720px, 94vw); } #panelCrew h2 span { font-size: 13px; letter-spacing: 3px; color: #9fe8ff; opacity: .8; margin-left: 8px; }
+  #panelCrew .csub { font: 12px "Segoe UI"; opacity: .8; margin: 2px 0 12px; line-height: 1.45; } #panelCrew .csub b { color: #9fe8ff; }
+  #panelCrew .crow { display: grid; grid-template-columns: 170px 120px 1fr; gap: 12px; align-items: center; padding: 9px 12px; margin-bottom: 7px; border-radius: 10px; background: rgba(255,255,255,.04); border-left: 4px solid var(--c); }
+  #panelCrew .cname b { display: block; color: var(--c); font: 900 14px Consolas; letter-spacing: 1px; } #panelCrew .cname small { font: 11px "Segoe UI"; opacity: .7; }
+  #panelCrew .cctl { display: flex; align-items: center; gap: 8px; font: 800 15px Consolas; } #panelCrew .cctl span { min-width: 44px; text-align: center; }
+  #panelCrew .cctl button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #5ad8ff; background: rgba(90,216,255,.12); color: #fff; font: 900 18px Consolas; cursor: pointer; } #panelCrew .cctl button:disabled { opacity: .25; cursor: default; }
+  #panelCrew .cbar { height: 10px; border-radius: 5px; background: rgba(255,255,255,.1); overflow: hidden; } #panelCrew .cbar i { display: block; height: 100%; background: linear-gradient(90deg, #5ad8ff, #c8f4ff); } #panelCrew .cbar.full i { background: #ff7a6a; }
+  #panelCrew .cbox small { font: 11px Consolas; opacity: .75; } #panelCrew .cms { display: flex; gap: 10px; margin-top: 3px; } #panelCrew .cm { display: flex; align-items: center; gap: 3px; font: 800 12px Consolas; } #panelCrew .cm img { width: 18px; height: 18px; }
+  #panelCrew .cfoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; font: 12px Consolas; opacity: .9; } #panelCrew .cfoot b { color: #9fe8ff; }
+  #panelCrew #crateUp { padding: 8px 14px; border-radius: 8px; border: 1px solid #5ad8ff; background: rgba(90,216,255,.14); color: #fff; font: 800 12px Consolas; letter-spacing: 1px; cursor: pointer; } #panelCrew #crateUp:disabled { opacity: .4; cursor: default; }
   #rebirthFx.violet { background: radial-gradient(circle, #f4eaff, #b88aff 60%, #6a3ad8); }
   #bossBar { position: fixed; top: 18px; left: 50%; transform: translate(-50%, -20px); width: min(640px, 60vw); z-index: 4; opacity: 0; pointer-events: none; transition: opacity .4s, transform .4s; text-align: center; text-shadow: 0 2px 0 #000; }
   #bossBar.show { opacity: 1; transform: translate(-50%, 0); }
@@ -493,6 +505,7 @@
   <button class="xbtn" data-close>✕ CLOSE <kbd>M</kbd></button>
   <h2>MAP</h2>
   <canvas id="mapc" width="640" height="640"></canvas>
+  <div id="mapLog" style="display:none"></div>
   <div class="foot">gold squares are unopened chests · coloured dots are rare trees · red = close enough to bite</div>
 </div>
 <div id="panelShop" class="panel">
@@ -557,6 +570,12 @@
 </div>
 <div id="bossBar"><div class="bn"><span id="bossName">THE ELDER HEART</span> <span id="bossPh"></span></div><div class="bb"><u id="bossLag"></u><i id="bossFill"></i></div><div id="bossHp"></div></div>
 <div id="titleCard"><b id="tcBig"></b><small id="tcSmall"></small></div>
+<div id="panelCrew" class="panel">
+  <button class="xbtn" data-close>✕ LEAVE <kbd>F</kbd></button>
+  <h2>THE GHOST CAPTAIN <span>GHOST CREWS</span></h2>
+  <div id="crewBody"></div>
+  <div class="foot">− / + moves a ghost between you and an island · sail to each island's harbor and press F at its crate to collect · F or Esc to leave</div>
+</div>
 <div id="panelCasino" class="panel">
   <button class="xbtn" data-close>✕ LEAVE TABLE <kbd>Esc</kbd></button>
   <h2><span id="csTitle">CASINO</span> <span id="csCash">$0</span></h2>

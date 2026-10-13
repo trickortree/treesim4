@@ -588,7 +588,7 @@ const grass = MODERN && GQ.grass ? (() => {
 // what counts as grassy ground on each island (by the ground's own colour)
 function grassAmt(h, s, l, y, isl) {
     if (y < -0.25) return 0;
-    if (isl === 5) return s > 0.3 && ((h > 0.2 && h < 0.45) || (h > 0.7 && h < 0.85)) && l < 0.42 ? 1 : 0; // tropical grass on Port Haven, heather on Storm Isle
+    if (isl === 5) return s > 0.28 && ((h > 0.19 && h < 0.45) || (h > 0.7 && h < 0.85)) && l < 0.44 ? 1 : h > 0.11 && h < 0.17 && s > 0.28 && l < 0.34 ? 0.6 : 0; // tropical grass, dune grass, tundra, moor, heather, Skull Rock's dry tufts
     if (isl === 4) return h > 0.11 && h < 0.3 && s > 0.15 ? 0.75 : 0;          // tough olive scrub in the ash
     if (isl === 3) return s > 0.3 && h > 0.44 && h < 0.84 && l < 0.34 ? 1 : 0; // teal and violet meadows
     return s > 0.26 && h > 0.17 && h < 0.5 && l < 0.34 ? 1 : 0;
@@ -2320,8 +2320,9 @@ function openChest(c) {
     else if (r < 0.85) { const cash = Math.round(rand(10, 30) * m); save.money += cash; save.bandages++; msg = `Chest: a bandage and ${money(cash)}`; }
     else { save.logs += 8; save.logBonus += 16; msg = "Chest: a bundle of 8 fine logs"; }
     toast(msg, "cash");
+    if (isle === 5 && c.special && !save.tmap && Math.random() < 0.6) setTimeout(() => { if (!save.tmap) newTreasureMap("chest"); }, 700); // a treasure map tucked under the lid
     sfx(520, 0.15, "triangle", 0.1, 1.8); setTimeout(() => sfx(780, 0.25, "triangle", 0.1, 1.4), 120);
-    burst(V3(c.x, 0.8, c.z), 14, 5, [chestGold, chestGold, chipMats[1]]);
+    burst(V3(c.x, (c.g.position.y || 0) + 0.8, c.z), 14, 5, [chestGold, chestGold, chipMats[1]]);
     writeSave();
 }
 
@@ -2331,12 +2332,15 @@ const PER_PAGE = 4;
 const SHOP_TABS = {
     reaper: [["axes", "AXES"], ["gear", "GEAR"], ["sellaxe", "SELL AXES"], ["sell", "SELL FISH"]],
     forge: [["axes", "CRAFT AXES"], ["guns", "CRAFT GUNS"], ["ammo", "AMMO"], ["gear", "GEAR"], ["sellaxe", "SELL AXES"]],
-    trade: [["trade", "SELL MATERIALS"]],
+    trade: [["trade", "SELL MATERIALS"], ["sell", "SELL FISH"]],
     brew: [["brew", "BREWS"]],
     ench: [["ench", "ENCHANT"]],
-    ship: [["boat", "BOAT"]]
+    ship: [["boat", "BOAT"], ["paint", "PAINT JOBS"]],
+    race: [["race", "BUOY RACES"]],
+    pirate: [["pirate", "MAPS & GROG"]],
+    hermit: [["hermit", "COCOA"]]
 };
-const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST", brew: "THE APOTHECARY", ench: "THE ENCHANTING TABLE", ship: "THE SHIPWRIGHT" };
+const SHOP_NAMES = { reaper: "THE REAPER'S SHOP", forge: "THE FORGE", trade: "TRADING POST", brew: "THE APOTHECARY", ench: "THE ENCHANTING TABLE", ship: "THE SHIPWRIGHT", race: "THE REGATTA", pirate: "CAPTAIN BRINE", hermit: "THE HERMIT'S IGLOO" };
 // what an axe is worth back: half its price, or half the value of the materials it was forged from
 function axeSellValue(i) {
     const r = isle >= 2 ? axeRecipe(i) : null;
@@ -2394,6 +2398,10 @@ function reaperGear() {
 }
 function shopItems() {
     if (shopTab === "boat") return boatItems();
+    if (shopTab === "paint") return paintItems();
+    if (shopTab === "race") return raceItems();
+    if (shopTab === "pirate") return pirateItems();
+    if (shopTab === "hermit") return hermitItems();
     if (shopTab === "brew") return isle === 5 ? brewItems5() : brewItems();
     if (shopTab === "ench") return enchItems();
     if (shopTab === "sellaxe") return sellAxeItems();
@@ -2413,7 +2421,9 @@ function openShop(mode, say) {
 function buy(i) {
     const it = shopItems()[i];
     if (!it) return;
+    if (it.act) { it.act(); return; }
     if (it.sell) { it.buy(); renderShop(); return; }
+    if (it.owned && it.paint) { if (paintOf().k !== it.paint) { save.boat.paint = it.paint; repaintBoat(); sfx(520, 0.15, "triangle", 0.1, 1.6); toast(`Your boat is now painted ${it.name}.`, "good"); renderShop(); writeSave(); } return; }
     if (it.owned) { if (it.axe !== undefined) equipAxe(it.axe); else if (it.gun !== undefined) equipGun(it.gun); return; }
     if (it.maxed) { toast("Already maxed out.", "bad"); return; }
     if (it.craft) {
@@ -2448,10 +2458,10 @@ function renderShop() {
     shopPage = clamp(shopPage, 0, pages - 1);
     const start = shopPage * PER_PAGE;
     let shopHtml = items.slice(start, start + PER_PAGE).map((it, k) => {
-        const i = start + k, eqd = it.owned && (it.axe !== undefined ? save.equipped === it.axe && !holdingGun() : save.gunEq === it.gun);
+        const i = start + k, eqd = it.owned && (it.paint ? paintOf().k === it.paint : it.axe !== undefined ? save.equipped === it.axe && !holdingGun() : save.gunEq === it.gun);
         const canCraft = it.craft && hasMats(it.craft) && (!it.cost || save.money >= it.cost);
-        const cls = it.sell ? (it.value > 0 ? "ok" : "no") : it.owned || it.maxed ? "owned" : it.craft ? (canCraft ? "ok" : "no") : save.money >= it.cost ? "ok" : "no";
-        const costTxt = it.sell ? (it.value > 0 ? "+" + money(it.value) : "—") : it.owned ? (eqd ? "EQUIPPED" : "OWNED · click to equip") : it.maxed ? (it.maxTxt || "MAX") : it.craft ? (canCraft ? (it.verb ? it.verb.toUpperCase() : "CRAFT") + (it.cost ? " " + money(it.cost) : "") : !hasMats(it.craft) ? "NEED MATERIALS" : "NEED " + money(it.cost)) : money(it.cost);
+        const cls = it.act ? "ok" : it.sell ? (it.value > 0 ? "ok" : "no") : it.owned || it.maxed ? "owned" : it.craft ? (canCraft ? "ok" : "no") : save.money >= it.cost ? "ok" : "no";
+        const costTxt = it.act ? it.actTxt : it.sell ? (it.value > 0 ? "+" + money(it.value) : "—") : it.owned ? (eqd ? (it.paint ? "ON YOUR BOAT" : "EQUIPPED") : it.paint ? "OWNED · click to paint" : "OWNED · click to equip") : it.maxed ? (it.maxTxt || "MAX") : it.craft ? (canCraft ? (it.verb ? it.verb.toUpperCase() : "CRAFT") + (it.cost ? " " + money(it.cost) : "") : !hasMats(it.craft) ? "NEED MATERIALS" : "NEED " + money(it.cost)) : money(it.cost);
         return `<div class="row ${cls}" data-i="${i}"><span class="key">${k + 1}</span>${it.icon ? `<img class="ico" src="${iconURL(it.icon)}">` : ""}<div class="info"><b${it.col ? ` style="color:${it.col}"` : ""}>${it.name}</b><small>${it.desc}</small>${it.craft && !it.owned ? recipeHtml(it.craft) : ""}</div><span class="cost">${costTxt}</span></div>`;
     }).join("");
     if (!items.length) shopHtml = `<div class="empty">Nothing here yet.</div>`;
@@ -2576,6 +2586,8 @@ function showPanels() {
     $("panelFerry").classList.toggle("show", panel === "ferry");
     $("panelRelic").classList.toggle("show", panel === "relic");
     $("panelCasino").classList.toggle("show", panel === "casino");
+    $("panelCrew").classList.toggle("show", panel === "crew");
+    if (panel === "crew") renderCrew();
     if (panel === "relic") renderRelic();
     $("panelTalk").classList.toggle("show", panel === "talk");
     $("panelBack").classList.toggle("show", panel !== null && panel !== "talk" && panel !== "dev");
@@ -2583,6 +2595,7 @@ function showPanels() {
     if (panel === "inv") renderInv();
     if (panel === "map") drawMap();
     if (panel === "shop") renderShop();
+    if (panel === "crew") renderCrew();
     if (panel === "fish") renderFishLog();
     if (panel === "ferry") renderFerry();
 }
@@ -2712,6 +2725,7 @@ function updateNameplates() {
 
 // ---------- map ----------
 function drawMap() {
+    if ($("mapLog")) $("mapLog").style.display = "none";
     if (isle === 5) { drawMap5(); return; }
     if (isle === 4) { drawMap4(); return; }
     if (isle === 3) { drawMap3(); return; }
@@ -2946,7 +2960,7 @@ function nearest() {
 }
 function interact() {
     if (panel === "talk") { advanceTalk(); return; }
-    if (panel === "shop" || panel === "ench") { closePanel(); return; }
+    if (panel === "shop" || panel === "ench" || panel === "crew") { closePanel(); return; }
     if (panel) return;
     const n = nearest();
     if (!n) return;
@@ -3187,7 +3201,7 @@ function update(dt) {
     const dir = boating() ? new THREE.Vector3() : new THREE.Vector3((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), 0, (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0));
     if (dir.lengthSq() > 0) dir.normalize().applyAxisAngle(UP, player.yaw);
     if (boating()) driveBoat(dt); else {
-    const maxSp = (keys.ShiftLeft ? 8.5 : 5.5) * (1 + 0.07 * save.bootLvl) * (buffOn("swift") ? 1.3 : 1) * devSpeed, accel = player.onGround ? 14 : 4;
+    const maxSp = (keys.ShiftLeft ? 8.5 : 5.5) * (1 + 0.07 * save.bootLvl) * (buffOn("swift") ? 1.3 : 1) * devSpeed * (isle === 5 ? moveK5() : 1), accel = player.onGround ? 14 : 4;
     player.vel.x += (dir.x * maxSp - player.vel.x) * Math.min(1, accel * dt);
     player.vel.z += (dir.z * maxSp - player.vel.z) * Math.min(1, accel * dt);
     if (keys.Space && player.onGround && !panel) { player.vel.y = 7; player.onGround = false; }
@@ -3735,14 +3749,14 @@ function makeGhost(i) {
     return { g, arm, tgt: null, cd: rand(0.3, 1), swing: 0, ph: srand() * 6, i };
 }
 function syncGhosts() {
-    const want = Math.min(save.ghosts, 10);
+    const want = Math.min(isle === 5 ? ghostsHere5() : save.ghosts, 10);
     while (ghostObjs.length < want) ghostObjs.push(makeGhost(ghostObjs.length));
     while (ghostObjs.length > want) { const o = ghostObjs.pop(); scene.remove(o.g); }
 }
 function updateGhosts(dt) {
     if (!ghostObjs.length) return;
     ghostMat.opacity = 0.32 + 0.34 * (1 - dayAmt() * 0.5);
-    const claimed = new Set(ghostObjs.map(o => o.tgt).filter(Boolean)), mult = Math.max(1, save.ghosts / ghostObjs.length);
+    const claimed = new Set(ghostObjs.map(o => o.tgt).filter(Boolean)), mult = Math.max(1, (isle === 5 ? ghostsHere5() : save.ghosts) / ghostObjs.length);
     for (const o of ghostObjs) {
         o.ph += dt;
         if (!o.tgt || o.tgt.gone || o.tgt.dying || o.tgt.burn) {
@@ -3756,13 +3770,13 @@ function updateGhosts(dt) {
             }
             if (best) { o.tgt = best; claimed.add(best); }
         }
-        let tx, tz, ty = 1.5 + Math.sin(o.ph * 1.6) * 0.18, speed = 10;
+        let tx, tz, ty = groundY(o.g.position.x, o.g.position.z) + 1.5 + Math.sin(o.ph * 1.6) * 0.18, speed = 10;
         if (o.tgt) {
             const t = o.tgt, dx = o.g.position.x - t.x, dz = o.g.position.z - t.z, dl = Math.hypot(dx, dz) || 1, off = t.r + 1.7;
             tx = t.x + dx / dl * off; tz = t.z + dz / dl * off;
         } else {
             const a = o.ph * 0.35 + o.i * 1.1, r = 5 + (o.i % 3) * 2;
-            tx = Math.cos(a) * r; tz = -8 + Math.sin(a) * r; speed = 4;
+            const ic = isle === 5 && arch5 !== "haven" ? ARCH_BY[arch5] : { x: 0, z: -8 }; tx = ic.x + Math.cos(a) * r; tz = ic.z + Math.sin(a) * r; speed = 4;
         }
         const gx = tx - o.g.position.x, gz = tz - o.g.position.z, gd = Math.hypot(gx, gz), m = Math.min(gd, speed * dt);
         if (gd > 0.05) { o.g.position.x += gx / gd * m; o.g.position.z += gz / gd * m; }
@@ -3776,7 +3790,7 @@ function updateGhosts(dt) {
                 o.cd = 0.8; o.swing = 0.3;
                 const t = o.tgt, dmg = Math.max(1, Math.round(ghostHit() * mult * isleHp())); // your axe, scaled to each island's tougher trees
                 t.hp -= dmg; t.hurt = 1;
-                burst(V3(t.x, Math.min(t.h * 0.3, 1.8), t.z), 4, 3, [new THREE.MeshBasicMaterial({ color: 0x9fe8ff }), chipMats[0]]);
+                burst(V3(t.x, (t.gy || 0) + Math.min(t.h * 0.3, 1.8), t.z), 4, 3, [new THREE.MeshBasicMaterial({ color: 0x9fe8ff }), chipMats[0]]);
                 if (Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 30) sfx(210, 0.08, "square", 0.04, 0.5);
                 if (t.hp <= 0) {
                     t.dying = true; t.t = 0; t.byGhost = true;
@@ -3784,7 +3798,7 @@ function updateGhosts(dt) {
                     if (isle >= 2) { // past Pine Island they haul the tree's materials back to you
                         const k = t.type.mat || isleMats()[0], n = Math.max(1, Math.round(treeLogs(t) * 0.8));
                         save.mats[k] = (save.mats[k] || 0) + n;
-                        floatWorld(V3(t.x, Math.min(t.h * 0.7, 4), t.z), "+" + n + " " + MATS[k].name, "cash");
+                        floatWorld(V3(t.x, (t.gy || 0) + Math.min(t.h * 0.7, 4), t.z), "+" + n + " " + MATS[k].name, "cash");
                     } else {
                         const pay = Math.round(treeLogs(t) * (logValue() + t.type.bonus * 0.8) * 0.85);
                         save.money += pay; save.ghostCash = (save.ghostCash || 0) + pay;
@@ -3956,6 +3970,7 @@ let fishLine = null;
 }
 
 function fishSpot() {
+    if (isle === 5) return fishSpot5();
     if (isle !== 1) return null;
     const px = player.pos.x, pz = player.pos.z, fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
     const dp = Math.hypot(px - POND.x, pz - POND.z);
@@ -3986,7 +4001,7 @@ function startFishing(spot) {
     fishing.on = true; fishing.phase = "cast"; fishing.t = 0.6; fishing.spot = spot; fishing.tx = spot.tx; fishing.tz = spot.tz;
     fishing.sx = player.pos.x; fishing.sz = player.pos.z; fishing.fish = null;
     axe.visible = false; rodGroup.visible = true; bobber.visible = true; fishLine.visible = true;
-    bobber.position.set(spot.tx, spot.kind === "pond" ? 0.08 : -0.38, spot.tz);
+    bobber.position.set(spot.tx, spot.kind === "pond" ? 0.08 : spot.kind === "ice" ? 0.37 : -0.38, spot.tz);
     sfx(600, 0.18, "sawtooth", 0.04, 0.3);
 }
 function endFishing() {
@@ -3995,7 +4010,7 @@ function endFishing() {
     axe.visible = true; rodGroup.visible = false; bobber.visible = false; fishLine.visible = false;
     $("fishUI").classList.remove("show");
 }
-const waterY = () => (fishing.spot && fishing.spot.kind === "pond" ? 0.08 : -0.38);
+const waterY = () => (fishing.spot && fishing.spot.kind === "pond" ? 0.08 : fishing.spot && fishing.spot.kind === "ice" ? 0.37 : -0.38);
 function splashAt(x, z, n = 8) { burst(V3(x, waterY() + 0.1, z), n, 3, [new THREE.MeshBasicMaterial({ color: 0xcfeaff }), new THREE.MeshBasicMaterial({ color: 0xffffff })]); if (fishing.spot && fishing.spot.kind === "pond") pondRipple(x, z); }
 function fishAction() {
     if (!fishing.on) return;
@@ -4077,7 +4092,7 @@ function renderFishLog() {
     }).join("");
     const found = ALL_FISH.filter(f => dex[f.n]).length;
     $("fishGrid").innerHTML = cards;
-    $("fishCount").textContent = `${found} / ${ALL_FISH.length} species · ${save.fishBag.length} fish in your bag (sell at the Reaper)`;
+    $("fishCount").textContent = `${found} / ${ALL_FISH.length} species · ${save.fishBag.length} fish in your bag (sell at ${isle === 5 ? "the Trading Post" : "the Reaper"})`;
 }
 
 
@@ -5649,6 +5664,7 @@ function leaveWorld() {
 }
 function showWorld(n) {
     isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3; isle4G.visible = n === 4; isle5G.visible = n === 5;
+    for (const G of [isle1, isle2G, isle3G, isle4G, isle5G]) G.matrixWorldAutoUpdate = G.visible; // a hidden island's thousands of objects don't need their matrices updated
     moon2.visible = false; for (const a of aurora) a.visible = false; spores3.visible = n === 3; ash4.visible = n === 4;
     wisps.material.color.setHex(n === 4 ? 0xffa060 : n === 3 ? 0xffb0f0 : 0x9dffd0);
     ghostMat.color.setHex(n === 4 ? 0xffb080 : n === 3 ? 0xd0b0ff : 0x9fe8ff); // the ghosts take on each island's glow
@@ -7615,6 +7631,7 @@ const wildDone = {}, wildBy = { 1: [], 2: [], 3: [], 4: [], 5: [] };
 const isleGroup = n => [null, isle1, isle2G, isle3G, isle4G, isle5G][n];
 // where wildlife may stand or walk: on land, out of camp, clear of landmarks, lakes, lava and the docks
 function wildOk(x, z, walk) {
+    if (isle === 5) return wildOk5(x, z, walk);
     const d = Math.hypot(x, z);
     if (d > curShoreAt(x, z) - (walk ? 7 : 9) || d < SAFE_R + (walk ? 1 : 4)) return false;
     for (const lm of curLM()) if (!lm.camp && Math.hypot(x - lm.x, z - lm.z) < lm.r + (walk ? 0.5 : 3)) return false;
@@ -7624,6 +7641,7 @@ function wildOk(x, z, walk) {
     return true;
 }
 function wildSpot() {
+    if (isle === 5) return wildSpot5();
     for (let i = 0; i < 80; i++) {
         const a = Math.random() * 6.283, d = rand(SAFE_R + 5, curShoreR(a) - 10), x = Math.cos(a) * d, z = Math.sin(a) * d;
         if (wildOk(x, z)) return { x, z, y: groundY(x, z) };
@@ -8300,10 +8318,7 @@ function populate(n) {
         P(10, (x, z) => addWild(n, "crow", makeCrow(), x, z));
         sky("bat", () => makeBat(0xff6a3a), 8, [14, 26], { night: true });
         sky("skycrow", makeCrow, 5, [20, 32], { day: true });
-    } else if (n === 5) { // crabs scuttling, gulls on the sand and over the water
-        P(14, (x, z) => addWild(n, "crab5", makeCrab(), x, z));
-        P(10, (x, z) => addWild(n, "butterfly", makeButterfly(), x, z));
-    }
+    } else if (n === 5) populate5(); // every island has its own animals now
 }
 function buildWild(n) {
     wildDone[n] = true;
@@ -8332,11 +8347,12 @@ function updateWild(dt) {
     for (const c of list) {
         const dp = Math.hypot(px - c.x, pz - c.z);
         if (c.kind === "eagle") { c.t -= dt; c.ph += dt; eagleAI(c, dt, px, pz); continue; }
+        if (WILD5_FLY[c.kind]) { c.t -= dt; c.ph += dt; WILD5_FLY[c.kind](c, dt, px, pz, night); continue; }
         if (c.kind === "bat" || c.kind === "skycrow") { c.ph += dt; skyAI(c, dt, px, pz, night); continue; }
         const far = dp > (SMALL_WILD[c.kind] ? 55 : 95);
-        c.g.visible = !far; if (far) continue;
+        c.g.visible = !far; c.g.matrixWorldAutoUpdate = !far; if (far) continue;
         c.t -= dt; c.ph += dt; c.yOff = 0;
-        switch (c.kind) {
+        if (WILD5[c.kind]) { if (WILD5[c.kind](c, dt, dp, px, pz, live, night)) continue; } else switch (c.kind) {
             case "deer": grazerAI(c, dt, dp, px, pz, live, panic, night, { alert: 22, flee: 12, walk: 1.3, run: 8, roam: 16 }); break;
             case "goat": grazerAI(c, dt, dp, px, pz, live, panic, night, { alert: 16, flee: 8.5, walk: 1.1, run: 6.2, roam: 14, climb: true, bleat: true, snort: 300 }); break;
             case "fox": grazerAI(c, dt, dp, px, pz, live, panic, night, { alert: 18, flee: 9.5, walk: 1.6, run: 8.5, roam: 18, sit: true, snort: 600 }); break;
@@ -9821,16 +9837,25 @@ function updateWing(dt) {
 //  REBIRTH 4: THE ARCHIPELAGO. Five islands scattered over open sea. Port Haven is home;
 //  everything else is a boat ride away, and the boat runs on fuel. Run dry in open water
 //  and the sea takes you, and every material you were carrying goes down with the boat.
+//  1.7.0: real terrain (ridges, cliffs, a mountain trail, an atoll lagoon, a mesa), wildlife on
+//  every island, sea life, ghost crews, treasure maps, buoy races, salvage, bottles and summits
 // =====================================================================
 const ARCH = [
-    { k: "haven", name: "PORT HAVEN", x: 0, z: 0, r: 92, w: [6, 4, 3], ph: [0.3, 1.7, 2.9], col: "#ffd890", hp: 1, pump: true },
-    { k: "coral", name: "CORAL KEY", x: 232, z: 196, r: 54, w: [5, 3, 2], ph: [1.1, 0.4, 2.2], col: "#ff8aa0", hp: 1.15, pump: true },
-    { k: "skull", name: "SKULL ROCK", x: -302, z: 128, r: 58, w: [6, 4, 2], ph: [2.4, 1.2, 0.5], col: "#d8c8b0", hp: 1.3 },
-    { k: "frost", name: "FROSTCAP", x: -112, z: -338, r: 56, w: [4, 5, 2], ph: [0.8, 2.6, 1.4], col: "#bff4ff", hp: 1.45 },
-    { k: "storm", name: "STORM ISLE", x: 362, z: -268, r: 52, w: [5, 3, 3], ph: [1.9, 0.2, 2.7], col: "#c8a0ff", hp: 1.7 }
+    { k: "haven", name: "PORT HAVEN", x: 0, z: 0, r: 98, w: [6, 4, 3], ph: [0.3, 1.7, 2.9], col: "#ffd890", hp: 1, pump: true, seed: 1.3, cliffs: [[3.55, 0.45], [4.05, 0.2]] },
+    { k: "coral", name: "CORAL KEY", x: 232, z: 196, r: 66, w: [5, 3, 2], ph: [1.1, 0.4, 2.2], col: "#ff8aa0", hp: 1.15, pump: true, seed: 4.1, cliffs: [] },
+    { k: "skull", name: "SKULL ROCK", x: -302, z: 128, r: 70, w: [6, 4, 2], ph: [2.4, 1.2, 0.5], col: "#d8c8b0", hp: 1.3, seed: 7.7, bays: [{ th: 0.62, w: 0.3, d: 21 }], cliffs: [[2.2, 0.7], [3.3, 0.5], [-1.6, 0.5], [1.5, 0.25]] },
+    { k: "frost", name: "FROSTCAP", x: -112, z: -338, r: 72, w: [4, 5, 2], ph: [0.8, 2.6, 1.4], col: "#bff4ff", hp: 1.45, seed: 2.9, cliffs: [[-1.4, 0.55], [-2.6, 0.4]] },
+    { k: "storm", name: "STORM ISLE", x: 362, z: -268, r: 64, w: [5, 3, 3], ph: [1.9, 0.2, 2.7], col: "#c8a0ff", hp: 1.7, seed: 5.6, cliffs: [[-0.64, 0.9], [0.5, 0.35], [-1.9, 0.4]] }
 ];
 const ARCH_BY = Object.fromEntries(ARCH.map(I => [I.k, I]));
-const archR = (I, th) => I.r + I.w[0] * Math.sin(2 * th + I.ph[0]) + I.w[1] * Math.sin(3 * th + I.ph[1]) + I.w[2] * Math.sin(5 * th + I.ph[2]);
+const archRraw = (I, th) => {
+    let r = I.r + I.w[0] * Math.sin(2 * th + I.ph[0]) + I.w[1] * Math.sin(3 * th + I.ph[1]) + I.w[2] * Math.sin(5 * th + I.ph[2])
+        + I.r * 0.16 * (fbm2(Math.cos(th) * 1.7 + I.seed * 7, Math.sin(th) * 1.7 - I.seed * 3, 3) - 0.5); // ragged capes and coves
+    if (I.bays) for (const b of I.bays) { const a = angDiff(th, b.th); r -= b.d * Math.exp(-(a * a) / (b.w * b.w)); }
+    return r;
+};
+function archLut(I) { const L = new Float32Array(2048); for (let i = 0; i < 2048; i++) L[i] = archRraw(I, (i / 2048) * Math.PI * 2 - Math.PI); return (I.lut = L); }
+const archR = (I, th) => { const L = I.lut || archLut(I); let u = (th + Math.PI) * (2048 / (Math.PI * 2)); u -= Math.floor(u / 2048) * 2048; const i = u | 0, f = u - i; return L[i] + (L[(i + 1) & 2047] - L[i]) * f; };
 const archIn = (I, x, z) => archR(I, Math.atan2(z - I.z, x - I.x)) - Math.hypot(x - I.x, z - I.z); // how far inside the shore (negative = at sea)
 function archAt(x, z) { // the island a point belongs to (or is nearest)
     let best = ARCH[0], bd = 1e9;
@@ -9838,17 +9863,12 @@ function archAt(x, z) { // the island a point belongs to (or is nearest)
     return best;
 }
 const shoreR5 = th => archR(ARCH[0], th), shoreAt5 = (x, z) => shoreR5(Math.atan2(z, x));
-function archTerrain(I, x, z) {
-    const lx = x - I.x, lz = z - I.z, d = Math.hypot(lx, lz), inside = archR(I, Math.atan2(lz, lx)) - d;
-    if (inside < 5) return Math.max(-3.4, -(5 - inside) * 0.22);
-    let h = 0;
-    if (I.k === "haven") h = Math.max(0, fbm2(x * 0.021 + 3.1, z * 0.021 - 5.3, 3) - 0.36) * 14 * sstep(22, 40, d) + fbm2(x * 0.09, z * 0.09, 2) * 0.6;
-    else if (I.k === "coral") h = 0.5 + fbm2(x * 0.05 + 1.7, z * 0.05 - 2.2, 3) * 2.4;
-    else if (I.k === "skull") { h = Math.max(0, fbm2(x * 0.04 - 2, z * 0.04 + 8, 3) - 0.3) * 12; const k = 1 - d / (I.r * 0.42); if (k > 0) h = Math.max(h, 19 * Math.pow(k, 1.3)); }
-    else if (I.k === "frost") h = 30 * Math.pow(Math.max(0, 1 - d / (I.r * 0.86)), 1.5) + fbm2(x * 0.06, z * 0.06, 3) * 3;
-    else if (I.k === "storm") h = 9 * sstep(4, 20, inside) + fbm2(x * 0.07 + 4, z * 0.07, 3) * 2.5;
-    return h * sstep(4, 15, inside) + (inside < 15 ? (1 - sstep(4, 15, inside)) * 0.35 : 0);
-}
+
+// ---- the terrain kit: shaped noise (ridges, terraces), pads that hold flat ground for buildings, and trails cut into slopes ----
+const ridged = (x, z, o = 4) => { let a = 0.5, f = 1, s = 0, w = 1; for (let i = 0; i < o; i++) { let n = 1 - Math.abs(vnoise(x * f + i * 31.7, z * f - i * 12.3) * 2 - 1); n *= n; s += n * a * w; w = clamp(n * 1.8, 0, 1); f *= 2.03; a *= 0.5; } return s; }; // sharp crests, 0..~0.9
+const terrace = (h, step, w) => { const k = h / step, f = Math.floor(k), t = k - f; return (f + sstep(0.5 - w, 0.5 + w, t)) * step; }; // flat shelves with steep risers
+const segDist = (x, z, ax, az, bx, bz) => { const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = clamp(((x - ax) * dx + (z - az) * dz) / l2, 0, 1); return [Math.hypot(x - ax - dx * t, z - az - dz * t), t]; };
+const polar = (I, th, d) => ({ x: I.x + Math.cos(th) * d, z: I.z + Math.sin(th) * d });
 // ---- docks: one harbor dock on every island, plus arrivals and the next ferry at Port Haven ----
 function mkDock(I, th, len, kind) {
     const DIR = V3(Math.cos(th), 0, Math.sin(th)), PERP = V3(-DIR.z, 0, DIR.x), R = archR(I, th) - 8;
@@ -9861,51 +9881,243 @@ const DOCKS5 = [
 const HARBOR5 = DOCKS5[1], ARR5 = DOCKS5[0], NEXT5 = DOCKS5[2];
 const harborOf = I => DOCKS5.find(D => D.I === I && D.kind === "harbor");
 const pumpAt = D => D.pt(D.LEN - 3, -1.2);
+const hailAt = D => D.pt(5.2, 1.5); // the boat-hail post at the land end of every harbor dock
 const FERRYMAN5 = (() => { const p = NEXT5.pt(NEXT5.LEN - 3.5, -0.9); return { x: p.x, z: p.z }; })();
 function onDock5(x, z) { for (const D of DOCKS5) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 4 && along < D.LEN + 0.4 && Math.abs(side) < 2.0) return D; } return null; }
+// ---- the shape of every island: places first, then the land is built round them ----
+const H5 = {}; // named spots, filled in below
+{
+    const I0 = ARCH_BY.haven, I1 = ARCH_BY.coral, I2 = ARCH_BY.skull, I3 = ARCH_BY.frost, I4 = ARCH_BY.storm;
+    H5.casino = { x: Math.cos(-0.75) * 60, z: Math.sin(-0.75) * 60 };
+    H5.ridge = { x: -56, z: -16 };                    // Lookout Ridge, Port Haven's mountain
+    H5.lookout = { x: -60, z: -20 };                  // its summit
+    H5.pool = { x: -42, z: -1, r: 6.5 };              // the pool at the foot of the falls (out past the camp)
+    H5.falls = { x: -41, z: -6.5 };
+    H5.jungle = { x: 6, z: 58 };
+    H5.lagoon = { x: I1.x - 5, z: I1.z + 4 };         // Coral Key's lagoon (an atoll)
+    H5.islet = { x: I1.x - 9, z: I1.z - 1 };          // the little islet in the middle of it
+    H5.channel = 0.95;                                // the lagoon opens to the sea this way
+    H5.crag = { x: I2.x + 4, z: I2.z - 6 };           // Skull Rock's crag
+    H5.cove = polar(I2, 0.62, archR(I2, 0.62) - 12);
+    H5.peak = { x: I3.x + 6, z: I3.z - 8 };           // Frostcap's summit
+    H5.lake = polar(I3, 2.05, 38);                     // the frozen lake
+    H5.mesa = { x: I4.x - 4, z: I4.z + 2 };           // Storm Isle's plateau
+    H5.light = polar(I4, -0.64, 27);                   // the lighthouse, on the seaward edge
+    H5.circle = { x: I4.x - 6, z: I4.z + 6 };          // the storm stones
+}
+const mesaR = th => 31 + 4 * Math.sin(3 * th + 0.7) + 2.5 * Math.sin(5 * th + 2.1);
+// flat pads (buildings, docks, summits) and trails (cut into slopes), per island. A trail point's height may be null: it's sampled from the land
+const PADS5 = { haven: [], coral: [], skull: [], frost: [], storm: [] }, TRAILS5 = { haven: [], coral: [], skull: [], frost: [], storm: [] };
+for (const D of DOCKS5) PADS5[D.I.k].push({ x: D.B.x, z: D.B.z, r: 7, f: 16, h: 0.3 });
+PADS5.haven.push({ x: 0, z: 0, r: 30, f: 12, h: 0.3 }, { x: H5.casino.x, z: H5.casino.z, r: 17, f: 10, h: 0.5 });
+PADS5.coral.push({ x: H5.islet.x, z: H5.islet.z, r: 2.5, f: 4, h: 1.0 });
+PADS5.skull.push({ x: H5.cove.x, z: H5.cove.z, r: 9, f: 10, h: 0.45 });
+PADS5.storm.push({ x: H5.light.x, z: H5.light.z, r: 6, f: 4, h: null }, { x: H5.circle.x, z: H5.circle.z, r: 8, f: 5, h: null });
+PADS5.frost.push({ x: H5.lake.x, z: H5.lake.z, r: 12, f: 6, h: 0.3 });
+// trails: from camp out to the docks, and up every mountain
+TRAILS5.haven.push({ w: 2.6, pts: [[-24, -10, 0.3], [-36, -14, null], [-44, -24, null], [-52, -30, null], [-62, -28, null], [H5.lookout.x, H5.lookout.z, null]] }); // up Lookout Ridge
+{   // Frostcap: a switchback trail that winds right up to the summit
+    const I = ARCH_BY.frost, pts = [], D = harborOf(I);
+    pts.push([D.B.x, D.B.z, 0.3]);
+    for (let s = 0; s <= 1.0001; s += 1 / 26) { const a = 1.25 + 0.15 + s * Math.PI * 2.35, rr = lerp(44, 3.5, Math.pow(s, 0.9)); pts.push([H5.peak.x + Math.cos(a) * rr, H5.peak.z + Math.sin(a) * rr, null]); }
+    TRAILS5.frost.push({ w: 2.3, spiral: true, pts });
+}
+{   // Storm Isle: a gully ramp from the harbor up onto the plateau
+    const I = ARCH_BY.storm, D = harborOf(I), th = 2.5, e = polar(I, th, mesaR(th) - 6);
+    TRAILS5.storm.push({ w: 3, pts: [[D.B.x, D.B.z, 0.3], [polar(I, th, archR(I, th) - 20).x, polar(I, th, archR(I, th) - 20).z, 2.2], [polar(I, th + 0.25, mesaR(th + 0.25) + 4).x, polar(I, th + 0.25, mesaR(th + 0.25) + 4).z, 9], [e.x, e.z, null]] });
+}
+{   // Skull Rock: Dead Man's Gulch, from the cove up to the crag
+    const I = ARCH_BY.skull;
+    const P = (a, d, h) => [polar(I, a, d).x, polar(I, a, d).z, h];
+    TRAILS5.skull.push({ w: 2.6, pts: [[H5.cove.x, H5.cove.z, 0.45], P(0.3, 30, 3.5), P(0, 24, 8), P(-0.45, 18, 14), P(-0.75, 12, 19), [H5.crag.x + 6, H5.crag.z + 3, null]] });
+}
+for (const D of DOCKS5) if (D.I.k === "coral" || D.I.k === "skull") TRAILS5[D.I.k].push({ w: 2.4, pts: [[D.B.x, D.B.z, 0.3], [D.I.x + (D.B.x - D.I.x) * 0.55, D.I.z + (D.B.z - D.I.z) * 0.55, null]] });
+// the land itself, island by island (before the shore, pads and trails shape it)
+function landH5(I, x, z, lx, lz, d, th) {
+    if (I.k === "haven") {
+        let h = Math.max(0, fbm2(x * 0.017 + 3.1, z * 0.017 - 5.3, 4) - 0.36) * 15 * sstep(26, 48, d);
+        const dr = Math.hypot(x - H5.ridge.x, z - H5.ridge.z), rg = ridged(x * 0.03 + 2.2, z * 0.03 - 1.4, 4);
+        h = Math.max(h, 34 * Math.pow(Math.max(0, 1 - dr / 50), 1.35) * (0.62 + 0.55 * rg));                  // Lookout Ridge
+        h += 11 * Math.exp(-((x - H5.jungle.x) ** 2 + (z - H5.jungle.z) ** 2) / 520) * (0.6 + 0.7 * fbm2(x * 0.06, z * 0.06, 2)); // the jungle hills
+        const dp = Math.hypot(x - H5.pool.x, z - H5.pool.z); h = lerp(h, -2.6, sstep(H5.pool.r + 5, H5.pool.r - 1, dp)); // the pool under the falls
+        { const [sd, t] = segDist(x, z, H5.pool.x, H5.pool.z, -91, 12); h = lerp(h, lerp(-2.0, -2.6, t), sstep(4.2, 1.6, sd)); } // and the stream from it to the sea
+        return h + fbm2(x * 0.11, z * 0.11, 2) * 0.7;
+    }
+    if (I.k === "coral") {
+        const ll = Math.hypot(x - H5.lagoon.x, z - H5.lagoon.z), la = Math.atan2(z - H5.lagoon.z, x - H5.lagoon.x);
+        const LR = 25 + 4 * Math.sin(3 * la + 1) + 3 * Math.sin(5 * la + 0.4), lin = LR - ll;               // > 0: inside the lagoon
+        const dune = Math.pow(0.5 + 0.5 * Math.sin((x * 0.62 + z * 0.78) * 0.17 + fbm2(x * 0.035, z * 0.035, 2) * 6), 2) * 5.5;
+        let h = 0.7 + fbm2(x * 0.05 + 1.7, z * 0.05 - 2.2, 3) * 1.6 + dune * sstep(-3, -12, lin) * sstep(10, 22, archR(I, th) - d);
+        h = lerp(h, -2.6 + fbm2(x * 0.1, z * 0.1, 2) * 0.6, sstep(-7, 3, lin));                               // the lagoon
+        { const e = polar(I, H5.channel, archR(I, H5.channel) + 6), [sd] = segDist(x, z, H5.lagoon.x, H5.lagoon.z, e.x, e.z); h = lerp(h, -2.9, sstep(7, 3.5, sd) * sstep(-2, 4, -lin + 4)); } // a channel out to sea: boats can sail in
+        const di = Math.hypot(x - H5.islet.x, z - H5.islet.z); h = Math.max(h, 1.3 - di * 0.32);              // the islet
+        return h;
+    }
+    if (I.k === "skull") {
+        const rg = ridged(x * 0.032 - 2, z * 0.032 + 8, 4), base = (fbm2(x * 0.024, z * 0.024, 4) * 0.55 + rg * 0.75) * 26 - 9;
+        let h = terrace(Math.max(0, base), 4.2, 0.13) * sstep(6, 22, archR(I, th) - d);                       // rock shelves with sheer risers
+        const dc = Math.hypot(x - H5.crag.x, z - H5.crag.z); h = Math.max(h, 31 * Math.pow(Math.max(0, 1 - dc / 26), 1.15)); // the crag
+        const dcv = Math.hypot(x - H5.cove.x, z - H5.cove.z); h *= sstep(10, 26, dcv);                     // the cove's beach
+        return h + fbm2(x * 0.14, z * 0.14, 2) * 0.6;
+    }
+    if (I.k === "frost") {
+        const dp = Math.hypot(x - H5.peak.x, z - H5.peak.z), k = Math.max(0, 1 - dp / 60), rg = ridged(x * 0.045 + 4, z * 0.045 - 2, 3);
+        let h = 52 * Math.pow(k, 1.55) * (0.78 + 0.4 * rg) + fbm2(x * 0.06, z * 0.06, 3) * 2.6;
+        h = Math.max(h, 54 * Math.pow(Math.max(0, 1 - dp / 9), 0.8));                                      // a sharp summit
+        return h;
+    }
+    // storm: moors round a plateau with cliffs all round it
+    const dm = Math.hypot(x - H5.mesa.x, z - H5.mesa.z), ma = Math.atan2(z - H5.mesa.z, x - H5.mesa.x), m = sstep(2.5, -1.5, dm - mesaR(ma));
+    const moor = 1.6 + fbm2(x * 0.045 + 4, z * 0.045, 3) * 4, top = 16 + fbm2(x * 0.07, z * 0.07, 2) * 1.6;
+    return lerp(moor, top, m);
+}
+const cliffK = (I, th) => { let c = 0; for (const [a, w] of I.cliffs) { const k = angDiff(th, a); c += Math.exp(-(k * k) / (w * w)); } for (const D of DOCKS5) if (D.I === I) { const k = angDiff(th, D.th); c *= 1 - Math.exp(-(k * k) / 0.12); } return clamp(c, 0, 1); };
+// trail heights: sampled once from the bare land and smoothed, so every trail is a gentle ramp
+const trailH5 = (I, x, z) => { const lx = x - I.x, lz = z - I.z; return landH5(I, x, z, lx, lz, Math.hypot(lx, lz), Math.atan2(lz, lx)); };
+for (const k in TRAILS5) for (const T of TRAILS5[k]) {
+    const I = ARCH_BY[k];
+    for (const p of T.pts) if (p[2] === null) p[2] = Math.max(0.3, trailH5(I, p[0], p[1]));
+    if (T.spiral) { for (let i = 1; i < T.pts.length; i++) T.pts[i][2] = Math.max(T.pts[i][2], T.pts[i - 1][2]); for (let i = 1; i < T.pts.length - 1; i++) T.pts[i][2] = (T.pts[i - 1][2] + T.pts[i][2] * 2 + T.pts[i + 1][2]) / 4; } // only ever climbing
+}
+// round off every corner (Chaikin, twice) so the trails curve and never kink where they turn
+for (const k in TRAILS5) for (const T of TRAILS5[k]) for (let it = 0; it < 2; it++) {
+    const P = T.pts, out = [P[0]];
+    for (let i = 0; i < P.length - 1; i++) { const a = P[i], b = P[i + 1]; out.push(a.map((v, j) => v * 0.75 + b[j] * 0.25), a.map((v, j) => v * 0.25 + b[j] * 0.75)); }
+    out.push(P[P.length - 1]); T.pts = out;
+}
+for (const k in PADS5) for (const P of PADS5[k]) if (P.h === null) P.h = trailH5(ARCH_BY[k], P.x, P.z);
+// the summits: the trail's end is a flat pad
+H5.lookoutY = TRAILS5.haven[0].pts.at(-1)[2]; PADS5.haven.push({ x: H5.lookout.x, z: H5.lookout.z, r: 3.5, f: 4, h: H5.lookoutY });
+H5.peakY = TRAILS5.frost[0].pts.at(-1)[2]; PADS5.frost.push({ x: TRAILS5.frost[0].pts.at(-1)[0], z: TRAILS5.frost[0].pts.at(-1)[1], r: 3.5, f: 3, h: H5.peakY });
+H5.cragTop = { x: H5.crag.x + 6, z: H5.crag.z + 3, y: TRAILS5.skull[0].pts.at(-1)[2] };
+for (const k in TRAILS5) for (const T of TRAILS5[k]) { T.box = []; for (let i = 0; i < T.pts.length - 1; i++) { const a = T.pts[i], b = T.pts[i + 1], m = T.w + 6; T.box.push([Math.min(a[0], b[0]) - m, Math.max(a[0], b[0]) + m, Math.min(a[1], b[1]) - m, Math.max(a[1], b[1]) + m]); } }
+function trailAt5(I, x, z) { // distance to the nearest trail on this island, and the trail's height there
+    let best = 1e9, bh = 0, bw = 2.5;
+    for (const T of TRAILS5[I.k]) for (let i = 0; i < T.pts.length - 1; i++) {
+        const B = T.box[i]; if (x < B[0] || x > B[1] || z < B[2] || z > B[3]) continue;
+        const a = T.pts[i], b = T.pts[i + 1], [sd, t] = segDist(x, z, a[0], a[1], b[0], b[1]);
+        if (sd < best) { best = sd; bh = lerp(a[2], b[2], t); bw = T.w; }
+    }
+    return { d: best, h: bh, w: bw };
+}
+function archRaw(I, x, z) {
+    const lx = x - I.x, lz = z - I.z, d = Math.hypot(lx, lz), th = Math.atan2(lz, lx), inside = archR(I, th) - d;
+    if (inside < -4) return Math.max(-9, -1.3 + inside * 0.12);                          // the seabed shelves off into deep blue
+    const c = cliffK(I, th), L = landH5(I, x, z, lx, lz, d, th);
+    const beach = inside < 0 ? -0.5 + inside * 0.2 : lerp(-0.5, 0.45, sstep(0, 6, inside));
+    let h = beach + L * lerp(sstep(5, 18, inside), sstep(0.6, 3.4, inside), c);
+    if (c > 0.05 && inside < 1) h = lerp(h, -3 + inside, c * sstep(1, -1, inside));      // sheer drops below the cliffs
+    for (const P of PADS5[I.k]) { const pd = Math.hypot(x - P.x, z - P.z); if (pd < P.r + P.f) h = lerp(h, P.h, sstep(P.r + P.f, P.r, pd)); }
+    const tr = trailAt5(I, x, z); if (tr.d < tr.w + 5) h = lerp(h, tr.h, sstep(tr.w + 5, tr.w + 1.4, tr.d)); // flat across a bit more than the grid, so the walking line is exact
+    return h;
+}
+// the land is baked into a grid once: the ground you walk on is exactly the ground you see
+const STEP5 = 1.25;
+function bakeArch(I) {
+    const segs = Math.ceil((I.r + 26) * 2 / STEP5), S = segs * STEP5, n = segs + 1, H = new Float32Array(n * n), x0 = I.x - S / 2, z0 = I.z - S / 2;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) H[j * n + i] = archRaw(I, x0 + i * STEP5, z0 + j * STEP5);
+    I.G = { H, n, segs, S, x0, z0 };
+}
+function archTerrain(I, x, z) {
+    const G = I.G; if (!G) return archRaw(I, x, z);
+    const fx = (x - G.x0) / STEP5, fz = (z - G.z0) / STEP5;
+    if (fx < 0 || fz < 0 || fx >= G.segs || fz >= G.segs) return archRaw(I, x, z);
+    const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j, n = G.n, H = G.H;
+    const a = H[j * n + i], b = H[(j + 1) * n + i], c = H[(j + 1) * n + i + 1], d = H[j * n + i + 1]; // the same two triangles the mesh is made of
+    return u + v <= 1 ? a + (d - a) * u + (b - a) * v : c + (b - c) * (1 - u) + (d - c) * (1 - v);
+}
+// sea stacks, sandbars, icebergs and a wreck out on the water: scenery the boat has to steer round
+const ROCKS5 = [];
+{
+    const I2 = ARCH_BY.skull, I3 = ARCH_BY.frost, I4 = ARCH_BY.storm;
+    for (const [a, dd, r, h] of [[2.0, 16, 4.5, 16], [2.35, 24, 3.4, 11], [2.75, 15, 5, 19], [3.5, 20, 3, 9], [-1.5, 14, 4, 14], [-1.95, 22, 2.6, 8]]) { const p = polar(I2, a, archR(I2, a) + dd); ROCKS5.push({ x: p.x, z: p.z, r, h, kind: "stack" }); }
+    for (const [a, dd, r] of [[-1.2, 22, 6], [-2.1, 30, 5], [-0.6, 34, 7], [0.4, 26, 4.5]]) { const p = polar(I3, a, archR(I3, a) + dd); ROCKS5.push({ x: p.x, z: p.z, r, h: r * 0.8, kind: "berg" }); }
+    for (const [a, dd, r, h] of [[-0.64, 14, 5, 15], [-0.2, 20, 3.5, 10], [-1.1, 18, 4, 12]]) { const p = polar(I4, a, archR(I4, a) + dd); ROCKS5.push({ x: p.x, z: p.z, r, h, kind: "stack" }); }
+    ROCKS5.push({ x: 176, z: -132, r: 9, h: 6, kind: "gull", name: "GULL ROCK" });
+    ROCKS5.push({ x: 128, z: 146, r: 12, h: 0.9, kind: "bar", name: "TURTLE BAR" });
+    ROCKS5.push({ x: -238, z: -128, r: 11, h: 5, kind: "wreck", name: "THE MERROW'S WRECK" });
+}
+const rockAt5 = (x, z) => { for (const R of ROCKS5) { const d = Math.hypot(x - R.x, z - R.z); if (d < R.r) return R; } return null; };
+const wetH5 = (x, z) => (onDock5(x, z) ? 0.3 : Math.max(archTerrain(archAt(x, z), x, z), rockAt5(x, z) ? 1 : -9)); // what the boat's hull would hit
+const SWIM_Y = -1.25; // in deep water you swim: chest-deep, slower
 function groundY5(x, z) {
     if (onDock5(x, z)) return 0;
-    const I = archAt(x, z);
-    return Math.max(-0.4, archTerrain(I, x, z));
+    return Math.max(SWIM_Y, archTerrain(archAt(x, z), x, z));
 }
-const landH5 = (x, z) => (onDock5(x, z) ? 0.3 : archTerrain(archAt(x, z), x, z));
+const slope5 = (x, z) => { const e = 0.6; return Math.hypot(groundY5(x + e, z) - groundY5(x - e, z), groundY5(x, z + e) - groundY5(x, z - e)) / (2 * e); };
+const swim5 = () => isle === 5 && !boating() && !onDock5(player.pos.x, player.pos.z) && archTerrain(archAt(player.pos.x, player.pos.z), player.pos.x, player.pos.z) < -0.7;
+const moveK5 = () => (swim5() ? 0.5 : 1);
 // the camp at Port Haven
 const BED5 = { x: -9, z: 6 }, SMITH5 = { x: -11, z: -7 }, DEPOT5 = { x: 11, z: -7 }, WITCH5 = { x: 10, z: 8 };
 const SMITH5_AT = standPt(SMITH5), DEPOT5_AT = standPt(DEPOT5), WITCH5_AT = standPt(WITCH5);
 const SHIPWRIGHT = (() => { const p = HARBOR5.pt(-3, 5.5); return { x: p.x, z: p.z }; })();
+const CAPTAIN5 = (() => { const p = HARBOR5.pt(-3, -6); return { x: p.x, z: p.z }; })(); // the Ghost Captain, across the dock from the Shipwright
 const LM5 = [
     { name: "PORT HAVEN", x: 0, z: 0, r: 24, col: "#ffd890", camp: true },
-    ...ARCH.slice(1).map(I => ({ name: I.name, x: I.x, z: I.z, r: 6, col: I.col }))
+    ...ARCH.slice(1).map(I => ({ name: I.name, x: I.x, z: I.z, r: 6, col: I.col })),
+    { name: "THE FALLS", x: H5.pool.x, z: H5.pool.z, r: H5.pool.r + 1, col: "#7ae8ff" }
 ];
+const clampLast5 = { x: 0, z: 0, ok: false };
+const SLOPE_MAX = 1.35; // anything steeper is a cliff: you can't walk up it, and you slide off it
 function clampIsle5(p) {
-    if (B5.on) return; // the boat moves itself
+    if (DEBUG && window.__freeCam) { clampLast5.ok = false; return; } // dev: a free camera for screenshots
+    if (B5.on) { clampLast5.ok = false; return; } // the boat moves itself
     for (const D of DOCKS5) {
         const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP);
-        if (along > 4.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; }
+        if (along > 4.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; clampLast5.x = p.x; clampLast5.z = p.z; clampLast5.ok = true; return; }
     }
     const I = archAt(p.x, p.z), dx = p.x - I.x, dz = p.z - I.z, d = Math.hypot(dx, dz), lim = archR(I, Math.atan2(dz, dx)) - 3;
     if (d > lim) { p.x = I.x + dx / d * lim; p.z = I.z + dz / d * lim; }
+    // cliffs: too steep to walk up (a jump gets you up a small ledge)
+    const L = clampLast5;
+    if (L.ok && !ride) {
+        const run = Math.hypot(p.x - L.x, p.z - L.z), g0 = groundY5(L.x, L.z), g1 = groundY5(p.x, p.z), feet = p.y - 1.7;
+        if (run > 1e-5 && run < 3 && g1 - g0 > 0.02 && (g1 - g0) / run > SLOPE_MAX && feet < g1 - 0.12) {
+            const gx = groundY5(p.x, L.z), gz = groundY5(L.x, p.z), rx = Math.abs(p.x - L.x), rz = Math.abs(p.z - L.z);
+            if (rx > 1e-5 && (gx - g0) / rx <= SLOPE_MAX) p.z = L.z;
+            else if (rz > 1e-5 && (gz - g0) / rz <= SLOPE_MAX) p.x = L.x;
+            else { p.x = L.x; p.z = L.z; }
+        }
+        // standing on a cliff face: slide down it
+        if (player.onGround && feet < groundY5(p.x, p.z) + 0.25) {
+            const e = 0.5, gxp = groundY5(p.x + e, p.z), gxm = groundY5(p.x - e, p.z), gzp = groundY5(p.x, p.z + e), gzm = groundY5(p.x, p.z - e), sx = (gxp - gxm) / (2 * e), sz = (gzp - gzm) / (2 * e), s = Math.hypot(sx, sz);
+            if (s > SLOPE_MAX + 0.25) { const k = Math.min(0.12, (s - SLOPE_MAX) * 0.05); p.x -= sx / s * k; p.z -= sz / s * k; }
+        }
+    }
+    L.x = p.x; L.z = p.z; L.ok = true;
 }
 // ---- trees live on whichever island you're on ----
 let arch5 = "haven";
-const archOK5 = (x, z, I) => { if (archIn(I, x, z) < 10) return false; if (I.k === "haven" && Math.hypot(x, z) < SAFE_R + 4) return false; for (const D of DOCKS5) if (D.I === I && Math.hypot(x - D.B.x, z - D.B.z) < 12) return false; if (I.k === "storm" && Math.hypot(x - I.x, z - I.z) < 9) return false; return true; };
+const archOK5 = (x, z, I) => {
+    if (archIn(I, x, z) < 10) return false;
+    if (I.k === "haven" && Math.hypot(x, z) < SAFE_R + 4) return false;
+    for (const D of DOCKS5) if (D.I === I && Math.hypot(x - D.B.x, z - D.B.z) < 12) return false;
+    for (const P of PADS5[I.k]) if (Math.hypot(x - P.x, z - P.z) < P.r + 2) return false;
+    const tr = trailAt5(I, x, z); if (tr.d < tr.w + 1.5) return false;
+    const y = archTerrain(I, x, z); if (y < 0.25) return false;                        // not in the water
+    if (slope5(x, z) > 0.85) return false;                                              // not on a cliff
+    if (I.k === "haven" && Math.hypot(x - H5.pool.x, z - H5.pool.z) < H5.pool.r + 4) return false;
+    if (I.k === "storm" && Math.hypot(x - H5.light.x, z - H5.light.z) < 8) return false;
+    return true;
+};
 function arch5Spot() {
     const I = ARCH_BY[arch5];
-    for (let k = 0; k < 20; k++) { const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * (archR(I, a) - 10), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (archOK5(x, z, I)) return { x, z }; }
+    for (let k = 0; k < 30; k++) { const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * (archR(I, a) - 10), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (archOK5(x, z, I)) return { x, z }; }
     return null;
 }
 function clampTree5(t) {
     const I = ARCH_BY[t.arch] || archAt(t.x, t.z), dx = t.x - I.x, dz = t.z - I.z, d = Math.hypot(dx, dz) || 1, lim = archR(I, Math.atan2(dz, dx)) - 8;
     if (d > lim) { t.x = I.x + dx / d * lim; t.z = I.z + dz / d * lim; }
 }
-const archTreeTarget = () => Math.round((arch5 === "haven" ? 55 : 38) * (isBlood() ? 1.4 : 1));
+const archTreeTarget = () => Math.round((arch5 === "haven" ? 62 : 46) * (isBlood() ? 1.4 : 1));
 function setArch5(k, quiet) {
     if (arch5 === k) return;
     arch5 = k; terrainMesh[5] = isle5.terrain[k] || terrainMesh[5];
     resetIsleTrees(Math.round(archTreeTarget() * 0.8));
-    if (!quiet) { const I = ARCH_BY[k]; say(I.name); setTimeout(() => say(""), 2600); }
+    syncGhosts();
+    if (!quiet) { const I = ARCH_BY[k]; titleCard(I.name, ISLE_SUB5[k]); }
 }
-
+const ISLE_SUB5 = { haven: "home port · fuel · the Shipwright", coral: "an atoll round a lagoon · fuel dock", skull: "pirate country · no fuel here", frost: "a mountain of ice · no fuel here", storm: "the plateau at the edge of the map · no fuel here" };
 // ---- materials, trees and recipes for the Archipelago ----
 Object.assign(MATS, {
     driftwood: { name: "Driftwood", col: "#d8b890", price: 120, hex: 0xa08a6a },
@@ -9957,27 +10169,169 @@ function brewItems5() {
 }
 
 // =========================== THE BOAT ===========================
-const B5 = { on: false, x: 0, z: 0, yaw: 0, speed: 0, mesh: null, prop: null, wakeT: 0, engT: 0, strand: 0, warned: 0, docked: "haven", lastLand: 0 };
+const B5 = { on: false, x: 0, z: 0, yaw: 0, speed: 0, mesh: null, prop: null, wakeT: 0, engT: 0, strand: 0, warned: 0, docked: "haven", lastLand: 0, steer: 0 };
 if (!save.boat || typeof save.boat !== "object") save.boat = { fuel: 100, tank: 0, engine: 0, cans: 0, hull: 0 };
+if (!Number.isFinite(save.boat.fuel)) save.boat.fuel = 100;
 const boatMaxFuel = () => 100 * (1 + 0.45 * (save.boat.tank || 0));
 const boatTop = () => 15 * (1 + 0.13 * (save.boat.engine || 0));
 const fuelPrice = () => Math.round(18 * rebirthMult()); // per unit
+const fillCost = () => Math.ceil(Math.max(0, boatMaxFuel() - save.boat.fuel) * fuelPrice());
 const boating = () => B5.on;
-function makeSpeedboat() {
-    const g = new THREE.Group(), hullM = lamb(0xf2f2f2), stripe = lamb(0x1a6ab0), deck = lamb(0xb08a5a), dark = lamb(0x22262e);
-    // hull: a box with a pointed bow
-    part(g, BOX, hullM, 0, 0.45, -0.3, 2.2, 0.9, 4.6);
-    const bow = new THREE.Mesh(new THREE.ConeGeometry(1.1, 1.8, 4), hullM); bow.rotation.set(Math.PI / 2, 0, Math.PI / 4); bow.scale.set(1, 1, 0.64); bow.position.set(0, 0.45, 2.75); g.add(bow);
-    part(g, BOX, stripe, 0, 0.62, -0.3, 2.24, 0.14, 4.62); part(g, BOX, deck, 0, 0.92, -0.6, 1.9, 0.06, 3.6);
-    part(g, BOX, dark, 0, 1.68, 0.68, 1.7, 0.05, 0.06); for (const sx of [-0.83, 0.83]) part(g, BOX, dark, sx, 1.33, 0.78, 0.05, 0.7, 0.05); // a slim windscreen frame
-    const glass = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.18 })); glass.scale.set(1.6, 0.6, 0.03); glass.position.set(0, 1.36, 0.74); glass.rotation.x = -0.35; g.add(glass);
-    part(g, BOX, lamb(0x8a2a2a), -0.45, 1.15, -0.5, 0.7, 0.4, 0.7); part(g, BOX, lamb(0x8a2a2a), 0.45, 1.15, -0.5, 0.7, 0.4, 0.7); // seats
-    part(g, CYL8, dark, 0, 1.45, 0.35, 0.22, 0.05, 0.22, Math.PI / 2.5); // wheel
-    part(g, BOX, dark, 0, 1.0, -2.75, 0.5, 1.1, 0.5); part(g, BOX, lamb(0xffb020), 0, 1.5, -2.75, 0.56, 0.2, 0.56); // outboard motor
-    const prop = new THREE.Group(); prop.position.set(0, 0.25, -2.9); g.add(prop); part(prop, BOX, dark, 0, 0, 0, 0.9, 0.12, 0.05); part(prop, BOX, dark, 0, 0, 0, 0.12, 0.9, 0.05);
-    part(g, ICO, glowM(0x6dff8a), 1.05, 1.05, 2.0, 0.08); part(g, ICO, glowM(0xff4a4a), -1.05, 1.05, 2.0, 0.08); // nav lights
-    g.userData.prop = prop;
+// paint jobs from the Shipwright
+const PAINTS = [
+    { k: "classic", name: "Harbor Classic", hull: 0xf4f4f0, stripe: 0x1a4a8a, boot: 0x1a2a4a, bottom: 0xa8282a, seat: 0xf2e8d2, deck: 0xe6e2da, txt: "#1a4a8a", cost: 0 },
+    { k: "racer", name: "Racing Red", hull: 0xd0202a, stripe: 0xf4f4f4, boot: 0x1a1a1a, bottom: 0x1a1a1a, seat: 0x2a2a2e, deck: 0xe6e2da, txt: "#ffffff", cost: 120000 },
+    { k: "sunset", name: "Sunset Run", hull: 0xff8a2a, stripe: 0xffe060, boot: 0x5a1a1a, bottom: 0x3a1a1a, seat: 0xf2e8d2, deck: 0xf0e2cc, txt: "#5a1a1a", cost: 200000 },
+    { k: "lagoon", name: "Lagoon Teal", hull: 0x23a8aa, stripe: 0xf4f4f4, boot: 0x0a3a5a, bottom: 0x0a2a4a, seat: 0xf2e8d2, deck: 0xe8f0ec, txt: "#ffffff", cost: 300000 },
+    { k: "midnight", name: "Midnight Gold", hull: 0x15171d, stripe: 0xd8a840, boot: 0xd8a840, bottom: 0x4a0a0a, seat: 0x8a1a1a, deck: 0x2a2a30, txt: "#d8a840", cost: 600000 },
+    { k: "pearl", name: "Pearl Diver", hull: 0xf4eefc, stripe: 0xff8ac8, boot: 0x8a6ab0, bottom: 0x4a3a6a, seat: 0xffe0f0, deck: 0xf4f0f8, txt: "#c86aa8", cost: 1000000 },
+    { k: "ghost", name: "Ghost Ship", hull: 0x5ad8ff, stripe: 0xffffff, boot: 0x0a3a5a, bottom: 0x08202e, seat: 0x9fe8ff, deck: 0x2a5a6a, txt: "#ffffff", cost: 0, glow: 0x0a4a6a, crew: 1500 }
+];
+const paintOf = () => PAINTS.find(p => p.k === save.boat.paint) || PAINTS[0];
+// the hull's shape: half-beam, keel, chine and sheer along its length (bow is +z)
+const HULL = { z0: -2.75, z1: 3.35 };
+const hb = z => z <= 0.4 ? 1.12 + 0.05 * sstep(-2.75, 0.4, z) : 1.17 * Math.pow(Math.max(0, 1 - ((z - 0.4) / 2.95) ** 2), 0.62);
+const hkeel = z => -0.3 + 0.78 * Math.max(0, (z - 0.7) / 2.65) ** 2;
+const hchine = z => -0.02 + 0.55 * Math.max(0, (z - 0.4) / 2.95) ** 2;
+const hsheer = z => 0.9 + 0.32 * ((z + 2.75) / 6.1) ** 2;
+function hullGeo() {
+    const N = 26, zs = []; for (let i = 0; i <= N; i++) zs.push(lerp(HULL.z0, HULL.z1 - 0.02, Math.pow(i / N, 0.9)));
+    // the profile up one side, keel to gunwale, and which paint each band gets (0 bottom, 1 boot stripe, 2 hull, 3 accent stripe)
+    const prof = z => { const b = hb(z), k = hkeel(z), ch = hchine(z), sh = hsheer(z); return [[0, k], [b * 0.46, lerp(k, ch, 0.58)], [b * 0.87, ch], [b * 0.95, ch + 0.07], [b * 0.99, Math.min(sh - 0.36, ch + 0.3)], [b * 1.01, sh - 0.34], [b * 1.02, sh - 0.21], [b, sh]]; };
+    const band = [0, 0, 0, 1, 2, 3, 2];
+    const pos = [], idx = [], groups = [];
+    for (let s = 0; s < band.length; s++) {
+        const start = idx.length;
+        for (const side of [-1, 1]) {
+            const base = pos.length / 3;
+            for (const z of zs) { const P = prof(z); pos.push(P[s][0] * side, P[s][1], z, P[s + 1][0] * side, P[s + 1][1], z); }
+            for (let i = 0; i < N; i++) { const a = base + i * 2, b = a + 1, c = a + 2, d = a + 3; side > 0 ? idx.push(a, b, c, b, d, c) : idx.push(a, c, b, b, c, d); }
+        }
+        groups.push([start, idx.length - start, band[s]]);
+    }
+    // the transom: a flat stern
+    { const start = idx.length, P = prof(HULL.z0), c0 = pos.length / 3; pos.push(0, 0.35, HULL.z0);
+      const ring = [...P.map(p => [-p[0], p[1]]), ...P.slice().reverse().map(p => [p[0], p[1]])], b0 = pos.length / 3;
+      for (const [x, y] of ring) pos.push(x, y, HULL.z0);
+      for (let i = 0; i < ring.length - 1; i++) idx.push(c0, b0 + i, b0 + i + 1);
+      groups.push([start, idx.length - start, 2]); }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+    for (const [s, c, m] of groups) g.addGroup(s, c, m);
+    g.computeVertexNormals();
     return g;
+}
+// a lofted strip (deck, cockpit sole, gunwale caps) between two edges, one point per station
+function stripGeo(zs, fnA, fnB, flip) {
+    const pos = [], idx = [];
+    for (const z of zs) { const a = fnA(z), b = fnB(z); pos.push(a[0], a[1], z, b[0], b[1], z); }
+    for (let i = 0; i < zs.length - 1; i++) { const a = i * 2, b = a + 1, c = a + 2, d = a + 3; flip ? idx.push(a, b, c, b, d, c) : idx.push(a, c, b, b, c, d); }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals(); return g;
+}
+const tube = (pts, r, mat, closed = false) => new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p => V3(...p)), closed), Math.max(8, pts.length * 6), r, 6, closed), mat);
+function nameDecal(text, col) {
+    const cv = document.createElement("canvas"); cv.width = 512; cv.height = 96; const g = cv.getContext("2d");
+    g.font = "italic 900 62px Segoe UI, Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillStyle = "rgba(0,0,0,.25)"; g.fillText(text, 259, 51); g.fillStyle = col; g.fillText(text, 256, 48);
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    return new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+}
+function makeSpeedboat(P = paintOf()) {
+    const g = new THREE.Group(), L = (c, e) => new THREE.MeshLambertMaterial({ color: c, emissive: e || 0, flatShading: false });
+    const hullM = L(P.hull, P.glow), mats = [L(P.bottom), L(P.boot), hullM, L(P.stripe, P.glow ? 0x3a6a7a : 0)];
+    const deckM = L(P.deck), seatM = L(P.seat), dark = L(0x1c1e24), chrome = new THREE.MeshLambertMaterial({ color: 0xd8dee8, emissive: 0x2a3038 }), teak = L(0xa87a4a), black = L(0x111216);
+    if (P.k === "ghost") for (const m of [...mats, deckM, seatM]) { m.transparent = true; m.opacity = 0.78; }
+    const hull = new THREE.Mesh(hullGeo(), mats); g.add(hull);
+    const zs = []; for (let z = HULL.z0; z <= HULL.z1 - 0.02; z += 0.12) zs.push(z); zs.push(HULL.z1 - 0.02);
+    const FORE = 0.62, COCK = -2.15, LIN = 0.17; // where the foredeck starts, where the cockpit ends, how thick the sides are
+    // foredeck, crowned, from the windscreen to the bow
+    const fz = zs.filter(z => z >= FORE);
+    for (const s of [-1, 1]) g.add(new THREE.Mesh(stripGeo(fz, z => [s * hb(z), hsheer(z)], z => [0, hsheer(z) + 0.07], s > 0), deckM));
+    // gunwale caps along the cockpit, and the cockpit's inner walls
+    const cz = zs.filter(z => z <= FORE + 0.06);
+    for (const s of [-1, 1]) {
+        g.add(new THREE.Mesh(stripGeo(cz, z => [s * hb(z), hsheer(z)], z => [s * (hb(z) - LIN), hsheer(z)], s > 0), deckM));
+        g.add(new THREE.Mesh(stripGeo(cz.filter(z => z >= COCK - 0.05), z => [s * (hb(z) - LIN), hsheer(z)], z => [s * (hb(z) - LIN), 0.34], s > 0), seatM));
+    }
+    // the cockpit sole (teak, with dark seams), the aft deck and the wall in front of it
+    { const w = hb(-0.8) - LIN; const sole = new THREE.Mesh(new THREE.BoxGeometry(w * 2, 0.06, FORE - COCK), teak); sole.position.set(0, 0.31, (FORE + COCK) / 2); g.add(sole);
+      const seams = batch(dark); for (let x = -w + 0.18; x < w; x += 0.18) seams.add(BOX, x, 0.345, (FORE + COCK) / 2, 0, 0, 0, 0.015, 0.005, FORE - COCK - 0.05); const sm = seams.build(); if (sm) g.add(sm); }
+    { const w = hb(COCK) - LIN; const aft = new THREE.Mesh(new THREE.BoxGeometry(w * 2 + LIN * 2, 0.06, COCK - HULL.z0), deckM); aft.position.set(0, hsheer(HULL.z0) - 0.02, (COCK + HULL.z0) / 2); g.add(aft);
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(w * 2, hsheer(COCK) - 0.34, 0.06), seatM); wall.position.set(0, (hsheer(COCK) + 0.34) / 2, COCK); g.add(wall); }
+    // rub rails, chrome
+    for (const s of [-1, 1]) g.add(tube(zs.filter((z, i) => i % 3 === 0 || z === zs.at(-1)).map(z => [s * (hb(z) + 0.025), hsheer(z) - 0.05, z]), 0.035, dark));
+    // the bow rail and its stanchions
+    { const bz = zs.filter(z => z >= FORE + 0.5 && z <= HULL.z1 - 0.25), pts = [];
+      for (const z of bz) pts.push([hb(z) - 0.1, hsheer(z) + 0.32, z]); for (const z of bz.slice().reverse()) pts.push([-(hb(z) - 0.1), hsheer(z) + 0.32, z]);
+      g.add(tube(pts.filter((p, i) => i % 2 === 0 || i === pts.length - 1), 0.022, chrome));
+      for (const z of [FORE + 0.6, FORE + 1.4, HULL.z1 - 0.6]) for (const s of [-1, 1]) part(g, CYL6, chrome, s * (hb(z) - 0.1), hsheer(z) + 0.16, z, 0.015, 0.32, 0.015); }
+    part(g, BOX, chrome, 0, hsheer(HULL.z1 - 0.7) + 0.1, HULL.z1 - 0.7, 0.05, 0.05, 0.22); // a bow cleat
+    // the windscreen: a wraparound sheet of tinted glass with a chrome top
+    { const R = 1.12, sy = hsheer(FORE), zc = FORE - 0.55;
+      const glass = new THREE.Mesh(new THREE.CylinderGeometry(R, R * 1.06, 0.5, 24, 1, true, -1.25, 2.5), new THREE.MeshBasicMaterial({ color: 0x8fd0f0, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
+      glass.scale.set(1, 1, 0.55); glass.position.set(0, sy + 0.25, zc); glass.rotation.x = -0.18; g.add(glass);
+      const top = []; for (let a = -1.25; a <= 1.2501; a += 0.125) top.push([Math.sin(a) * R, sy + 0.5 - Math.cos(a) * 0.04, zc + Math.cos(a) * R * 0.55 - 0.05]);
+      g.add(tube(top, 0.022, chrome));
+      for (const a of [-1.25, 1.25]) part(g, BOX, chrome, Math.sin(a) * R, sy + 0.24, zc + Math.cos(a) * R * 0.55, 0.03, 0.52, 0.03); }
+    // the helm (starboard) and the passenger's console (port)
+    for (const s of [-1, 1]) {
+        const x = s * 0.5, c = new THREE.Group(); c.position.set(x, 0.34, FORE - 0.2); g.add(c);
+        part(c, BOX, hullM, 0, 0.36, 0, 0.72, 0.72, 0.5); part(c, BOX, dark, 0, 0.76, -0.04, 0.74, 0.1, 0.44, -0.35);
+        if (s < 0) { // gauges, wheel and throttle
+            for (const gx of [-0.18, 0.02, 0.2]) { part(c, CYL8, dark, gx, 0.84, 0.0, 0.07, 0.02, 0.07, 1.2); part(c, CYL8, glowM(gx > 0.1 ? 0xffb040 : 0x7ae8ff), gx, 0.845, 0.005, 0.055, 0.02, 0.055, 1.2); }
+            const wheel = new THREE.Group(); wheel.position.set(0, 0.86, -0.3); wheel.rotation.x = -0.9; c.add(wheel);
+            wheel.add(new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 6, 18), black)); for (let k = 0; k < 3; k++) part(wheel, BOX, chrome, 0, 0, 0, 0.32, 0.018, 0.018, 0, 0, k * 1.047);
+            part(c, CYL6, chrome, 0, 0.86, -0.22, 0.02, 0.18, 0.02, 0.9); g.userData.wheel = wheel;
+            const thr = new THREE.Group(); thr.position.set(0.33, 0.72, -0.05); c.add(thr); part(thr, BOX, chrome, 0, 0.12, 0, 0.02, 0.24, 0.02); part(thr, SPH, black, 0, 0.25, 0, 0.04, 0.04, 0.04); g.userData.throttle = thr;
+        } else { part(c, BOX, dark, 0, 0.5, -0.255, 0.4, 0.22, 0.02); part(c, CYL6, chrome, 0, 0.9, -0.18, 0.015, 0.36, 0.015, 0, 0, Math.PI / 2); } // a glovebox and a grab rail
+    }
+    // two bucket seats and a bench across the stern
+    for (const s of [-1, 1]) {
+        const st = new THREE.Group(); st.position.set(s * 0.5, 0.34, -0.55); g.add(st);
+        part(st, CYL8, chrome, 0, 0.2, 0, 0.06, 0.4, 0.06); part(st, BOX, seatM, 0, 0.47, 0, 0.56, 0.14, 0.5); part(st, SPH, seatM, 0, 0.55, 0.03, 0.27, 0.06, 0.24);
+        part(st, BOX, seatM, 0, 0.85, -0.25, 0.56, 0.62, 0.12, -0.12); part(st, SPH, seatM, 0, 1.15, -0.29, 0.28, 0.08, 0.07, -0.12); part(st, BOX, dark, 0, 0.62, -0.31, 0.5, 0.06, 0.04);
+    }
+    { const w = hb(COCK) - LIN - 0.05; part(g, BOX, seatM, 0, 0.55, COCK + 0.32, w * 2, 0.42, 0.6); part(g, BOX, seatM, 0, 0.8, COCK + 0.32, w * 2 - 0.05, 0.12, 0.56); part(g, BOX, seatM, 0, 1.05, COCK + 0.08, w * 2, 0.5, 0.14, 0.12);
+      for (let k = -1; k <= 1; k++) part(g, BOX, dark, k * w * 0.66, 0.87, COCK + 0.32, 0.015, 0.02, 0.5); }
+    // the outboard: cowling, leg, gearcase and a three-bladed prop. It turns with the wheel
+    const eng = new THREE.Group(); eng.position.set(0, 0, HULL.z0 - 0.12); g.add(eng);
+    part(g, BOX, dark, 0, 0.7, HULL.z0 - 0.06, 0.34, 0.5, 0.14); // the transom bracket
+    part(eng, SPH, black, 0, 1.36, -0.22, 0.34, 0.36, 0.48); part(eng, BOX, black, 0, 1.08, -0.2, 0.52, 0.34, 0.66);
+    part(eng, BOX, L(P.stripe), 0, 1.24, -0.2, 0.53, 0.06, 0.67); part(eng, BOX, chrome, 0, 1.62, -0.2, 0.2, 0.04, 0.4);
+    part(eng, BOX, dark, 0, 0.5, -0.12, 0.22, 0.85, 0.3); part(eng, BOX, dark, 0, -0.12, -0.1, 0.13, 0.55, 0.22);
+    part(eng, BOX, dark, 0, 0.14, -0.1, 0.44, 0.03, 0.46); part(eng, SPH, dark, 0, -0.42, -0.08, 0.1, 0.1, 0.32); part(eng, BOX, dark, 0, -0.58, -0.1, 0.03, 0.2, 0.18);
+    const prop = new THREE.Group(); prop.position.set(0, -0.42, -0.42); eng.add(prop);
+    part(prop, SPH, chrome, 0, 0, 0, 0.06, 0.06, 0.1);
+    for (let k = 0; k < 3; k++) { const bl = new THREE.Group(); bl.rotation.z = k * 2.094; prop.add(bl); part(bl, BOX, chrome, 0, 0.13, 0, 0.11, 0.22, 0.015, 0, 0.5, 0); }
+    // nav lights (red to port, green to starboard), a stern light and a little flag
+    const bz = HULL.z1 - 1.0;
+    part(g, SPH, glowM(0xff3a3a), hb(bz) + 0.02, hsheer(bz) + 0.04, bz, 0.06, 0.06, 0.08); part(g, SPH, glowM(0x3aff7a), -hb(bz) - 0.02, hsheer(bz) + 0.04, bz, 0.06, 0.06, 0.08);
+    part(g, CYL6, chrome, -0.85, hsheer(HULL.z0) + 0.5, HULL.z0 + 0.25, 0.02, 1.0, 0.02); part(g, SPH, glowM(0xfff6e0), -0.85, hsheer(HULL.z0) + 1.02, HULL.z0 + 0.25, 0.05, 0.05, 0.05);
+    const flag = new THREE.Group(); flag.position.set(-0.85, hsheer(HULL.z0) + 0.9, HULL.z0 + 0.25); g.add(flag); part(flag, BOX, L(P.stripe), 0, 0, -0.17, 0.01, 0.2, 0.32);
+    // the name, on both bows and across the transom
+    const nm = nameDecal("SEA CHOPPER", P.txt);
+    for (const s of [-1, 1]) {
+        const z = 1.5, dz = 0.1, ang = Math.atan2(hb(z + dz) - hb(z - dz), 2 * dz), y = hsheer(z) - 0.27;
+        const d = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.28), nm); d.position.set(s * (hb(z) + 0.035), y, z); d.rotation.y = s > 0 ? Math.PI / 2 + ang : -Math.PI / 2 - ang; g.add(d);
+    }
+    { const d = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.26), nm); d.position.set(0, 0.62, HULL.z0 - 0.012); d.rotation.y = Math.PI; g.add(d); }
+    g.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
+    g.userData = Object.assign(g.userData, { prop, eng, flag });
+    return g;
+}
+function repaintBoat() {
+    if (!B5.mesh) return;
+    const p = B5.mesh.position.clone(), r = B5.mesh.rotation.clone(), parent = B5.mesh.parent;
+    parent.remove(B5.mesh);
+    B5.mesh.traverse(o => { if (o.isMesh && o.geometry !== BOX && o.geometry !== SPH && o.geometry !== CYL6 && o.geometry !== CYL8) o.geometry.dispose(); });
+    const prevAdd = addTgt; addTgt = isle5G; B5.mesh = makeSpeedboat(); scene.add(B5.mesh); addTgt = prevAdd;
+    B5.mesh.position.copy(p); B5.mesh.rotation.copy(r);
+}
+// the hull's footprint: six points round the waterline (bow, stern, both sides fore and aft)
+const HULL_PTS = [[3.2, 0], [-2.8, 0], [0.6, 1.15], [0.6, -1.15], [-2.1, 1.1], [-2.1, -1.1]];
+function hullCount(x, z, yaw, lead = 0) {
+    const fx = Math.sin(yaw), fz = Math.cos(yaw); let n = 0, leadHit = false;
+    HULL_PTS.forEach(([a, s], i) => { const px = x + fx * a + fz * s, pz = z + fz * a - fx * s; if (wetH5(px, pz) > -0.85) { n++; if ((lead > 0 && i === 0) || (lead < 0 && i === 1)) leadHit = true; } });
+    return { n, leadHit };
 }
 function boatHome(fuelFloor = 0) {
     const D = HARBOR5, p = D.pt(D.LEN - 7, 4.2);
@@ -9985,16 +10339,21 @@ function boatHome(fuelFloor = 0) {
     save.boat.fuel = Math.max(save.boat.fuel, boatMaxFuel() * fuelFloor);
     placeBoat();
 }
+function boatTo(D) { // moored alongside a harbor dock
+    const p = D.pt(D.LEN - 7, 4.2);
+    B5.x = p.x; B5.z = p.z; B5.yaw = Math.atan2(D.DIR.x, D.DIR.z); B5.speed = 0; B5.docked = D.I.k;
+    placeBoat();
+}
 function placeBoat() { if (!B5.mesh) return; B5.mesh.position.set(B5.x, -0.32, B5.z); B5.mesh.rotation.set(0, B5.yaw, 0); }
 const seatPos = new THREE.Vector3();
-function boatSeat() { return seatPos.set(B5.x + Math.sin(B5.yaw) * -0.5, 1.95 + B5.mesh.position.y + 0.32, B5.z + Math.cos(B5.yaw) * -0.5); }
-// where you'd step out onto land (a dock or a beach) from where the boat is
+function boatSeat() { const lx = -0.5, lz = -0.55, c = Math.cos(B5.yaw), s = Math.sin(B5.yaw); return seatPos.set(B5.x + lx * c + lz * s, 1.62 + B5.mesh.position.y + 0.32, B5.z - lx * s + lz * c); }
+// where you'd step out onto land (a dock or a dry beach) from where the boat is
 function landingSpot() {
     let best = null, bd = 1e9;
-    for (let r = 2.5; r <= 11; r += 1.5) for (let k = 0; k < 16; k++) {
+    for (let r = 2.5; r <= 12; r += 1.5) for (let k = 0; k < 16; k++) {
         const a = (k / 16) * Math.PI * 2, x = B5.x + Math.cos(a) * r, z = B5.z + Math.sin(a) * r;
         const dock = onDock5(x, z), I = archAt(x, z), inside = archIn(I, x, z);
-        if (!(dock || inside > 4.5)) continue;
+        if (!(dock || (inside > 3.3 && archTerrain(I, x, z) > -0.15 && archTerrain(I, x, z) < 6 && slope5(x, z) < 1.1))) continue;
         if (r < bd) { bd = r; best = { x, z, I, dock }; }
     }
     return best;
@@ -10002,15 +10361,34 @@ function landingSpot() {
 function boatEnter() {
     if (B5.on) return;
     B5.on = true; B5.speed = 0; player.vel.set(0, 0, 0); mouseDown = false;
-    player.yaw = B5.yaw + Math.PI; player.pitch = -0.05;
+    player.yaw = B5.yaw + Math.PI; player.pitch = -0.08;
     sfx(90, 0.4, "sawtooth", 0.1, 1.6); setTimeout(() => sfx(70, 0.6, "sawtooth", 0.08, 1.3), 200);
     if (!save.boatTip) { save.boatTip = 1; toast("W / S throttle · A / D steer · Shift to boost (burns fuel fast) · F to get out next to land", "good"); toast("Watch your fuel! Run dry out at sea and you'll lose everything you're carrying.", "bad"); }
+}
+// stepping off: the boat swings broadside to the shore and is eased in as close as its hull allows
+function moorBoat(tx, tz) {
+    const dx = tx - B5.x, dz = tz - B5.z, d = Math.hypot(dx, dz); if (d < 0.1) return;
+    const ux = dx / d, uz = dz / d;
+    for (const yaw of [Math.atan2(-uz, ux), Math.atan2(uz, -ux)]) if (!hullCount(B5.x, B5.z, yaw).n) { B5.yaw = yaw; break; } // side-on to the beach, the way you'd tie up
+    let k = 0;
+    for (let s = 0.25; s < d - 1.6; s += 0.25) { if (hullCount(B5.x + ux * s, B5.z + uz * s, B5.yaw).n) break; k = s; }
+    B5.x += ux * k; B5.z += uz * k; placeBoat();
+}
+// can you climb aboard from here? close by, or facing it from the water's edge
+function canBoard() {
+    if (!B5.mesh) return false;
+    const dx = B5.x - player.pos.x, dz = B5.z - player.pos.z, d = Math.hypot(dx, dz);
+    if (d < 4.5) return true;
+    if (d > 11.5) return false;
+    const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+    return (dx * fx + dz * fz) / d > 0.55; // looking at it
 }
 function boatExit() {
     const s = landingSpot(); if (!s) { toast("Too far from land to get out. Get closer to a dock or a beach.", "bad"); return; }
     B5.on = false; B5.speed = 0; B5.strand = 0;
-    player.pos.set(s.x, groundY5(s.x, s.z) + 1.7, s.z); player.vel.set(0, 0, 0);
+    player.pos.set(s.x, groundY5(s.x, s.z) + 1.7, s.z); player.vel.set(0, 0, 0); clampLast5.ok = false;
     B5.docked = s.I.k;
+    moorBoat(s.x, s.z);
     sfx(140, 0.2, "square", 0.08, 0.5);
     if (s.I.k !== arch5) setArch5(s.I.k);
     writeSave();
@@ -10020,26 +10398,29 @@ function driveBoat(dt) {
     let thr = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 0.45 : 0);
     if (!can || panel) thr = 0;
     const boost = can && thr > 0 && (keys.ShiftLeft || keys.ShiftRight);
-    const target = thr * boatTop() * (boost ? 1.45 : 1);
+    const target = thr * boatTop() * (boost ? 1.45 : 1) * (race5.on ? 1.04 : 1);
     B5.speed += (target - B5.speed) * Math.min(1, (thr ? 0.7 : 0.35) * dt);
     const steer = panel ? 0 : (keys.KeyA ? 1 : 0) - (keys.KeyD ? 1 : 0), turn = steer * 1.05 * clamp(Math.abs(B5.speed) / 7, 0.2, 1) * (B5.speed < -0.2 ? -1 : 1) * dt;
+    B5.steer += (steer - B5.steer) * Math.min(1, dt * 6);
     B5.yaw += turn; player.yaw += turn;
     if (can && thr) save.boat.fuel = Math.max(0, fuel - Math.abs(thr) * (boost ? 6 : 2.8) * dt);
-    // move, unless that would beach us or hit a dock
+    // move, unless that would beach us or hit a dock or a rock (backing off a beach is always allowed)
     const fx = Math.sin(B5.yaw), fz = Math.cos(B5.yaw), nx = B5.x + fx * B5.speed * dt, nz = B5.z + fz * B5.speed * dt;
-    const bowX = nx + fx * 3.2 * Math.sign(B5.speed || 1), bowZ = nz + fz * 3.2 * Math.sign(B5.speed || 1);
-    const hit = landH5(bowX, bowZ) > -0.85 || landH5(nx + fz * 1.1, nz - fx * 1.1) > -0.85 || landH5(nx - fz * 1.1, nz + fx * 1.1) > -0.85;
-    if (hit) { if (Math.abs(B5.speed) > 4) { sfx(60, 0.3, "square", 0.14, 0.5); shake = Math.min(0.6, shake + Math.abs(B5.speed) * 0.03); } B5.speed *= -0.25; }
+    const now = hullCount(B5.x, B5.z, B5.yaw), next = hullCount(nx, nz, B5.yaw, Math.sign(B5.speed));
+    if (next.leadHit || next.n > now.n) { if (Math.abs(B5.speed) > 4) { sfx(60, 0.3, "square", 0.14, 0.5); shake = Math.min(0.6, shake + Math.abs(B5.speed) * 0.03); } B5.speed *= -0.25; }
     else if (Math.hypot(nx, nz) > 760) B5.speed *= -0.3;
     else { B5.x = nx; B5.z = nz; }
     // ride the swell
-    const bob = Math.sin(time * 1.3) * 0.07 + Math.sin(time * 2.1 + B5.x * 0.05) * 0.04;
-    B5.mesh.position.set(B5.x, -0.32 + bob, B5.z);
-    B5.mesh.rotation.set(-Math.min(0.12, Math.abs(B5.speed) * 0.006) + Math.sin(time * 1.7) * 0.02, B5.yaw, -turn * 4 + Math.sin(time * 1.1) * 0.025);
-    B5.mesh.userData.prop.rotation.z += B5.speed * dt * 4;
+    const bob = Math.sin(time * 1.3) * 0.07 + Math.sin(time * 2.1 + B5.x * 0.05) * 0.04, plane = Math.min(1, Math.abs(B5.speed) / 12);
+    B5.mesh.position.set(B5.x, -0.32 + bob + plane * 0.12, B5.z);
+    B5.mesh.rotation.set(-plane * 0.09 + Math.sin(time * 1.7) * 0.02 * (1 - plane * 0.5), B5.yaw, -turn * 4 + Math.sin(time * 1.1) * 0.025);
+    const U = B5.mesh.userData;
+    U.prop.rotation.z += B5.speed * dt * 4; U.eng.rotation.y = -B5.steer * 0.35;
+    if (U.wheel) U.wheel.rotation.z = B5.steer * 1.4; if (U.throttle) U.throttle.rotation.x = -thr * 0.7;
     player.pos.copy(boatSeat()); player.vel.set(0, 0, 0); player.onGround = true;
-    // wake and engine noise
-    if (Math.abs(B5.speed) > 2 && (B5.wakeT -= dt) <= 0) { B5.wakeT = 0.05; burst(V3(B5.x - fx * 2.8 + (Math.random() - 0.5), -0.3, B5.z - fz * 2.8 + (Math.random() - 0.5)), 1, 1.5, [wakeMat]); }
+    // wake, bow spray and engine noise
+    if (Math.abs(B5.speed) > 1.5 && (B5.wakeT -= dt) <= 0) { B5.wakeT = 0.05; wakeAt(B5.x - fx * 3.1, B5.z - fz * 3.1, B5.yaw, Math.abs(B5.speed)); }
+    if (Math.abs(B5.speed) > 7 && Math.random() < dt * 14) burst(V3(B5.x + fx * 2.6 + fz * (Math.random() < 0.5 ? 1 : -1), -0.2, B5.z + fz * 2.6 - fx * (Math.random() < 0.5 ? 1 : -1)), 2, 2.4, [wakeMat]);
     if ((B5.engT -= dt) <= 0 && can) { B5.engT = 0.11; sfx(55 + Math.abs(B5.speed) * 6 + (boost ? 30 : 0), 0.13, "sawtooth", 0.025 + Math.abs(thr) * 0.03, 1.05); }
     // fuel: warnings, then the sea
     const f = save.boat.fuel / boatMaxFuel();
@@ -10060,10 +10441,29 @@ function driveBoat(dt) {
     } else if (B5.strand) { B5.strand = 0; say(""); }
 }
 const wakeMat = new THREE.MeshBasicMaterial({ color: 0xe8f8ff, transparent: true, opacity: 0.8 });
+// the wake: foam quads that peel off both sides of the stern, spread and fade
+const wakes = [], wakeGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+function wakeAt(x, z, yaw, sp) {
+    for (const s of [-1, 1]) {
+        let w = wakes.find(q => q.life <= 0);
+        if (!w) { if (wakes.length > 90) continue; const m = new THREE.Mesh(wakeGeo, new THREE.MeshBasicMaterial({ color: 0xf4fcff, transparent: true, opacity: 0.6, depthWrite: false })); m.renderOrder = 2; scene.add(m); w = { m, life: 0 }; wakes.push(w); }
+        const px = Math.cos(yaw), pz = -Math.sin(yaw);
+        w.m.position.set(x + px * s * 0.9, -0.36, z + pz * s * 0.9); w.m.rotation.y = yaw; w.vx = px * s * (0.6 + sp * 0.08); w.vz = pz * s * (0.6 + sp * 0.08);
+        w.life = w.max = 1.6 + sp * 0.06; w.m.visible = true; w.s = 0.5 + sp * 0.04;
+    }
+}
+function updateWakes(dt) {
+    for (const w of wakes) if (w.life > 0) {
+        w.life -= dt; w.m.position.x += w.vx * dt; w.m.position.z += w.vz * dt; w.vx *= 1 - dt * 0.8; w.vz *= 1 - dt * 0.8;
+        const k = w.life / w.max; w.s += dt * 1.4; w.m.scale.set(w.s, 1, w.s * 1.6); w.m.material.opacity = 0.55 * k * k;
+        if (w.life <= 0) w.m.visible = false;
+    }
+}
 function loseAtSea() {
     say("");
     const lostN = Object.values(save.mats || {}).reduce((a, b) => a + (b || 0), 0);
     save.mats = {};
+    if (race5.on) endRace5(false);
     B5.on = false; B5.speed = 0; B5.strand = 0; B5.warned = 0;
     boatHome(0.3);
     endFishing(); player.hp = 0; state = "dead"; deadT = 0; save.deaths++; mouseDown = false; panel = null;
@@ -10074,15 +10474,20 @@ function loseAtSea() {
 }
 function boatRespawn() { // after any death on the Archipelago you wake at Port Haven; the harbor master tows your boat home
     if (arch5 !== "haven") setArch5("haven", true);
+    if (race5.on) endRace5(false);
     if (B5.docked !== "haven" || Math.hypot(B5.x - HARBOR5.B.x, B5.z - HARBOR5.B.z) > 40) { boatHome(0.3); toast("The harbor master towed your boat back to Port Haven.", ""); }
 }
 function refuel() {
     const need = boatMaxFuel() - save.boat.fuel;
     if (need < 0.5) { toast("The tank is already full.", ""); return; }
-    const price = fuelPrice(), afford = Math.floor(save.money / price), units = Math.min(need, afford);
-    if (units < 1) { toast(`Fuel costs ${money(price)} a unit. You can't afford any.`, "bad"); return; }
-    save.money -= Math.round(units * price); save.boat.fuel += units;
-    toast(units < need ? `Filled ${Math.round(units)} units (that's all you could afford). -${money(Math.round(units * price))}` : `Tank full! -${money(Math.round(units * price))}`, "cash");
+    const price = fuelPrice(), full = fillCost();
+    if (save.money >= full) { save.money -= full; save.boat.fuel = boatMaxFuel(); toast(`Tank full! -${money(full)}`, "cash"); }
+    else {
+        const units = Math.floor(save.money / price);
+        if (units < 1) { toast(`Fuel costs ${money(price)} a unit. You can't afford any.`, "bad"); return; }
+        save.money -= units * price; save.boat.fuel += units;
+        toast(`Filled ${units} units (that's all you could afford). -${money(units * price)}`, "cash");
+    }
     sfx(200, 0.6, "sine", 0.06, 2.4); writeSave();
 }
 function ringTow() {
@@ -10090,68 +10495,145 @@ function ringTow() {
     if (save.money < cost) { toast(`The harbor tow costs ${money(cost)}. You can't afford it.`, "bad"); return; }
     save.money -= cost;
     sfx(880, 1.2, "sine", 0.1, 1); setTimeout(() => sfx(880, 1.2, "sine", 0.08, 1), 600);
-    fadeTo(() => { boatHome(0.3); B5.on = false; const p = HARBOR5.pt(HARBOR5.LEN - 4); player.pos.set(p.x, 1.75, p.z); player.vel.set(0, 0, 0); setArch5("haven", true); });
+    fadeTo(() => { boatHome(0.3); B5.on = false; const p = HARBOR5.pt(HARBOR5.LEN - 4); player.pos.set(p.x, 1.75, p.z); player.vel.set(0, 0, 0); clampLast5.ok = false; setArch5("haven", true); });
     toast(`The harbor tow hauls you and your boat back to Port Haven. -${money(cost)}`, "");
 }
+// every harbor has a hail post: whistle and your boat is brought round to this dock
+const hailCost = () => Math.round(400 * rebirthMult());
+const boatNear = D => Math.hypot(B5.x - D.pt(D.LEN - 7, 4.2).x, B5.z - D.pt(D.LEN - 7, 4.2).z) < 14;
+function hailBoat(D) {
+    if (B5.on) return;
+    if (boatNear(D)) { toast("Your boat is already tied up right here.", ""); return; }
+    const far = Math.hypot(B5.x - D.B.x, B5.z - D.B.z) > 60, cost = far ? hailCost() : 0;
+    if (save.money < cost) { toast(`Bringing your boat round costs ${money(cost)}. You can't afford it.`, "bad"); return; }
+    save.money -= cost;
+    sfx(1400, 0.25, "sine", 0.08, 1.4); setTimeout(() => sfx(1700, 0.3, "sine", 0.07, 1.2), 220);
+    fadeTo(() => boatTo(D));
+    toast(cost ? `A harbor hand brings your boat round to ${D.I.name}. -${money(cost)}` : `You whistle, and your boat is brought round to the dock.`, "");
+}
 function boatItems() {
-    const m = rebirthMult(), lvl = k => save.boat[k] || 0;
+    const m = rebirthMult(), lvl = k => save.boat[k] || 0, full = fillCost();
     return [
+        { name: "Fill the Tank", desc: `Fuel is ${money(fuelPrice())} a unit. You have ${Math.round(save.boat.fuel)} / ${Math.round(boatMaxFuel())}`, cost: full, maxed: full <= 0, maxTxt: "TANK FULL", buy() { save.boat.fuel = boatMaxFuel(); } },
         { name: "Bigger Fuel Tank", desc: `+45% fuel capacity (${lvl("tank")}/5) · now ${Math.round(boatMaxFuel())} units`, cost: Math.round([6000, 18000, 50000, 130000, 320000][lvl("tank")] * m || 0), maxed: lvl("tank") >= 5, buy() { save.boat.tank++; save.boat.fuel = Math.min(boatMaxFuel(), save.boat.fuel + 40); } },
         { name: "Faster Engine", desc: `+13% top speed (${lvl("engine")}/5) · now ${boatTop().toFixed(1)} m/s`, cost: Math.round([8000, 24000, 65000, 160000, 400000][lvl("engine")] * m || 0), maxed: lvl("engine") >= 5, buy() { save.boat.engine++; } },
         { name: "Spare Fuel Can", desc: `Pours itself in the moment your tank runs dry: +25% fuel. Carry up to 3. You have ${lvl("cans")}`, cost: Math.round(4000 * m), maxed: lvl("cans") >= 3, buy() { save.boat.cans = lvl("cans") + 1; } },
-        { name: "Fill the Tank", desc: `Fuel is ${money(fuelPrice())} a unit. You have ${Math.round(save.boat.fuel)} / ${Math.round(boatMaxFuel())}`, sell: true, value: 0, buy() { refuel(); } }
+        { name: "Sea Rod", icon: "fish", desc: `A deep-sea fishing rod: wider catch zone, faster bites, rarer fish (${save.rodLvl || 0}/3). Fish off any dock, beach, or a stopped boat`, cost: Math.round([15000, 45000, 120000][save.rodLvl || 0] * m || 0), maxed: (save.rodLvl || 0) >= 3, buy() { save.rodLvl = (save.rodLvl || 0) + 1; } }
     ];
+}
+function paintItems() {
+    const got = save.boat.paints || ["classic"], cur = paintOf().k;
+    return PAINTS.map(P => {
+        const own = got.includes(P.k), locked = P.crew && (save.crewHauled || 0) < P.crew;
+        return { name: P.name, col: "#" + P.hull.toString(16).padStart(6, "0"), desc: locked ? `Your ghost crews haul ${P.crew.toLocaleString()} materials home to unlock it (${(save.crewHauled || 0).toLocaleString()} so far)` : `Hull, stripes and seats${cur === P.k ? " · ON YOUR BOAT" : own ? " · owned, click to paint" : ""}`,
+            cost: own ? 0 : P.cost, maxed: locked, maxTxt: "LOCKED", owned: own, paint: P.k,
+            buy() { save.boat.paints = [...new Set([...(save.boat.paints || ["classic"]), P.k])]; save.boat.paint = P.k; repaintBoat(); } };
+    });
 }
 
 // =========================== the islands (3D) ===========================
 const isle5G = new THREE.Group(); isle5G.visible = false; scene.add(isle5G);
-const isle5 = { waterGeo: null, terrain: {}, emit: [], fireLight: null, beam: null, lighthouse: null, boatArr: null, boatNext: null, labels: [], bells: [] };
+const isle5 = { waterGeo: null, terrain: {}, emit: [], fireLight: null, beam: null, lighthouse: null, boatArr: null, boatNext: null, labels: [], bells: [], falls: null, crates: {}, flags: {}, bottles: [], lamps: [], torches: [] };
 let isle5Built = false, ferryman5 = null, mapBg5 = null;
 const npcs5 = [];
-const ISLE_PAL = {
-    haven: (x, z, y, ny, inside, d, rn, c) => { if (inside < 12 && y < 1.6) c.setHSL(0.12, 0.5, 0.62 + rn * 0.06); else if (d < SAFE_R + 1) c.setHSL(0.09, 0.32, 0.32 + rn * 0.05); else if (ny < 0.8) c.setHSL(0.08, 0.2, 0.32 + rn * 0.06); else c.setHSL(0.3 + rn * 0.05, 0.48, 0.26 + rn * 0.06); },
-    coral: (x, z, y, ny, inside, d, rn, c) => { const v = fbm2(x * 0.08, z * 0.08, 2); if (v > 0.6 && inside > 10) c.setHSL(0.97, 0.45, 0.62 + rn * 0.05); else c.setHSL(0.11, 0.32, 0.78 + rn * 0.06); },
-    skull: (x, z, y, ny, inside, d, rn, c) => { if (inside < 10 && y < 1.4) c.setHSL(0.08, 0.06, 0.14 + rn * 0.04); else if (ny < 0.82 || y > 6) c.setHSL(0.07, 0.08, 0.24 + rn * 0.06 + Math.min(0.12, y * 0.006)); else c.setHSL(0.15, 0.25, 0.28 + rn * 0.05); },
-    frost: (x, z, y, ny, inside, d, rn, c) => { if (y > 7 || (y > 3 && ny > 0.8)) c.setHSL(0.58, 0.22, 0.72 + rn * 0.06); else if (ny < 0.8) c.setHSL(0.6, 0.12, 0.46 + rn * 0.06); else if (inside < 10) c.setHSL(0.58, 0.1, 0.62 + rn * 0.05); else c.setHSL(0.47, 0.22, 0.48 + rn * 0.05); },
-    storm: (x, z, y, ny, inside, d, rn, c) => { if (inside < 10 && y < 1.5) c.setHSL(0.7, 0.08, 0.2 + rn * 0.04); else if (ny < 0.8) c.setHSL(0.72, 0.14, 0.24 + rn * 0.05); else c.setHSL(0.76 + rn * 0.03, 0.34, 0.26 + rn * 0.05); }
-};
+const mkRng = s => () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+// each island's colours: sand, grass, rock, snow, heather; trails are packed earth
+function pal5(I, x, z, y, ny, inside, tr, rn, c) {
+    if (y < -0.55) { const k = clamp((-y - 0.55) / 5, 0, 1); if (I.k === "coral" && archIn(I, x, z) > 6) c.setHSL(lerp(0.13, 0.47, k), lerp(0.4, 0.55, k), lerp(0.74, 0.5, k)); else c.setHSL(lerp(0.12, 0.5, k), 0.3, lerp(0.55, 0.28, k)); return; }
+    const onTrail = tr.d < tr.w - 0.2 && y > 0.15, steep = ny < 0.74, f = fbm2(x * 0.07 + I.seed, z * 0.07, 2);
+    if (onTrail) { ({ haven: () => c.setHSL(0.08, 0.32, 0.36 + rn * 0.04), coral: () => c.setHSL(0.09, 0.32, 0.5 + rn * 0.04), skull: () => c.setHSL(0.07, 0.12, 0.31 + rn * 0.04), frost: () => c.setHSL(0.6, 0.22, 0.52 + rn * 0.04), storm: () => c.setHSL(0.08, 0.14, 0.33 + rn * 0.04) })[I.k](); return; }
+    const beach = inside < 11 && y < 1.6, wet = y < 0.08;
+    if (I.k === "haven") {
+        if (wet) c.setHSL(0.11, 0.42, 0.46 + rn * 0.04);
+        else if (beach) c.setHSL(0.115, 0.5, 0.55 + rn * 0.05);
+        else if (ny < 0.6) c.setHSL(0.08, 0.1, 0.36 + rn * 0.06 + Math.min(0.08, y * 0.003));
+        else if (steep) c.setHSL(0.22 + f * 0.05, 0.28, 0.3 + rn * 0.05);
+        else if (Math.hypot(x, z) < SAFE_R + 1) c.setHSL(0.09, 0.3, 0.35 + rn * 0.04);
+        else if (y > 21) c.setHSL(0.24 + f * 0.04, 0.36, 0.31 + rn * 0.05);
+        else { const jg = Math.exp(-((x - H5.jungle.x) ** 2 + (z - H5.jungle.z) ** 2) / 900); c.setHSL(0.27 + f * 0.07 + jg * 0.03, 0.5 + jg * 0.1, 0.27 + rn * 0.05 - jg * 0.06); }
+    } else if (I.k === "coral") {
+        if (Math.hypot(x - H5.islet.x, z - H5.islet.z) < 3.4 && y > 0.5) c.setHSL(0.27, 0.45, 0.32 + rn * 0.04); // the islet's patch of grass
+        else if (wet || (y < 0.3 && inside < 9)) c.setHSL(0.11, 0.44, 0.46 + rn * 0.04);
+        else if (steep) c.setHSL(0.1, 0.36, 0.5 + rn * 0.04);
+        else if (fbm2(x * 0.08, z * 0.08, 2) > 0.52 && inside > 12 && y > 0.9) c.setHSL(0.21 + rn * 0.03, 0.42, 0.36 + rn * 0.04);
+        else c.setHSL(0.115, 0.52, 0.56 + rn * 0.05);
+    } else if (I.k === "skull") {
+        if (beach || wet) c.setHSL(0.07, 0.06, 0.2 + rn * 0.04);
+        else if (steep) c.setHSL(0.05, 0.1, 0.2 + rn * 0.05 + Math.min(0.1, y * 0.004));
+        else if (f > 0.45) c.setHSL(0.13, 0.32, 0.28 + rn * 0.04);
+        else c.setHSL(0.07, 0.08, 0.26 + rn * 0.05);
+    } else if (I.k === "frost") {
+        if (y > 3.5 || (y > 1.2 && ny > 0.86 && f > 0.35)) c.setHSL(0.58, 0.3, 0.76 + rn * 0.05);
+        else if (steep) c.setHSL(0.6, 0.16, 0.46 + rn * 0.06);
+        else if (beach || wet) c.setHSL(0.6, 0.08, 0.46 + rn * 0.05);
+        else c.setHSL(0.2 + f * 0.06, 0.22, 0.42 + rn * 0.05); // pale tundra, too thin for grass
+    } else {
+        if (beach || wet) c.setHSL(0.7, 0.06, 0.28 + rn * 0.04);
+        else if (steep) c.setHSL(0.72, 0.1, 0.24 + rn * 0.05);
+        else if (f > 0.55) c.setHSL(0.79 + rn * 0.02, 0.34, 0.3 + rn * 0.04);
+        else if (y > 12) c.setHSL(0.26, 0.32, 0.26 + rn * 0.04);
+        else c.setHSL(0.22, 0.32, 0.3 + rn * 0.04);
+    }
+}
+// scatter helper: random spots on an island that pass a test (not on trails, pads or cliffs unless asked)
+function spots5(I, n, R, test, fn) {
+    let made = 0, guard = 0;
+    while (made < n && guard++ < n * 40) {
+        const a = R() * 6.283, d = Math.sqrt(R()) * (archR(I, a) - 3), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d;
+        const y = archTerrain(I, x, z), inside = archIn(I, x, z);
+        if (!test(x, z, y, inside)) continue;
+        fn(x, z, y, inside); made++;
+    }
+}
+const clearAt5 = (I, x, z, pad = 1.5) => { if (onDock5(x, z)) return false; for (const P of PADS5[I.k]) if (Math.hypot(x - P.x, z - P.z) < P.r + pad) return false; const tr = trailAt5(I, x, z); return tr.d > tr.w + pad; };
 function buildIsle5() {
     isle5Built = true; curBuild = 5;
     const prevAdd = addTgt; addTgt = isle5G;
     colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
-    // ----- the land: one terrain per island -----
+    const R = mkRng(5150), n0 = isle5G.children.length;
+    // ----- the land: one baked terrain per island -----
     for (const I of ARCH) {
-        const S = Math.ceil((I.r + 22) * 2), seg = Math.round(S / 1.6), g = new THREE.PlaneGeometry(S, S, seg, seg);
+        bakeArch(I);
+        const G = I.G, g = new THREE.PlaneGeometry(G.S, G.S, G.segs, G.segs);
         g.rotateX(-Math.PI / 2);
         const pos = g.attributes.position;
-        for (let i = 0; i < pos.count; i++) pos.setY(i, archTerrain(I, pos.getX(i) + I.x, pos.getZ(i) + I.z));
+        for (let i = 0; i < pos.count; i++) pos.setY(i, G.H[i]);
         g.computeVertexNormals();
-        const nor = g.attributes.normal, col = [], c = new THREE.Color();
+        const nor = g.attributes.normal, col = new Float32Array(pos.count * 3), c = new THREE.Color();
         for (let i = 0; i < pos.count; i++) {
-            const x = pos.getX(i) + I.x, z = pos.getZ(i) + I.z, y = pos.getY(i), inside = archIn(I, x, z), d = Math.hypot(x, z);
-            if (y < -0.5) c.setHSL(0.5, 0.35, 0.3 + Math.random() * 0.05); else ISLE_PAL[I.k](x, z, y, nor.getY(i), inside, d, Math.random(), c);
-            col.push(c.r, c.g, c.b);
+            const x = pos.getX(i) + I.x, z = pos.getZ(i) + I.z, y = pos.getY(i), inside = archIn(I, x, z);
+            pal5(I, x, z, y, nor.getY(i), inside, inside > -2 ? trailAt5(I, x, z) : { d: 99, w: 0 }, R(), c);
+            col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
         }
-        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-        const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })); m.position.set(I.x, 0, I.z); scene.add(m);
+        g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+        const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })); m.position.set(I.x, 0, I.z); m.receiveShadow = true; scene.add(m);
         isle5.terrain[I.k] = m;
         // a floating name over every island, readable from far across the water
-        const l = label(I.name, I.col, 4.6, 1.0); l.position.set(I.x, I.k === "frost" ? 40 : 26, I.z); l.maxD = 900; l.blurK = 0.18; l.base = I.name; isle5.labels.push({ l, I });
+        const top = I.k === "frost" ? H5.peakY + 16 : I.k === "skull" ? 50 : I.k === "storm" ? 34 : I.k === "haven" ? 46 : 22;
+        const l = label(I.name, I.col, 4.6, 1.0); l.position.set(I.x, top, I.z); l.maxD = 900; l.blurK = 0.18; l.base = I.name; isle5.labels.push({ l, I });
     }
     terrainMesh[5] = isle5.terrain.haven;
-    // ----- the sea: shallow turquoise round every island, deep blue between -----
+    // ----- the sea: shallow turquoise round every island and rock, deep blue between -----
     {
-        const wg = new THREE.PlaneGeometry(1600, 1600, 200, 200); wg.rotateX(-Math.PI / 2);
+        const wg = new THREE.PlaneGeometry(1600, 1600, 220, 220); wg.rotateX(-Math.PI / 2);
         const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x5ae8e0), mid = new THREE.Color(0x2f96c8), deep = new THREE.Color(0x0e3a6a);
-        for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), I = archAt(x, z), k = clamp(-archIn(I, x, z) / 46, 0, 1); cc.copy(shallow).lerp(mid, clamp(k * 2, 0, 1)).lerp(deep, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
+        for (let i = 0; i < wp.count; i++) {
+            const x = wp.getX(i), z = wp.getZ(i), I = archAt(x, z);
+            let k = clamp(-archIn(I, x, z) / 46, 0, 1);
+            for (const Rk of ROCKS5) k = Math.min(k, clamp((Math.hypot(x - Rk.x, z - Rk.z) - Rk.r) / 26, 0, 1));
+            if (I.k === "coral" && archIn(I, x, z) > 0) k = 0;
+            cc.copy(shallow).lerp(mid, clamp(k * 2, 0, 1)).lerp(deep, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b);
+        }
         wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3)); isle5.waterGeo = wg;
         const fp = [], idx = []; let base = 0;
-        for (const I of ARCH) { const N = Math.round(I.r * 3); for (let i = 0; i <= N; i++) { const th = (i / N) * Math.PI * 2, r = archR(I, th); fp.push(I.x + Math.cos(th) * (r - 3.5), -0.4, I.z + Math.sin(th) * (r - 3.5), I.x + Math.cos(th) * (r - 2.2), -0.4, I.z + Math.sin(th) * (r - 2.2)); if (i < N) { const a = base + i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } } base += (N + 1) * 2; }
+        const ring = (cx, cz, rf, N, w0, w1) => { for (let i = 0; i <= N; i++) { const th = (i / N) * Math.PI * 2, r = rf(th); fp.push(cx + Math.cos(th) * (r - w0), -0.4, cz + Math.sin(th) * (r - w0), cx + Math.cos(th) * (r - w1), -0.4, cz + Math.sin(th) * (r - w1)); if (i < N) { const a = base + i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } } base += (N + 1) * 2; };
+        for (const I of ARCH) ring(I.x, I.z, th => archR(I, th), Math.round(I.r * 3), 0.9, -0.8);
+        for (const Rk of ROCKS5) ring(Rk.x, Rk.z, () => Rk.r + 1.2, 28, 1.2, -0.2);
         const fg = new THREE.BufferGeometry(); fg.setAttribute("position", new THREE.Float32BufferAttribute(fp, 3)); fg.setIndex(idx);
         isle5.foam = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
         scene.add(isle5.foam);
     }
-    // ----- docks -----
+    // ----- docks: every harbor has a hail post (call your boat here) and a ghost crew's crate -----
     for (const D of DOCKS5) {
         const yaw = Math.atan2(D.DIR.x, D.DIR.z);
         const planks = batch(lamb(D.kind === "harbor" ? 0x8a6a4a : 0x6a5a4a)), posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(glowM(D.kind === "next" ? 0x9fe8ff : 0xffd890));
@@ -10172,7 +10654,13 @@ function buildIsle5() {
                 const bell = part(g, CONE6, lamb(0xd8a840), 0, 1.85, 0, 0.32, 0.5, 0.32); isle5.bells.push(bell);
                 const l = label("TOW BELL", "#ffd040", 2.2, 0.6); l.position.set(p.x, 3.0, p.z); l.maxD = 50;
             }
+            // the hail post: a pole with a horn and a pennant
+            const h = hailAt(D), hg = new THREE.Group(); hg.position.set(h.x, 0.3, h.z); hg.rotation.y = yaw; scene.add(hg);
+            part(hg, CYL6, lamb(0xf2f2f2), 0, 1.2, 0, 0.07, 2.4, 0.07); part(hg, CONE6, lamb(0xd8a840), 0, 2.15, 0.2, 0.12, 0.35, 0.12, Math.PI / 2); part(hg, BOX, lamb(0x2a8ac8), 0, 2.2, -0.2, 0.02, 0.3, 0.4);
+            const hl = label("BOAT HAIL", "#9fe8ff", 2.2, 0.55); hl.position.set(h.x, 3.0, h.z); hl.maxD = 40;
             const sl = label(D.I.name + " HARBOR", D.I.col, 3, 0.7); const sp = D.pt(3.5, 0, 4.2); sl.position.copy(sp); sl.maxD = 90;
+            // the ghost crew's crate (Port Haven's is at the Ghost Captain)
+            if (D.I.k !== "haven") { const cp = D.pt(2.2, -3.6); isle5.crates[D.I.k] = makeCrate5(cp.x, cp.z, yaw, D.I); }
         } else {
             const [a1, a2, c1] = D.kind === "arr" ? ["WELCOME TO", "PORT HAVEN", "#ffd890"] : ["REBIRTH 5", "COMING SOON", "#9fe8ff"];
             const s1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(a1, a2, c1) })); s1.position.copy(D.pt(3.5, 0, 3.3)); s1.rotation.y = D.kind === "arr" ? yaw : yaw + Math.PI; scene.add(s1);
@@ -10183,115 +10671,1148 @@ function buildIsle5() {
             if (D.kind === "arr") isle5.boatArr = b; else isle5.boatNext = b;
         }
     }
-    // ----- Port Haven: camp, stalls, shipwright, ferryman, lanterns -----
-    {
-        const stones = batch(lamb(0x6a6460)); for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); } stones.build();
-        const lg = batch(woodDark); for (let i = 0; i < 4; i++) lg.add(CYL6, 0, 0.25, -3, Math.PI / 2, i * 0.8, 0, 0.12, 1.3, 0.12); lg.build();
-        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.7, 6), glowM(0xff8a2a)); flame.position.set(0, 1.05, -3);
-        const core = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 5), glowM(0xffe070)); core.position.set(0, 0.72, -3);
-        scene.add(flame, core); fires.push({ flame, core, ph: srand() * 6 });
-        const fl = new THREE.PointLight(0xff9a40, 18, 18, 1.6); fl.position.set(0, 2, -3); scene.add(fl); isle5.fireLight = fl;
-        circles.push({ x: 0, z: -3, r: 1.3 }); isle5.emit.push({ x: 0, y: 2.0, z: -3, rate: 1.0, acc: 0.3 });
-        const cl = label("PORT HAVEN", "#ffd890", 3.4, 0.8); cl.position.set(0, 4.6, -3); cl.maxD = 90;
-        // a beach hut to sleep in
-        const g = new THREE.Group(); g.position.set(BED5.x, groundY5(BED5.x, BED5.z), BED5.z); g.rotation.y = Math.atan2(-BED5.x, -BED5.z);
-        for (const [x, z] of [[-1.5, -1.2], [1.5, -1.2], [-1.5, 1.0], [1.5, 1.0]]) part(g, CYL6, lamb(0x8a6a4a), x, 1.2, z, 0.1, 2.4, 0.1);
-        const thatch = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.4, 4), lamb(0xc8a860)); thatch.position.set(0, 3.0, -0.1); thatch.rotation.y = Math.PI / 4; g.add(thatch);
-        part(g, BOX, wood, 0, 0.35, -0.2, 1.4, 0.3, 2.3); part(g, BOX, lamb(0x2a8ab0), 0, 0.58, -0.55, 1.3, 0.14, 1.5); part(g, BOX, lamb(0xf0ece0), 0, 0.58, 0.7, 1.0, 0.14, 0.5);
-        scene.add(g); circles.push({ x: BED5.x, z: BED5.z, r: 1.6 });
-        const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(BED5.x, 3.6, BED5.z);
-        const gS = stall3(SMITH5, "THE SEA FORGE", "CRAFT AXES · GUNS", "#7ad8ff", 0x2a4a5a);
-        const smith = makeHumanoid({ face: "smith", skin: 0xc8946a, shirt: 0x2a4a6a, pants: 0x1a2a3a, apron: 0x3a2a1a, beard: 0x5a3a1a, hat: "cap", hatCol: 0x1a3a5a, wide: 1.25, belly: true });
-        smith.g.position.set(0, 0, -0.6); gS.add(smith.g); smith.yaw = gS.rotation.y; npcs5.push(smith);
-        const hm = new THREE.Group(); hm.position.set(0, -0.64, 0.05); smith.armR.add(hm); part(hm, BOX, lamb(0x6a4a2a), 0, 0, 0.22, 0.05, 0.05, 0.5); smith.hammer = part(hm, BOX, lamb(0x2a2a30), 0, 0, 0.48, 0.24, 0.13, 0.13);
-        const l1 = label("THE SEA FORGE", "#7ad8ff", 3.2, 0.8); l1.position.set(SMITH5.x, 6.2, SMITH5.z);
-        const gD = stall3(DEPOT5, "TRADING POST", "SELL MATERIALS", "#ffd040", 0x5a3a20);
-        const clerk = makeHumanoid({ face: "clerk", skin: 0x8a5a3a, shirt: 0xf0e8d8, vest: 0x1a6ab0, pants: 0x3a2a20, hair: 0x101010, hat: "cap", hatCol: 0xf0f0f0 });
-        clerk.g.position.set(0, 0, -0.6); gD.add(clerk.g); clerk.yaw = gD.rotation.y; npcs5.push(clerk);
-        const l2 = label("TRADING POST", "#ffd040", 3.6, 0.8); l2.position.set(DEPOT5.x, 6.2, DEPOT5.z);
-        const gW = stall3(WITCH5, "SEA WITCH", "BREWS · TONICS", "#7affd8", 0x1a4a4a);
-        const witch = makeHumanoid({ face: "witch", skin: 0x7ac8b0, shirt: 0x1a3a4a, pants: 0x1a2a2a, hair: 0x2a6a6a, hat: "witch", hatCol: 0x1a3a3a });
-        witch.g.position.set(0, 0, -0.6); gW.add(witch.g); witch.yaw = gW.rotation.y; npcs5.push(witch);
-        const l3 = label("SEA WITCH", "#7affd8", 3.2, 0.8); l3.position.set(WITCH5.x, 6.2, WITCH5.z);
-        // the shipwright's shed by the harbor
-        const sw = new THREE.Group(), sy = groundY5(SHIPWRIGHT.x, SHIPWRIGHT.z); sw.position.set(SHIPWRIGHT.x, sy, SHIPWRIGHT.z); sw.rotation.y = Math.atan2(HARBOR5.DIR.x, HARBOR5.DIR.z) + Math.PI / 2; scene.add(sw);
-        part(sw, BOX, lamb(0x8a6a4a), 0, 0.55, 0, 3.4, 1.1, 1.2); part(sw, BOX, lamb(0xd8c8a0), 0, 1.14, 0, 3.5, 0.08, 1.3);
-        for (const x of [-1.6, 1.6]) part(sw, CYL6, woodDark, x, 1.6, -0.5, 0.08, 3.2, 0.08);
-        const roof = new THREE.Mesh(new THREE.BoxGeometry(4, 0.14, 2.4), lamb(0x2a6a9a)); roof.position.set(0, 3.25, -0.2); roof.rotation.x = 0.15; sw.add(roof);
-        part(sw, CYL6, lamb(0xffb020), 1.2, 1.5, 0, 0.12, 0.6, 0.12, Math.PI / 2); // a life ring
-        const wright = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0xf2f2f2, pants: 0x1a2a4a, beard: 0xd8d0c0, hat: "cap", hatCol: 0x1a2a4a });
-        wright.g.position.set(0, 0, -0.9); sw.add(wright.g); wright.yaw = sw.rotation.y; npcs5.push(wright);
-        circles.push({ x: SHIPWRIGHT.x, z: SHIPWRIGHT.z, r: 1.8 });
-        const l4 = label("SHIPWRIGHT", "#9fe8ff", 3.2, 0.8); l4.position.set(SHIPWRIGHT.x, sy + 4.4, SHIPWRIGHT.z);
-        const l5 = label("boat upgrades · fuel cans", "#cfe8ff", 2.4, 0.5); l5.position.set(SHIPWRIGHT.x, sy + 3.6, SHIPWRIGHT.z); l5.maxD = 40;
-        // lanterns from camp to every dock
-        const lp = batch(woodDark), lgl = batch(glowM(0xffd890));
-        for (const D of DOCKS5.slice(0, 3)) { const land = Math.hypot(D.B.x, D.B.z); for (let s = 4, k = 0; s < land - 26; s += 9, k++) { const sd = k % 2 ? 3.2 : -3.2, x = D.B.x - D.DIR.x * s + D.PERP.x * sd, z = D.B.z - D.DIR.z * s + D.PERP.z * sd, y = groundY5(x, z); lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lgl.add(ICO, x, y + 2.5, z, 0, 0, 0, 0.18, 0.24, 0.18); } }
-        lp.build(); lgl.build();
-        // the Rebirth 5 ferryman (not sailing yet)
-        const yaw = Math.atan2(NEXT5.DIR.x, NEXT5.DIR.z);
-        ferryman5 = makeFerrymanFigure(0x1a2a3a, 0x3a7aaa, 0x9fe8ff); ferryman5.position.set(FERRYMAN5.x, 0.3, FERRYMAN5.z); ferryman5.rotation.y = yaw + Math.PI; scene.add(ferryman5);
-        const fm = label("FERRYMAN", "#9fe8ff", 2.6, 0.6); fm.position.set(FERRYMAN5.x, 4.7, FERRYMAN5.z); fm.maxD = 60;
+    buildHaven5(R); buildCoral5(R); buildSkull5(R); buildFrost5(R); buildStorm5(R); buildRocks5(R);
+    // treasure chests on every island
+    for (const I of ARCH) {
+        const nC = I.k === "haven" ? 4 : 3;
+        for (let i = 0; i < nC; i++) { let guard = 0; while (guard++ < 80) { const a = srand() * 6.283, d = srange(I.k === "haven" ? 34 : 8, archR(I, a) - 14), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (!archOK5(x, z, I)) continue; const c = makeChest(x, z, srand() * 6, I.k !== "haven" && i === 0); const y = archTerrain(I, x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; break; } }
     }
-    // ----- landmarks you can see from the water -----
-    {   // Storm Isle's lighthouse, with a sweeping beam
-        const I = ARCH_BY.storm, y = archTerrain(I, I.x, I.z), g = new THREE.Group(); g.position.set(I.x, y, I.z); scene.add(g);
-        part(g, CYL8, lamb(0xf2f2f2), 0, 5, 0, 2.2, 10, 2.2); part(g, CYL8, lamb(0xc8202a), 0, 3.3, 0, 2.25, 1.4, 2.25); part(g, CYL8, lamb(0xc8202a), 0, 7.2, 0, 2.05, 1.4, 2.05);
-        part(g, CYL8, lamb(0x2a2a30), 0, 10.4, 0, 2.4, 0.4, 2.4); part(g, CYL8, glowM(0xfff4c0), 0, 11.4, 0, 1.4, 1.6, 1.4); part(g, CONE6, lamb(0xc8202a), 0, 12.9, 0, 1.8, 1.4, 1.8);
-        const beam = new THREE.Mesh(new THREE.ConeGeometry(5, 70, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff4c0, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false }));
-        beam.rotation.z = Math.PI / 2; beam.position.set(35, 0, 0); const piv = new THREE.Group(); piv.position.set(0, 11.4, 0); piv.add(beam); g.add(piv); isle5.beam = piv;
-        circles.push({ x: I.x, z: I.z, r: 2.6 });
-    }
-    {   // Skull Rock: a huge stone skull glaring at the sea
-        const I = ARCH_BY.skull, y = archTerrain(I, I.x, I.z), g = new THREE.Group(); g.position.set(I.x, y - 2, I.z); g.rotation.y = Math.atan2(-I.x, -I.z); scene.add(g);
-        const bone = lamb(0xd8d0c0), dark = new THREE.MeshBasicMaterial({ color: 0x0a0806 });
-        part(g, SPH, bone, 0, 9, 0, 8, 7, 7); part(g, BOX, bone, 0, 3.6, 2.6, 7, 4, 5);
-        for (const s of [-1, 1]) part(g, SPH, dark, s * 2.8, 9.5, 5.2, 2, 2.4, 1.6);
-        part(g, CONE6, dark, 0, 6.5, 6.4, 1, 2, 0.8, Math.PI);
-        for (let i = 0; i < 6; i++) part(g, BOX, bone, -2.5 + i, 2.6, 5.15, 0.7, 1.4, 0.4);
-        const l = label("☠", "#ffd8a0", 2, 1); l.position.set(I.x, y + 22, I.z); l.maxD = 600;
-        // a wrecked pirate ship on the beach
-        const wd = archR(I, 0.6) - 9, wx = I.x + Math.cos(0.6) * wd, wz = I.z + Math.sin(0.6) * wd, wg = new THREE.Group(); wg.position.set(wx, archTerrain(I, wx, wz) - 0.6, wz); wg.rotation.set(0.25, 1.2, 0.18); scene.add(wg);
-        part(wg, BOX, lamb(0x4a2a1a), 0, 1, 0, 3.4, 2, 9); part(wg, CYL6, lamb(0x3a2214), 0, 5, 0.5, 0.18, 8, 0.18, 0.2); part(wg, BOX, lamb(0xd8d0c0), 0.3, 5.5, 0.5, 0.06, 3, 3.2);
-        circles.push({ x: wx, z: wz, r: 4.5 });
-    }
-    {   // Coral Key: a big pink coral arch
-        const I = ARCH_BY.coral, g = new THREE.Group(), y = archTerrain(I, I.x + 6, I.z - 4); g.position.set(I.x + 6, y, I.z - 4); scene.add(g);
-        const cm = lamb(0xff7a9a), cm2 = lamb(0xffb0c0);
-        for (let k = 0; k <= 12; k++) { const a = (k / 12) * Math.PI, x = Math.cos(a) * 6, yy = Math.sin(a) * 7; part(g, SPH, k % 2 ? cm : cm2, x, yy, 0, 1.4, 1.4, 1.4); }
-        for (let k = 0; k < 14; k++) { const a = srand() * 6.28, d = srange(3, 10); part(g, CONE6, k % 2 ? cm : lamb(0xffa060), Math.cos(a) * d, 0.8, Math.sin(a) * d, 0.3, srange(1.2, 2.6), 0.3); }
-        circles.push({ x: I.x + 0, z: I.z - 4, r: 1.6 }, { x: I.x + 12, z: I.z - 4, r: 1.6 });
-    }
-    {   // Frostcap: an ice spire on the summit
-        const I = ARCH_BY.frost, y = archTerrain(I, I.x, I.z);
-        const ice = new THREE.MeshLambertMaterial({ color: 0xbff0ff, emissive: 0x1a4a6a, transparent: true, opacity: 0.9, flatShading: true });
-        for (let k = 0; k < 7; k++) { const a = (k / 7) * 6.28, m = new THREE.Mesh(CONE6, ice); m.scale.set(0.9, srange(4, 9), 0.9); m.position.set(I.x + Math.cos(a) * 2, y + 2, I.z + Math.sin(a) * 2); m.rotation.set(Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3); scene.add(m); }
-        const m = new THREE.Mesh(CONE6, ice); m.scale.set(1.4, 14, 1.4); m.position.set(I.x, y + 6, I.z); scene.add(m);
-    }
-    // ----- scenery on every island -----
-    {
-        const rocks = batch(lamb(0x6a6460)), palmT = batch(lamb(0xa8885a)), palmL = batch(lamb(0x3aa04a)), shells = batch(glowM(0xffe8d8)), ice = batch(lamb(0xe8f6ff)), dead = batch(lamb(0x2a2420)), heather = batch(lamb(0x7a4a9a));
-        for (const I of ARCH) {
-            const spots = (n, fn, minIn = 12) => { let made = 0, guard = 0; while (made < n && guard++ < n * 30) { const a = srand() * 6.283, d = srand() * (archR(I, a) - minIn), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (!archOK5(x, z, I)) continue; fn(x, z, archTerrain(I, x, z)); made++; } };
-            const beach = (n, fn) => { for (let i = 0; i < n; i++) { const a = srand() * 6.283, d = archR(I, a) - srange(2, 9), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (onDock5(x, z)) continue; fn(x, z, Math.max(-0.3, archTerrain(I, x, z))); } };
-            spots(I.k === "skull" ? 50 : 22, (x, z, y) => { const s = srange(0.4, 1.4); rocks.add(ICO, x, y + s * 0.4, z, srand() * 3, srand() * 3, 0, s, s * srange(0.6, 1), s); if (s > 1.1) circles.push({ x, z, r: s * 0.85 }); });
-            beach(I.r * 0.8, (x, z, y) => shells.add(ICO, x, y + 0.06, z, srand(), srand() * 3, 0, 0.14, 0.08, 0.14));
-            if (I.k === "haven" || I.k === "coral") beach(I.k === "haven" ? 26 : 14, (x, z, y) => { const h = srange(5, 8), lean = srange(0.15, 0.35), dir = Math.atan2(z - I.z, x - I.x); palmT.add(CYL6, x + Math.cos(dir) * lean * h * 0.5, y + h / 2, z + Math.sin(dir) * lean * h * 0.5, Math.sin(dir) * -lean, 0, Math.cos(dir) * lean, 0.22, h, 0.22);
-                for (let k = 0; k < 6; k++) { const a = (k / 6) * 6.28; palmL.add(BOX, x + Math.cos(dir) * lean * h + Math.cos(a) * 1.3, y + h - 0.2, z + Math.sin(dir) * lean * h + Math.sin(a) * 1.3, 0, -a, 0.35, 2.6, 0.06, 0.6); } });
-            if (I.k === "frost") spots(40, (x, z, y) => ice.add(CONE6, x, y + 0.5, z, srand() * 0.4, 0, srand() * 0.4, 0.25, srange(0.8, 2), 0.25));
-            if (I.k === "skull") spots(30, (x, z, y) => dead.add(CYL6, x, y + 1.5, z, srange(-0.2, 0.2), 0, srange(-0.2, 0.2), 0.12, srange(2, 4), 0.12));
-            if (I.k === "storm") spots(60, (x, z, y) => heather.add(ICO, x, y + 0.15, z, 0, srand() * 3, 0, srange(0.3, 0.6), 0.25, srange(0.3, 0.6)));
-            // treasure chests on every island
-            const nC = I.k === "haven" ? 4 : 3;
-            for (let i = 0; i < nC; i++) { let guard = 0; while (guard++ < 60) { const a = srand() * 6.283, d = srange(I.k === "haven" ? 34 : 8, archR(I, a) - 14), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d; if (!archOK5(x, z, I)) continue; const c = makeChest(x, z, srand() * 6, I.k !== "haven" && i === 0); const y = archTerrain(I, x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; break; } }
-        }
-        rocks.build(); palmT.build(); palmL.build(); shells.build(); ice.build(); dead.build(); heather.build();
-    }
+    { const c = makeChest(H5.islet.x + 1.2, H5.islet.z - 0.6, 0.6, true), y = archTerrain(ARCH_BY.coral, H5.islet.x + 1.2, H5.islet.z - 0.6); c.g.position.y = y; c.beacon.position.y = y + 2.7; } // the lagoon islet's chest
+    buildBottles5(); buildFlags5(); buildRaceBuoy5();
+    freezeStatic5(n0);
     isle5.emit.forEach(e => smokeEmit.push(e));
     // your boat, waiting at the harbor
     B5.mesh = makeSpeedboat(); scene.add(B5.mesh);
     addTgt = prevAdd; curBuild = 1;
 }
+// ---- Port Haven: camp, stalls, shipwright, the Ghost Captain, Lookout Ridge and its falls, a fishing hamlet, jungle ----
+function buildHaven5(R) {
+    const I = ARCH_BY.haven;
+    const stones = batch(lamb(0x6a6460)); for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, 0.48, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); } stones.build();
+    const lg = batch(woodDark); for (let i = 0; i < 4; i++) lg.add(CYL6, 0, 0.55, -3, Math.PI / 2, i * 0.8, 0, 0.12, 1.3, 0.12); lg.build();
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.7, 6), glowM(0xff8a2a)); flame.position.set(0, 1.35, -3);
+    const core = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 5), glowM(0xffe070)); core.position.set(0, 1.02, -3);
+    scene.add(flame, core); fires.push({ flame, core, ph: srand() * 6 });
+    const fl = new THREE.PointLight(0xff9a40, 18, 18, 1.6); fl.position.set(0, 2.3, -3); scene.add(fl); isle5.fireLight = fl;
+    circles.push({ x: 0, z: -3, r: 1.3 }); isle5.emit.push({ x: 0, y: 2.3, z: -3, rate: 1.0, acc: 0.3 });
+    const cl = label("PORT HAVEN", "#ffd890", 3.4, 0.8); cl.position.set(0, 4.9, -3); cl.maxD = 90;
+    // a beach hut to sleep in
+    const g = new THREE.Group(); g.position.set(BED5.x, groundY5(BED5.x, BED5.z), BED5.z); g.rotation.y = Math.atan2(-BED5.x, -BED5.z);
+    for (const [x, z] of [[-1.5, -1.2], [1.5, -1.2], [-1.5, 1.0], [1.5, 1.0]]) part(g, CYL6, lamb(0x8a6a4a), x, 1.2, z, 0.1, 2.4, 0.1);
+    const thatch = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.4, 4), lamb(0xc8a860)); thatch.position.set(0, 3.0, -0.1); thatch.rotation.y = Math.PI / 4; g.add(thatch);
+    part(g, BOX, wood, 0, 0.35, -0.2, 1.4, 0.3, 2.3); part(g, BOX, lamb(0x2a8ab0), 0, 0.58, -0.55, 1.3, 0.14, 1.5); part(g, BOX, lamb(0xf0ece0), 0, 0.58, 0.7, 1.0, 0.14, 0.5);
+    scene.add(g); circles.push({ x: BED5.x, z: BED5.z, r: 1.6 });
+    const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(BED5.x, 3.9, BED5.z);
+    const stall = (at, a, b, col, roof) => { const s = stall3(at, a, b, col, roof); s.position.y = groundY5(at.x, at.z); return s; };
+    const gS = stall(SMITH5, "THE SEA FORGE", "CRAFT AXES · GUNS", "#7ad8ff", 0x2a4a5a);
+    const smith = makeHumanoid({ face: "smith", skin: 0xc8946a, shirt: 0x2a4a6a, pants: 0x1a2a3a, apron: 0x3a2a1a, beard: 0x5a3a1a, hat: "cap", hatCol: 0x1a3a5a, wide: 1.25, belly: true });
+    smith.g.position.set(0, 0, -0.6); gS.add(smith.g); smith.yaw = gS.rotation.y; npcs5.push(smith);
+    const hm = new THREE.Group(); hm.position.set(0, -0.64, 0.05); smith.armR.add(hm); part(hm, BOX, lamb(0x6a4a2a), 0, 0, 0.22, 0.05, 0.05, 0.5); smith.hammer = part(hm, BOX, lamb(0x2a2a30), 0, 0, 0.48, 0.24, 0.13, 0.13);
+    const l1 = label("THE SEA FORGE", "#7ad8ff", 3.2, 0.8); l1.position.set(SMITH5.x, 6.5, SMITH5.z);
+    const gD = stall(DEPOT5, "TRADING POST", "MATERIALS · FISH", "#ffd040", 0x5a3a20);
+    const clerk = makeHumanoid({ face: "clerk", skin: 0x8a5a3a, shirt: 0xf0e8d8, vest: 0x1a6ab0, pants: 0x3a2a20, hair: 0x101010, hat: "cap", hatCol: 0xf0f0f0 });
+    clerk.g.position.set(0, 0, -0.6); gD.add(clerk.g); clerk.yaw = gD.rotation.y; npcs5.push(clerk);
+    const l2 = label("TRADING POST", "#ffd040", 3.6, 0.8); l2.position.set(DEPOT5.x, 6.5, DEPOT5.z);
+    const gW = stall(WITCH5, "SEA WITCH", "BREWS · TONICS", "#7affd8", 0x1a4a4a);
+    const witch = makeHumanoid({ face: "witch", skin: 0x7ac8b0, shirt: 0x1a3a4a, pants: 0x1a2a2a, hair: 0x2a6a6a, hat: "witch", hatCol: 0x1a3a3a });
+    witch.g.position.set(0, 0, -0.6); gW.add(witch.g); witch.yaw = gW.rotation.y; npcs5.push(witch);
+    const l3 = label("SEA WITCH", "#7affd8", 3.2, 0.8); l3.position.set(WITCH5.x, 6.5, WITCH5.z);
+    // the shipwright's shed by the harbor
+    const sw = new THREE.Group(), sy = groundY5(SHIPWRIGHT.x, SHIPWRIGHT.z); sw.position.set(SHIPWRIGHT.x, sy, SHIPWRIGHT.z); sw.rotation.y = Math.atan2(HARBOR5.DIR.x, HARBOR5.DIR.z) + Math.PI / 2; scene.add(sw);
+    part(sw, BOX, lamb(0x8a6a4a), 0, 0.55, 0, 3.4, 1.1, 1.2); part(sw, BOX, lamb(0xd8c8a0), 0, 1.14, 0, 3.5, 0.08, 1.3);
+    for (const x of [-1.6, 1.6]) part(sw, CYL6, woodDark, x, 1.6, -0.5, 0.08, 3.2, 0.08);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(4, 0.14, 2.4), lamb(0x2a6a9a)); roof.position.set(0, 3.25, -0.2); roof.rotation.x = 0.15; sw.add(roof);
+    part(sw, CYL6, lamb(0xffb020), 1.2, 1.5, 0, 0.12, 0.6, 0.12, Math.PI / 2); // a life ring
+    for (let k = 0; k < 4; k++) part(sw, BOX, lamb([0xd0202a, 0x23a8aa, 0xff8a2a, 0x15171d][k]), -1.2 + k * 0.5, 1.6, -0.62, 0.36, 0.5, 0.06); // paint swatches
+    const wright = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0xf2f2f2, pants: 0x1a2a4a, beard: 0xd8d0c0, hat: "cap", hatCol: 0x1a2a4a });
+    wright.g.position.set(0, 0, -0.9); sw.add(wright.g); wright.yaw = sw.rotation.y; npcs5.push(wright);
+    circles.push({ x: SHIPWRIGHT.x, z: SHIPWRIGHT.z, r: 1.8 });
+    const l4 = label("SHIPWRIGHT", "#9fe8ff", 3.2, 0.8); l4.position.set(SHIPWRIGHT.x, sy + 4.4, SHIPWRIGHT.z);
+    const l5 = label("boat upgrades · paint · sea rod", "#cfe8ff", 2.4, 0.5); l5.position.set(SHIPWRIGHT.x, sy + 3.6, SHIPWRIGHT.z); l5.maxD = 40;
+    // the Ghost Captain: sends your ghost lumberjacks to work the other islands
+    { const cy = groundY5(CAPTAIN5.x, CAPTAIN5.z), cg = new THREE.Group(); cg.position.set(CAPTAIN5.x, cy, CAPTAIN5.z); cg.rotation.y = Math.atan2(HARBOR5.DIR.x, HARBOR5.DIR.z) - Math.PI / 2; scene.add(cg);
+      const cap = makeHumanoid({ face: "clerk", skin: 0x9fe8ff, shirt: 0x1a3a5a, pants: 0x1a2a3a, beard: 0xd8f4ff, hat: "cap", hatCol: 0x0a1a2a });
+      cap.g.traverse(o => { if (o.isMesh && !(o.material.map)) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.62; o.material.emissive = new THREE.Color(0x0a3a4a); o.material.depthWrite = false; } });
+      cap.g.position.set(0, 0.25, 0); cg.add(cap.g); cap.yaw = cg.rotation.y; npcs5.push(cap); isle5.captain = cap;
+      part(cg, CYL6, woodDark, 1.1, 1.1, -0.4, 0.06, 2.2, 0.06); const lamp = part(cg, ICO, glowM(0x9fe8ff), 1.1, 2.3, -0.4, 0.16); isle5.lamps.push(lamp);
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.1), new THREE.MeshBasicMaterial({ map: signTex("GHOST CREWS", "SEND THEM TO WORK", "#9fe8ff"), side: THREE.DoubleSide })); board.position.set(-1.4, 1.9, -0.5); cg.add(board);
+      part(cg, CYL6, woodDark, -2.5, 1, -0.5, 0.06, 2, 0.06); part(cg, CYL6, woodDark, -0.3, 1, -0.5, 0.06, 2, 0.06);
+      const cl2 = label("GHOST CAPTAIN", "#9fe8ff", 3.2, 0.8); cl2.position.set(CAPTAIN5.x, cy + 4.0, CAPTAIN5.z); cl2.maxD = 60;
+      circles.push({ x: CAPTAIN5.x, z: CAPTAIN5.z, r: 1.0 });
+      const cp = HARBOR5.pt(-0.5, -4.2); isle5.crates.haven = makeCrate5(cp.x, cp.z, 0, I); }
+    // lanterns from camp to every dock
+    const lp = batch(woodDark), lgl = batch(glowM(0xffd890));
+    for (const D of DOCKS5.slice(0, 3)) { const land = Math.hypot(D.B.x, D.B.z); for (let s = 4, k = 0; s < land - 26; s += 9, k++) { const sd = k % 2 ? 3.2 : -3.2, x = D.B.x - D.DIR.x * s + D.PERP.x * sd, z = D.B.z - D.DIR.z * s + D.PERP.z * sd, y = groundY5(x, z); lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lgl.add(ICO, x, y + 2.5, z, 0, 0, 0, 0.18, 0.24, 0.18); } }
+    // tiki torches up the Lookout trail
+    for (const [x, z, h] of TRAILS5.haven[0].pts) { const y = groundY5(x + 3, z + 1); lp.add(CYL6, x + 3, y + 0.9, z + 1, 0, 0, 0, 0.08, 1.8, 0.08); lgl.add(CONE6, x + 3, y + 2.0, z + 1, 0, 0, 0, 0.16, 0.4, 0.16); }
+    lp.build(); lgl.build();
+    // the Rebirth 5 ferryman (not sailing yet)
+    const yaw = Math.atan2(NEXT5.DIR.x, NEXT5.DIR.z);
+    ferryman5 = makeFerrymanFigure(0x1a2a3a, 0x3a7aaa, 0x9fe8ff); ferryman5.position.set(FERRYMAN5.x, 0.3, FERRYMAN5.z); ferryman5.rotation.y = yaw + Math.PI; scene.add(ferryman5);
+    const fm = label("FERRYMAN", "#9fe8ff", 2.6, 0.6); fm.position.set(FERRYMAN5.x, 4.7, FERRYMAN5.z); fm.maxD = 60;
+    // Lookout Point: a platform, a telescope and a flagpole on top of the ridge
+    { const y = H5.lookoutY, x = H5.lookout.x, z = H5.lookout.z, lgp = new THREE.Group(); lgp.position.set(x, y, z); scene.add(lgp);
+      part(lgp, BOX, lamb(0x8a6a4a), 0, 0.12, 0, 4.4, 0.18, 4.4); for (const [px, pz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) part(lgp, CYL6, woodDark, px, 0.6, pz, 0.08, 1.2, 0.08);
+      for (const [px, pz, sx, sz] of [[0, -2, 4, 0.08], [0, 2, 4, 0.08], [-2, 0, 0.08, 4]]) part(lgp, BOX, woodDark, px, 1.1, pz, sx, 0.08, sz);
+      const tel = new THREE.Group(); tel.position.set(1.2, 0.2, 0.4); lgp.add(tel); for (let k = 0; k < 3; k++) part(tel, CYL6, woodDark, Math.cos(k * 2.1) * 0.25, 0.55, Math.sin(k * 2.1) * 0.25, 0.03, 1.1, 0.03, Math.sin(k * 2.1) * 0.25, 0, -Math.cos(k * 2.1) * 0.25);
+      part(tel, CYL8, lamb(0xd8a840), 0, 1.2, 0, 0.09, 0.9, 0.09, 1.2, 0.6, 0);
+      const ll = label("LOOKOUT POINT", "#ffe080", 3, 0.7); ll.position.set(x, y + 4.2, z); ll.maxD = 140; }
+    // the falls: a cascade down the ridge into a pool, and the stream out to sea
+    {
+        const pts = [], dir = Math.atan2(H5.ridge.z - H5.pool.z, H5.ridge.x - H5.pool.x);
+        for (let s = H5.pool.r - 1; s < 40; s += 0.8) { const x = H5.pool.x + Math.cos(dir) * s, z = H5.pool.z + Math.sin(dir) * s, y = archTerrain(I, x, z); pts.push([x, y, z]); if (y > 13) break; }
+        const pos = [], uv = [], idx = [], px = -Math.sin(dir), pz = Math.cos(dir); let len = 0;
+        pts.forEach(([x, y, z], i) => { if (i) len += Math.hypot(x - pts[i - 1][0], y - pts[i - 1][1], z - pts[i - 1][2]); const w = 1.3 + (i / pts.length) * -0.4; pos.push(x + px * w, Math.max(y, -0.45) + 0.12, z + pz * w, x - px * w, Math.max(y, -0.45) + 0.12, z - pz * w); uv.push(0, len * 0.25, 1, len * 0.25); if (i) { const a = (i - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } });
+        const cv = document.createElement("canvas"); cv.width = 64; cv.height = 128; const gx = cv.getContext("2d"); gx.fillStyle = "#bfe9ff"; gx.fillRect(0, 0, 64, 128);
+        for (let k = 0; k < 70; k++) { gx.fillStyle = `rgba(255,255,255,${0.3 + Math.random() * 0.6})`; gx.fillRect(Math.random() * 64, Math.random() * 128, 2 + Math.random() * 3, 10 + Math.random() * 30); }
+        const tex = new THREE.CanvasTexture(cv); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.colorSpace = THREE.SRGBColorSpace;
+        const fg = new THREE.BufferGeometry(); fg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); fg.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2)); fg.setIndex(idx); fg.computeVertexNormals();
+        const fm2 = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide })); fm2.renderOrder = 3; scene.add(fm2);
+        isle5.falls = { tex, x: H5.pool.x + Math.cos(dir) * (H5.pool.r - 1), z: H5.pool.z + Math.sin(dir) * (H5.pool.r - 1), top: pts.at(-1) };
+        const fl2 = label("THE FALLS", "#7ae8ff", 2.6, 0.6); fl2.position.set(H5.pool.x, 5, H5.pool.z); fl2.maxD = 70;
+        const rocks = batch(lamb(0x6a6460)); for (let k = 0; k < 16; k++) { const a = (k / 16) * 6.283, r = H5.pool.r + R() * 1.5, x = H5.pool.x + Math.cos(a) * r, z = H5.pool.z + Math.sin(a) * r; rocks.add(ICO, x, archTerrain(I, x, z) + 0.2, z, R() * 3, R() * 3, 0, 0.5 + R() * 0.6, 0.4 + R() * 0.3, 0.5 + R() * 0.6); } rocks.build();
+    }
+    // a fishing hamlet near Arrivals: two huts, nets drying on poles, rowboats pulled up the sand
+    { const hut = (x, z, rot) => { const hg = new THREE.Group(), y = groundY5(x, z); hg.position.set(x, y, z); hg.rotation.y = rot; scene.add(hg);
+          part(hg, BOX, lamb(0xa88a5a), 0, 1.0, 0, 2.6, 2.0, 2.2); part(hg, BOX, lamb(0x3a2a1a), 0, 0.75, 1.11, 0.7, 1.5, 0.04); part(hg, BOX, lamb(0x6aa8c8), 0.85, 1.3, 1.11, 0.5, 0.45, 0.04);
+          const rf = new THREE.Mesh(new THREE.ConeGeometry(2.3, 1.3, 4), lamb(0xc8a860)); rf.position.y = 2.65; rf.rotation.y = Math.PI / 4; hg.add(rf); circles.push({ x, z, r: 1.7 }); };
+      const D = ARR5, a0 = Math.atan2(D.B.z, D.B.x);
+      for (const [da, dd, rot] of [[0.22, -12, 0.5], [-0.24, -10, -0.6]]) { const r = Math.hypot(D.B.x, D.B.z) + dd, x = Math.cos(a0 + da) * r, z = Math.sin(a0 + da) * r; hut(x, z, Math.atan2(-x, -z) + rot); }
+      const nets = batch(lamb(0x8a7a5a)), poles = batch(woodDark);
+      for (const da of [0.34, 0.42]) { const r = Math.hypot(D.B.x, D.B.z) - 2, x = Math.cos(a0 + da) * r, z = Math.sin(a0 + da) * r, y = groundY5(x, z), t = a0 + da + Math.PI / 2; poles.add(CYL6, x, y + 1, z, 0, 0, 0, 0.06, 2, 0.06); poles.add(CYL6, x + Math.cos(t) * 2.4, y + 1, z + Math.sin(t) * 2.4, 0, 0, 0, 0.06, 2, 0.06); nets.add(BOX, x + Math.cos(t) * 1.2, y + 1.35, z + Math.sin(t) * 1.2, 0, -t, 0, 2.4, 1.1, 0.02); }
+      nets.build(); poles.build();
+      for (const [da, c1] of [[-0.36, 0xd0402a], [-0.42, 0x2a8ac8]]) { const r = archR(I, a0 + da) - 4, x = Math.cos(a0 + da) * r, z = Math.sin(a0 + da) * r, rb = new THREE.Group(); rb.position.set(x, groundY5(x, z) + 0.2, z); rb.rotation.set(0.1, a0 + da + 0.4, 0.12); scene.add(rb);
+          part(rb, BOX, lamb(c1), 0, 0.2, 0, 1.2, 0.45, 3.2); part(rb, BOX, lamb(0x8a6a4a), 0, 0.35, 0, 1.0, 0.1, 3.0); part(rb, BOX, lamb(0x6a4a2a), 0, 0.5, 0.3, 1.1, 0.08, 0.3); part(rb, BOX, lamb(0x6a4a2a), 0.4, 0.5, -0.6, 0.06, 0.06, 2.2, 0, 0, 0.2); } }
+    decorIsle5(I, R);
+}
+// ---- Coral Key: the atoll, its lagoon and islet, the coral arch, the Beachcomber's hut, umbrellas and loungers ----
+function buildCoral5(R) {
+    const I = ARCH_BY.coral;
+    { const a = -0.6, p = polar(I, a, archR(I, a) - 17), g = new THREE.Group(), y = archTerrain(I, p.x, p.z); g.position.set(p.x, y - 0.4, p.z); g.rotation.y = a; scene.add(g);
+      const cm = lamb(0xff7a9a), cm2 = lamb(0xffb0c0);
+      for (let k = 0; k <= 12; k++) { const t = (k / 12) * Math.PI, x = Math.cos(t) * 6, yy = Math.sin(t) * 7; part(g, SPH, k % 2 ? cm : cm2, x, yy, 0, 1.4, 1.4, 1.4); }
+      for (let k = 0; k < 14; k++) { const t = R() * 6.28, d = 3 + R() * 7; part(g, CONE6, k % 2 ? cm : lamb(0xffa060), Math.cos(t) * d, 0.8, Math.sin(t) * d, 0.3, 1.2 + R() * 1.4, 0.3); }
+      for (const s of [-6, 6]) circles.push({ x: p.x + Math.cos(a) * s, z: p.z - Math.sin(a) * s, r: 1.6 });
+      const al = label("THE CORAL ARCH", "#ff8aa0", 2.8, 0.6); al.position.set(p.x, y + 9, p.z); al.maxD = 80; }
+    // the lagoon islet: one palm and a buried chest
+    palms5([[H5.islet.x - 1, archTerrain(I, H5.islet.x - 1, H5.islet.z + 0.5), H5.islet.z + 0.5, 6.5, 0.3]], R);
+    // the Beachcomber's hut by the harbor
+    { const D = harborOf(I), p = D.pt(-6, 7), y = groundY5(p.x, p.z), hg = new THREE.Group(); hg.position.set(p.x, y, p.z); hg.rotation.y = Math.atan2(D.DIR.x, D.DIR.z) + Math.PI; scene.add(hg);
+      for (const [x, z] of [[-1.6, -1.2], [1.6, -1.2], [-1.6, 1.2], [1.6, 1.2]]) part(hg, CYL6, lamb(0x8a6a4a), x, 1.3, z, 0.1, 2.6, 0.1);
+      const rf = new THREE.Mesh(new THREE.ConeGeometry(2.8, 1.5, 4), lamb(0xd8b870)); rf.position.y = 3.2; rf.rotation.y = Math.PI / 4; hg.add(rf);
+      part(hg, BOX, lamb(0x8a6a4a), 0, 0.5, 1.1, 3.2, 1.0, 0.3); // a counter of driftwood
+      for (let k = 0; k < 7; k++) part(hg, SPH, glowM([0x7affd8, 0xffd0e0, 0xfff0a0][k % 3]), -1.4 + k * 0.45, 1.08, 1.1, 0.12, 0.16, 0.12); // bottles and shells on the counter
+      const bess = makeHumanoid({ face: "clerk", skin: 0xc8946a, shirt: 0xff8aa0, pants: 0xf0e0c0, hair: 0xf0d080, hat: "cap", hatCol: 0xfff0d0 });
+      bess.g.position.set(0, 0, 0.2); hg.add(bess.g); bess.yaw = hg.rotation.y; npcs5.push(bess);
+      H5.bess = { x: p.x + Math.sin(hg.rotation.y) * 2.2, z: p.z + Math.cos(hg.rotation.y) * 2.2 };
+      circles.push({ x: p.x, z: p.z, r: 1.9 });
+      const bl = label("BEACHCOMBER BESS", "#ff8aa0", 3.2, 0.7); bl.position.set(p.x, y + 4.4, p.z); bl.maxD = 60; }
+    // umbrellas and loungers along the harbor beach
+    { const D = harborOf(I), cols = [0xff5a6a, 0x2ab0b0, 0xffd040, 0xf4f4f4];
+      for (let k = 0; k < 5; k++) { const a = D.th + (k - 2) * 0.09 + 0.25, r = archR(I, a) - 9, x = I.x + Math.cos(a) * r, z = I.z + Math.sin(a) * r, y = archTerrain(I, x, z); if (onDock5(x, z)) continue;
+          const ug = new THREE.Group(); ug.position.set(x, y, z); ug.rotation.y = R() * 6; scene.add(ug);
+          part(ug, CYL6, lamb(0xf4f4f4), 0, 1.2, 0, 0.04, 2.4, 0.04, 0.1); part(ug, CONE6, lamb(cols[k % 4]), 0.12, 2.4, 0, 1.5, 0.5, 1.5);
+          part(ug, BOX, lamb(0xf4f4f4), 1.1, 0.25, 0.4, 0.7, 0.08, 1.8); part(ug, BOX, lamb(cols[(k + 1) % 4]), 1.1, 0.33, 0.4, 0.66, 0.06, 1.7); part(ug, BOX, lamb(cols[(k + 1) % 4]), 1.1, 0.55, -0.45, 0.66, 0.5, 0.06, 0.6); } }
+    // coral gardens on the lagoon floor
+    { const cs = [0xff6a8a, 0xffa060, 0xb07aff, 0x5ae8ff, 0xffe070].map(c => batch(lamb(c)));
+      for (let k = 0; k < 140; k++) { const a = R() * 6.283, d = Math.sqrt(R()) * 24, x = H5.lagoon.x + Math.cos(a) * d, z = H5.lagoon.z + Math.sin(a) * d, y = archTerrain(I, x, z); if (y > -0.9) continue;
+          const b = cs[Math.floor(R() * cs.length)], kind = R(); if (kind < 0.5) for (let j = 0; j < 4; j++) b.add(CONE6, x + (R() - 0.5), y + 0.3, z + (R() - 0.5), (R() - 0.5) * 0.5, 0, (R() - 0.5) * 0.5, 0.1, 0.5 + R() * 0.6, 0.1); else b.add(SPH, x, y + 0.1, z, 0, R() * 3, 0, 0.4 + R() * 0.4, 0.25, 0.4 + R() * 0.4); }
+      cs.forEach(b => b.build()); }
+    decorIsle5(I, R);
+}
+// ---- Skull Rock: the skull on its crag, the pirate cove with its wreck, Captain Brine, cannons ----
+function buildSkull5(R) {
+    const I = ARCH_BY.skull;
+    { const y = archTerrain(I, H5.crag.x, H5.crag.z), g = new THREE.Group(); g.position.set(H5.crag.x, y - 2, H5.crag.z); g.rotation.y = Math.atan2(-I.x, -I.z); scene.add(g);
+      const bone = lamb(0xd8d0c0), dark = new THREE.MeshBasicMaterial({ color: 0x0a0806 });
+      part(g, SPH, bone, 0, 9, 0, 8, 7, 7); part(g, BOX, bone, 0, 3.6, 2.6, 7, 4, 5);
+      for (const s of [-1, 1]) { part(g, SPH, dark, s * 2.8, 9.5, 5.2, 2, 2.4, 1.6); part(g, ICO, glowM(0xff3a2a), s * 2.8, 9.3, 5.9, 0.35); }
+      part(g, CONE6, dark, 0, 6.5, 6.4, 1, 2, 0.8, Math.PI);
+      for (let i = 0; i < 6; i++) part(g, BOX, bone, -2.5 + i, 2.6, 5.15, 0.7, 1.4, 0.4);
+      circles.push({ x: H5.crag.x, z: H5.crag.z, r: 7.5 });
+      const l = label("☠", "#ffd8a0", 2, 1); l.position.set(H5.crag.x, y + 22, H5.crag.z); l.maxD = 600; }
+    // the cove: a wrecked pirate ship on the black sand, cannons, a camp
+    { const a = 0.62, wd = archR(I, a) - 7, wx = I.x + Math.cos(a) * wd, wz = I.z + Math.sin(a) * wd, wg = new THREE.Group(); wg.position.set(wx, archTerrain(I, wx, wz) - 0.7, wz); wg.rotation.set(0.22, a + 1.3, 0.2); scene.add(wg);
+      const hullW = lamb(0x4a2a1a), dk = lamb(0x3a2214);
+      part(wg, BOX, hullW, 0, 1.2, 0, 3.6, 2.4, 10); part(wg, CONE6, hullW, 0, 1.2, 5.9, 1.9, 2.4, 1.6, Math.PI / 2, 0, Math.PI / 4); part(wg, BOX, dk, 0, 2.45, 0, 3.4, 0.12, 9.6);
+      for (let k = 0; k < 5; k++) part(wg, BOX, dk, 1.81, 0.8 + (k % 2) * 0.5, -3.5 + k * 1.7, 0.05, 0.3, 1.2); // broken planking
+      part(wg, CYL6, dk, 0, 6, 0.5, 0.2, 8, 0.2, 0.25); part(wg, BOX, lamb(0xd8d0c0), 0.3, 6.5, 0.6, 0.06, 3.2, 3.4, 0.25); part(wg, BOX, lamb(0x101010), 0, 9.6, 1.4, 0.04, 0.9, 1.3, 0.25);
+      part(wg, BOX, dk, 0, 3.6, -4, 3.2, 2.2, 2.4); // the stern castle
+      circles.push({ x: wx, z: wz, r: 5 });
+      const wl = label("THE CRIMSON GULL", "#ff8a6a", 2.8, 0.6); wl.position.set(wx, wg.position.y + 7, wz); wl.maxD = 80;
+      const cg = new THREE.Group(), c = H5.cove, cy = groundY5(c.x, c.z); cg.position.set(c.x, cy, c.z); scene.add(cg);
+      for (let k = 0; k < 3; k++) { const t = a + (k - 1) * 0.5, cx2 = Math.cos(t) * 4.5, cz2 = Math.sin(t) * 4.5, cn = new THREE.Group(); cn.position.set(cx2, 0, cz2); cn.rotation.y = Math.atan2(Math.cos(a), Math.sin(a)); cg.add(cn);
+          part(cn, BOX, lamb(0x5a3a1a), 0, 0.3, 0, 0.8, 0.4, 1.2); part(cn, CYL8, lamb(0x1a1a1e), 0, 0.65, 0.25, 0.2, 1.6, 0.2, Math.PI / 2 - 0.15); for (const s of [-1, 1]) part(cn, CYL8, lamb(0x3a2a1a), s * 0.45, 0.3, 0, 0.3, 0.08, 0.3, 0, 0, Math.PI / 2); }
+      // Captain Brine: a ghost pirate who sells treasure maps
+      const brine = makeHumanoid({ face: "clerk", skin: 0x7affb0, shirt: 0x3a1a1a, pants: 0x1a1a1a, beard: 0x2a4a3a, hat: "cap", hatCol: 0x1a1a1a, wide: 1.1 });
+      brine.g.traverse(o => { if (o.isMesh && !(o.material.map)) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.7; o.material.emissive = new THREE.Color(0x0a3a1a); o.material.depthWrite = false; } });
+      part(brine.head, BOX, lamb(0x1a1a1a), 0, 0.36, 0, 0.9, 0.12, 0.3); part(brine.head, BOX, lamb(0xd8d0c0), 0, 0.38, 0.16, 0.18, 0.1, 0.02); // a tricorn and its skull badge
+      brine.g.position.set(-2.6, 0.15, -1.5); brine.g.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); cg.add(brine.g); brine.yaw = brine.g.rotation.y; npcs5.push(brine);
+      H5.brine = { x: c.x - 2.6, z: c.z - 1.5 };
+      const bl = label("CAPTAIN BRINE", "#7affb0", 3, 0.7); bl.position.set(c.x - 2.6, cy + 4.2, c.z - 1.5); bl.maxD = 60;
+      const fire = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.1, 6), glowM(0x7affb0)); fire.position.set(c.x + 1.5, cy + 0.6, c.z + 1.5); scene.add(fire); fires.push({ flame: fire, core: fire, ph: 2 });
+      const fl3 = new THREE.PointLight(0x7affb0, 10, 14, 1.6); fl3.position.set(c.x + 1.5, cy + 1.8, c.z + 1.5); scene.add(fl3);
+      const misc = batch(lamb(0x6a4a2a)); for (let k = 0; k < 9; k++) { const t = R() * 6.28, d = 5 + R() * 4, x = c.x + Math.cos(t) * d, z = c.z + Math.sin(t) * d; if (!clearAt5(I, x, z, 0)) continue; const y = groundY5(x, z); R() < 0.5 ? misc.add(CYL8, x, y + 0.45, z, 0, R(), 0, 0.38, 0.9, 0.38) : misc.add(BOX, x, y + 0.35, z, 0, R() * 3, 0, 0.7, 0.7, 0.7); } misc.build(); }
+    decorIsle5(I, R);
+}
+// ---- Frostcap: the frozen lake with its ice-fishing hole, the Hermit's igloo, the summit spire ----
+function buildFrost5(R) {
+    const I = ARCH_BY.frost;
+    { const ice = new THREE.Mesh(new THREE.CircleGeometry(12.5, 40).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x8fc8dc, emissive: 0x06202a, transparent: true, opacity: 0.88 })); ice.position.set(H5.lake.x, 0.34, H5.lake.z); scene.add(ice);
+      const cr = batch(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })); for (let k = 0; k < 18; k++) { const a = R() * 6.28, d = R() * 10, l = 1 + R() * 3; cr.add(BOX, H5.lake.x + Math.cos(a) * d, 0.36, H5.lake.z + Math.sin(a) * d, 0, R() * 3, 0, l, 0.01, 0.04); } cr.build();
+      H5.hole = { x: H5.lake.x + 3, z: H5.lake.z - 2 };
+      const hole = new THREE.Mesh(new THREE.CircleGeometry(0.75, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x0a2a3a })); hole.position.set(H5.hole.x, 0.37, H5.hole.z); scene.add(hole);
+      part(isle5G, CYL8, lamb(0x8a6a4a), H5.hole.x + 1.3, 0.6, H5.hole.z, 0.3, 0.5, 0.3); // a stool
+      const ll = label("ICE FISHING", "#bff4ff", 2.2, 0.55); ll.position.set(H5.hole.x, 2.2, H5.hole.z); ll.maxD = 40;
+      const lk = label("FROZEN LAKE", "#bff4ff", 2.6, 0.6); lk.position.set(H5.lake.x, 4, H5.lake.z); lk.maxD = 80; }
+    // the Hermit's igloo
+    { const a = Math.atan2(H5.lake.z - I.z, H5.lake.x - I.x) + 0.45, p = polar(I, a, 46), y = groundY5(p.x, p.z), ig = new THREE.Group(); ig.position.set(p.x, y - 0.1, p.z); ig.rotation.y = Math.atan2(H5.lake.x - p.x, H5.lake.z - p.z); scene.add(ig);
+      const snow = lamb(0xf4fbff); ig.add(new THREE.Mesh(new THREE.SphereGeometry(2.4, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), snow)); part(ig, CYL8, snow, 0, 0.7, 2.3, 0.9, 1.4, 1.2, Math.PI / 2); part(ig, CYL8, new THREE.MeshBasicMaterial({ color: 0x1a2a3a }), 0, 0.65, 2.95, 0.6, 0.05, 0.75, Math.PI / 2);
+      for (let r = 0; r < 4; r++) part(ig, TOR, lamb(0xd8eef8), 0, 0.5 + r * 0.55, 0, 2.38 - r * 0.25, 2.38 - r * 0.25, 0.25, Math.PI / 2);
+      const hermit = makeHumanoid({ face: "smith", skin: 0xe8c0a0, shirt: 0x7a4a2a, pants: 0x3a2a1a, beard: 0xf0f0f0, hat: "cap", hatCol: 0xd8d0c0, wide: 1.15, belly: true });
+      hermit.kind = "hermit"; hermit.g.position.set(1.6, 0, 3.3); ig.add(hermit.g); hermit.yaw = ig.rotation.y; npcs5.push(hermit);
+      H5.hermit = { x: p.x + Math.sin(ig.rotation.y) * 4.5 + Math.cos(ig.rotation.y) * 1.6, z: p.z + Math.cos(ig.rotation.y) * 4.5 - Math.sin(ig.rotation.y) * 1.6 };
+      circles.push({ x: p.x, z: p.z, r: 2.5 });
+      const sm = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 5), glowM(0xff9a40)); sm.position.set(p.x + Math.sin(ig.rotation.y) * 5.5, y + 0.3, p.z + Math.cos(ig.rotation.y) * 5.5); scene.add(sm); fires.push({ flame: sm, core: sm, ph: 1 });
+      const hl = label("THE HERMIT", "#bff4ff", 2.6, 0.6); hl.position.set(p.x, y + 4.4, p.z); hl.maxD = 60; }
+    // the summit's ice spire
+    { const p = TRAILS5.frost[0].pts.at(-1), y = H5.peakY, ice = new THREE.MeshLambertMaterial({ color: 0xbff0ff, emissive: 0x1a4a6a, transparent: true, opacity: 0.9, flatShading: true });
+      for (let k = 0; k < 7; k++) { const a = (k / 7) * 6.28, m = new THREE.Mesh(CONE6, ice); m.scale.set(0.7, 3 + R() * 4, 0.7); m.position.set(p[0] + Math.cos(a) * 3.2, y + 1.5, p[1] + Math.sin(a) * 3.2); m.rotation.set(Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3); scene.add(m); }
+      const m = new THREE.Mesh(CONE6, ice); m.scale.set(1.2, 11, 1.2); m.position.set(p[0] + 1.5, y + 5, p[1] - 1.5); scene.add(m); circles.push({ x: p[0] + 1.5, z: p[1] - 1.5, r: 1.2 });
+      const sl = label("FROSTCAP SUMMIT", "#e8fbff", 3, 0.7); sl.position.set(p[0], y + 6, p[1]); sl.maxD = 160; }
+    decorIsle5(I, R);
+}
+// ---- Storm Isle: the plateau, its lighthouse and keeper, the storm stones ----
+function buildStorm5(R) {
+    const I = ARCH_BY.storm;
+    { const y = archTerrain(I, H5.light.x, H5.light.z), g = new THREE.Group(); g.position.set(H5.light.x, y, H5.light.z); scene.add(g);
+      part(g, CYL8, lamb(0xf2f2f2), 0, 5, 0, 2.2, 10, 2.2); part(g, CYL8, lamb(0xc8202a), 0, 3.3, 0, 2.25, 1.4, 2.25); part(g, CYL8, lamb(0xc8202a), 0, 7.2, 0, 2.05, 1.4, 2.05);
+      part(g, CYL8, lamb(0x2a2a30), 0, 10.4, 0, 2.4, 0.4, 2.4); part(g, CYL8, glowM(0xfff4c0), 0, 11.4, 0, 1.4, 1.6, 1.4); part(g, CONE6, lamb(0xc8202a), 0, 12.9, 0, 1.8, 1.4, 1.8);
+      part(g, BOX, lamb(0x3a2a1a), 0, 0.9, 2.2, 0.9, 1.8, 0.1); // the door
+      const beam = new THREE.Mesh(new THREE.ConeGeometry(5, 70, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff4c0, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false }));
+      beam.rotation.z = Math.PI / 2; beam.position.set(35, 0, 0); const piv = new THREE.Group(); piv.position.set(0, 11.4, 0); piv.add(beam); g.add(piv); isle5.beam = piv;
+      circles.push({ x: H5.light.x, z: H5.light.z, r: 2.6 });
+      // the keeper's cottage, and the keeper
+      const a = Math.atan2(H5.light.z - I.z, H5.light.x - I.x), cx = H5.light.x - Math.cos(a) * 7 + Math.cos(a + 1.57) * 3, cz = H5.light.z - Math.sin(a) * 7 + Math.sin(a + 1.57) * 3, ch = new THREE.Group(); ch.position.set(cx, groundY5(cx, cz), cz); ch.rotation.y = a; scene.add(ch);
+      part(ch, BOX, lamb(0x8a8a94), 0, 1.1, 0, 3.4, 2.2, 2.8); const rf = new THREE.Mesh(new THREE.ConeGeometry(2.7, 1.4, 4), lamb(0x3a3a5a)); rf.position.y = 2.9; rf.rotation.y = Math.PI / 4; ch.add(rf);
+      part(ch, BOX, glowM(0xffd890), 1.71, 1.3, 0.5, 0.04, 0.5, 0.5); part(ch, CYL6, lamb(0x5a5a64), 0.9, 3.2, -0.6, 0.2, 1, 0.2); circles.push({ x: cx, z: cz, r: 2.2 });
+      const keeper = makeHumanoid({ face: "clerk", skin: 0xd8a888, shirt: 0x1a2a4a, pants: 0x2a2a30, beard: 0x8a8a8a, hat: "cap", hatCol: 0x1a1a2a });
+      const kx = cx + Math.cos(a) * 2.4, kz = cz + Math.sin(a) * 2.4; keeper.g.position.set(kx, groundY5(kx, kz), kz); keeper.g.rotation.y = a + Math.PI / 2; scene.add(keeper.g); keeper.yaw = keeper.g.rotation.y; npcs5.push(keeper);
+      H5.keeper = { x: kx, z: kz };
+      const kl = label("THE KEEPER", "#c8a0ff", 2.6, 0.6); kl.position.set(kx, groundY5(kx, kz) + 4, kz); kl.maxD = 60; }
+    // the storm stones: a ring of standing stones round a crackling heart
+    { const c = H5.circle, y = archTerrain(I, c.x, c.z), st = batch(lamb(0x5a5a6a));
+      for (let k = 0; k < 9; k++) { const a = (k / 9) * 6.283, x = c.x + Math.cos(a) * 6, z = c.z + Math.sin(a) * 6, h = 2.6 + R() * 1.4; st.add(BOX, x, y + h / 2 - 0.2, z, (R() - 0.5) * 0.1, -a, (R() - 0.5) * 0.12, 0.9, h, 0.5); circles.push({ x, z, r: 0.6 }); }
+      st.add(BOX, c.x, y + 0.45, c.z, 0, 0.4, 0, 2.2, 0.9, 1.3); st.build();
+      const heart = part(isle5G, OCTA, glowM(0xc8a0ff), c.x, y + 1.6, c.z, 0.5, 0.7, 0.5); isle5.stormHeart = heart; circles.push({ x: c.x, z: c.z, r: 1.4 });
+      const sl = label("THE STORM STONES", "#c8a0ff", 2.8, 0.6); sl.position.set(c.x, y + 5.4, c.z); sl.maxD = 80; }
+    decorIsle5(I, R);
+}
+// ---- out on the water: sea stacks, icebergs, Gull Rock's beacon, Turtle Bar, the Merrow's wreck ----
+function buildRocks5(R) {
+    const rock = batch(lamb(0x5a5450)), dark = batch(lamb(0x3a3430)), berg = batch(new THREE.MeshLambertMaterial({ color: 0xe8fbff, emissive: 0x1a3a4a, flatShading: true })), sand = batch(lamb(0xe8d8a8)), white = batch(lamb(0xf4f4f0));
+    for (const K of ROCKS5) {
+        if (K.kind === "stack") { for (let k = 0; k < 4; k++) (k % 2 ? dark : rock).add(CYL6, K.x + (R() - 0.5) * K.r * 0.4, K.h * (0.3 + k * 0.15) - 2, K.z + (R() - 0.5) * K.r * 0.4, (R() - 0.5) * 0.2, R() * 3, (R() - 0.5) * 0.2, K.r * (1 - k * 0.18), K.h * (0.7 - k * 0.1), K.r * (1 - k * 0.18)); white.add(ICO, K.x, K.h * 0.88, K.z, 0, R() * 3, 0, K.r * 0.45, 0.25, K.r * 0.45); }
+        else if (K.kind === "berg") { berg.add(ICO, K.x, K.h * 0.3, K.z, R(), R() * 3, R(), K.r, K.h, K.r * 0.85); berg.add(ICO, K.x + K.r * 0.4, K.h * 0.6, K.z - K.r * 0.2, R(), R() * 3, R(), K.r * 0.5, K.h * 0.7, K.r * 0.5); }
+        else if (K.kind === "gull") {
+            rock.add(ICO, K.x, 0.5, K.z, 0, R() * 3, 0, K.r, K.h, K.r * 0.9); rock.add(ICO, K.x + 3, 1, K.z - 2, 0, R() * 3, 0, K.r * 0.5, K.h * 0.8, K.r * 0.5); white.add(ICO, K.x - 1, K.h * 0.85, K.z + 1, 0, 0, 0, K.r * 0.5, 0.4, K.r * 0.5);
+            const g = new THREE.Group(); g.position.set(K.x, K.h * 0.95, K.z); scene.add(g); part(g, CYL8, lamb(0xf2f2f2), 0, 1.6, 0, 0.5, 3.2, 0.5); part(g, CYL8, lamb(0xc8202a), 0, 2.2, 0, 0.52, 0.6, 0.52); const lamp = part(g, ICO, glowM(0x7aff9a), 0, 3.5, 0, 0.35); isle5.lamps.push(lamp);
+        } else if (K.kind === "bar") {
+            sand.add(SPH, K.x, -0.35, K.z, 0, 0.6, 0, K.r, 1.2, K.r * 0.55);
+            palms5([[K.x - 4, 0.6, K.z + 1, 5, 0.3], [K.x + 3, 0.6, K.z - 1, 6.5, 0.3]], R);
+        } else if (K.kind === "wreck") {
+            const g = new THREE.Group(); g.position.set(K.x, -1.6, K.z); g.rotation.set(0.3, 0.8, -0.35); scene.add(g);
+            const hw = lamb(0x3a2418), dk = lamb(0x2a1a10);
+            part(g, BOX, hw, 0, 1.5, 0, 5, 4, 16); part(g, CONE6, hw, 0, 1.5, 9.4, 2.6, 4, 2.8, Math.PI / 2, 0, Math.PI / 4); part(g, BOX, dk, 0, 3.6, -5.5, 4.6, 3, 4);
+            part(g, CYL6, dk, 0, 8, 2, 0.28, 12, 0.28, 0.3); part(g, CYL6, dk, 0, 7, -3, 0.24, 9, 0.24, -0.2); part(g, BOX, lamb(0xc8c0a8), 0.4, 9, 2.6, 0.05, 4, 4.2, 0.3); part(g, BOX, dk, 0, 10.5, 3, 0.15, 0.15, 5, 0.3);
+            for (let k = 0; k < 6; k++) part(g, BOX, dk, 2.52, 0.6 + (k % 2) * 0.8, -6 + k * 2.3, 0.05, 0.6, 1.6);
+        }
+        if (K.name) { const l = label(K.name, K.kind === "wreck" ? "#ff8a6a" : K.kind === "bar" ? "#ffe0a0" : "#d8e8f0", 3, 0.7); l.position.set(K.x, K.h + 8, K.z); l.maxD = 260; }
+    }
+    rock.build(); dark.build(); berg.build(); sand.build(); white.build();
+}
+// a palm: a leaning, segmented trunk, a crown of drooping fronds and coconuts
+const palmSet = b => ({ tr: b("ptr", lamb(0x9a7a4a)), lf: b("plf", windy(lamb(0x3aa04a))), lf2: b("plf2", windy(lamb(0x2e8a3e))), nut: b("pnut", lamb(0x5a3a1a)) });
+function palm5(P, x, y, z, h, lean, R) {
+    const dir = R() * 6.28, dx = Math.cos(dir), dz = Math.sin(dir);
+    for (let k = 0; k < 6; k++) { const t = k / 6, t2 = (k + 1) / 6, bend = l => lean * h * l * l; P.tr.add(CYL6, x + dx * bend((t + t2) / 2), y + h * (t + t2) / 2, z + dz * bend((t + t2) / 2), dz * lean * t * 1.6, 0, -dx * lean * t * 1.6, 0.2 - k * 0.015, h / 6 + 0.05, 0.2 - k * 0.015); }
+    const tx = x + dx * lean * h, tz = z + dz * lean * h, ty = y + h;
+    for (let k = 0; k < 7; k++) { const a = (k / 7) * 6.28 + R(), c = Math.cos(a), s = Math.sin(a); (k % 2 ? P.lf : P.lf2).add(BOX, tx + c * 1.3, ty - 0.25, tz + s * 1.3, 0, -a, -0.35, 2.6, 0.05, 0.55); (k % 2 ? P.lf2 : P.lf).add(BOX, tx + c * 2.5, ty - 0.85, tz + s * 2.5, 0, -a, -0.75, 1.0, 0.05, 0.4); }
+    for (let k = 0; k < 3; k++) P.nut.add(SPH, tx + Math.cos(k * 2.1) * 0.25, ty - 0.3, tz + Math.sin(k * 2.1) * 0.25, 0, 0, 0, 0.16, 0.18, 0.16);
+}
+function palms5(list, R) { const B = {}, P = palmSet((k, m) => B[k] || (B[k] = batch(m))); for (const [x, y, z, h, lean] of list) palm5(P, x, y, z, h, lean, R); for (const k in B) B[k].build(); }
+// everything that grows or lies about on each island (merged: one mesh per material)
+function decorIsle5(I, R) {
+    const B = {}, b = (k, mat) => B[k] || (B[k] = batch(mat));
+    const land = (minIn = 6, maxSlope = 0.8, yMin = 0.25, yMax = 99) => (x, z, y, inside) => inside > minIn && y > yMin && y < yMax && slope5(x, z) < maxSlope && clearAt5(I, x, z) && !(I.k === "haven" && Math.hypot(x, z) < SAFE_R + 3) && Math.hypot(x - H5.casino.x, z - H5.casino.z) > 20;
+    const beach = (x, z, y, inside) => inside > 3.5 && inside < 12 && y > 0.05 && y < 1.4 && clearAt5(I, x, z);
+    const bush = (x, y, z, m, s = 1) => { for (let i = 0; i < 3; i++) { const k = (0.45 + R() * 0.35) * s; m.add(ICO, x + (R() - 0.5) * s, y + k * 0.6, z + (R() - 0.5) * s, 0, R() * 3, 0, k, k * 0.8, k); } };
+    const tufts = (x, y, z, m, n = 5, h = 0.7) => { for (let i = 0; i < n; i++) { const gx = x + (R() - 0.5) * 0.8, gz = z + (R() - 0.5) * 0.8; m.add(CONE6, gx, archTerrain(I, gx, gz) + h * 0.4, gz, (R() - 0.5) * 0.6, 0, (R() - 0.5) * 0.6, 0.05, (0.6 + R() * 0.4) * h, 0.05); } };
+    const rocks = (x, y, z, m, s = 1) => { const k = (0.4 + R()) * s; m.add(ICO, x, y + k * 0.3, z, R() * 3, R() * 3, 0, k, k * (0.6 + R() * 0.4), k); if (k > 1.1) circles.push({ x, z, r: k * 0.8 }); };
+    const shell = (x, y, z, m) => m.add(ICO, x, y + 0.05, z, R(), R() * 3, 0, 0.13, 0.07, 0.13);
+    const star = (x, y, z, m) => { const a0 = R() * 6; for (let k = 0; k < 5; k++) { const a = a0 + k * 1.2566; m.add(BOX, x + Math.cos(a) * 0.12, y + 0.04, z + Math.sin(a) * 0.12, 0, -a, 0, 0.26, 0.04, 0.08); } };
+    const log = (x, y, z, m) => { const ry = R() * 3.14, len = 2 + R() * 2; m.add(CYL8, x, y + 0.25, z, 0, ry, Math.PI / 2, 0.22, len, 0.22); };
+    const flowers = (x, y, z, heads, stem) => { for (let i = 0; i < 9; i++) { const fx = x + (R() - 0.5) * 3, fz = z + (R() - 0.5) * 3, fy = archTerrain(I, fx, fz); stem.add(CYL6, fx, fy + 0.25, fz, 0, 0, 0, 0.02, 0.5, 0.02); heads[Math.floor(R() * heads.length)].add(ICO, fx, fy + 0.52, fz, 0, R() * 3, 0, 0.14, 0.08, 0.14); } };
+    const fern = (x, y, z, m) => { for (let k = 0; k < 6; k++) { const a = (k / 6) * 6.28 + R(); m.add(BOX, x + Math.cos(a) * 0.45, y + 0.3, z + Math.sin(a) * 0.45, 0, -a, 0.55, 0.9, 0.03, 0.22); } };
+    const banana = (x, y, z, trunk, leaf) => { const h = 2 + R() * 1.2; trunk.add(CYL6, x, y + h / 2, z, 0, 0, 0, 0.14, h, 0.14); for (let k = 0; k < 5; k++) { const a = (k / 5) * 6.28 + R(); leaf.add(BOX, x + Math.cos(a) * 0.9, y + h + 0.1, z + Math.sin(a) * 0.9, 0, -a, 0.5, 1.9, 0.03, 0.55); } };
+    const deadTree = (x, y, z, m) => { const h = 2.5 + R() * 2.5; m.add(CYL6, x, y + h / 2, z, (R() - 0.5) * 0.25, 0, (R() - 0.5) * 0.25, 0.14, h, 0.14); for (let k = 0; k < 3; k++) { const a = R() * 6.28; m.add(CYL6, x + Math.cos(a) * 0.5, y + h * (0.55 + k * 0.12), z + Math.sin(a) * 0.5, Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9, 0.06, 1.2, 0.06); } };
+    const crystals = (x, y, z, m, s = 1) => { for (let i = 0; i < 5; i++) { const h = (0.5 + R()) * s; m.add(CONE6, x + (R() - 0.5) * 0.8, y + h * 0.4, z + (R() - 0.5) * 0.8, (R() - 0.5) * 0.9, R() * 3, (R() - 0.5) * 0.9, 0.13 * s, h, 0.13 * s); } };
+    const snowman = (x, y, z, snow, coal, carrot) => { snow.add(SPH, x, y + 0.45, z, 0, 0, 0, 0.55, 0.5, 0.55); snow.add(SPH, x, y + 1.15, z, 0, 0, 0, 0.4, 0.38, 0.4); snow.add(SPH, x, y + 1.7, z, 0, 0, 0, 0.28, 0.28, 0.28); const a = R() * 6.28; carrot.add(CONE6, x + Math.sin(a) * 0.3, y + 1.7, z + Math.cos(a) * 0.3, Math.PI / 2, a, 0, 0.05, 0.3, 0.05); for (const s of [-1, 1]) coal.add(ICO, x + Math.sin(a + s * 0.35) * 0.25, y + 1.8, z + Math.cos(a + s * 0.35) * 0.25, 0, 0, 0, 0.04); circles.push({ x, z, r: 0.6 }); };
+    const barrel = (x, y, z, m, hoop) => { m.add(CYL8, x, y + 0.45, z, 0, R(), 0, 0.38, 0.9, 0.38); hoop.add(CYL8, x, y + 0.25, z, 0, 0, 0, 0.4, 0.05, 0.4); hoop.add(CYL8, x, y + 0.65, z, 0, 0, 0, 0.4, 0.05, 0.4); };
+    const grave = (x, y, z, m) => { const ry = R() * 0.6 - 0.3; m.add(BOX, x, y + 0.6, z, 0, ry, (R() - 0.5) * 0.2, 0.12, 1.2, 0.12); m.add(BOX, x, y + 0.85, z, 0, ry, 0, 0.6, 0.12, 0.12); };
+    if (I.k === "haven") {
+        const P = palmSet(b);
+        spots5(I, 34, R, beach, (x, z, y) => palm5(P, x, y, z, 5 + R() * 3, 0.25 + R() * 0.15, R));
+        spots5(I, 24, R, land(14, 0.7), (x, z, y) => { palm5(P, x, y, z, 6 + R() * 3, 0.12, R); circles.push({ x, z, r: 0.4 }); });
+        const heads = [0xff3a4a, 0xff8ad0, 0xffd040, 0xffffff].map(c => b("fl" + c, lamb(c)));
+        spots5(I, 30, R, land(10), (x, z, y) => flowers(x, y, z, heads, b("stem", lamb(0x3a7a3a))));
+        spots5(I, 60, R, land(8), (x, z, y) => bush(x, y, z, b(R() < 0.5 ? "bush1" : "bush2", lamb(R() < 0.5 ? 0x2a7a3a : 0x3a8a2a)), 1 + R() * 0.6));
+        spots5(I, 40, R, land(10, 0.75), (x, z, y) => fern(x, y, z, b("fern", lamb(0x3a9a4a))));
+        spots5(I, 22, R, land(12, 0.6), (x, z, y) => banana(x, y, z, b("btr", lamb(0x7a8a3a)), b("bleaf", lamb(0x4ab04a))));
+        spots5(I, 40, R, (x, z, y, ins) => ins > 6 && y > 0.2 && clearAt5(I, x, z) && (slope5(x, z) > 0.6 || ins < 14), (x, z, y) => rocks(x, y, z, b("rock", lamb(0x6a6460))));
+        spots5(I, 50, R, beach, (x, z, y) => shell(x, y, z, b("shell", glowM(0xffe8d8))));
+        spots5(I, 10, R, beach, (x, z, y) => log(x, y, z, b("drift", lamb(0xb8a080))));
+        spots5(I, 120, R, land(8, 0.9), (x, z, y) => tufts(x, y, z, b("grass", lamb(0x5aa03a))));
+    } else if (I.k === "coral") {
+        const P = palmSet(b);
+        spots5(I, 30, R, (x, z, y, ins) => y > 0.4 && y < 3 && ins > 4 && clearAt5(I, x, z), (x, z, y) => { palm5(P, x, y, z, 5 + R() * 3.5, 0.2 + R() * 0.2, R); circles.push({ x, z, r: 0.4 }); });
+        spots5(I, 160, R, land(8, 0.9, 0.5), (x, z, y) => tufts(x, y, z, b("dune", lamb(0x9ab05a)), 6, 0.9));
+        spots5(I, 70, R, beach, (x, z, y) => shell(x, y, z, b("shell", glowM(0xffe0f0))));
+        spots5(I, 26, R, beach, (x, z, y) => star(x, y, z, b("star", lamb(R() < 0.5 ? 0xff7a3a : 0xff5a8a))));
+        spots5(I, 14, R, beach, (x, z, y) => log(x, y, z, b("drift", lamb(0xc8b090))));
+        spots5(I, 24, R, (x, z, y, ins) => ins > 4 && ins < 16 && y > -0.2 && y < 1 && clearAt5(I, x, z), (x, z, y) => crystals(x, y - 0.2, z, b("coral" + (R() < 0.5 ? 1 : 2), lamb(R() < 0.5 ? 0xff6a8a : 0xffa060)), 0.8));
+        // dune fences
+        spots5(I, 6, R, land(14, 0.5, 1), (x, z, y) => { const a = R() * 3; for (let k = -3; k <= 3; k++) { const fx = x + Math.cos(a) * k * 0.7, fz = z + Math.sin(a) * k * 0.7; b("fence", lamb(0xa88a6a)).add(BOX, fx, archTerrain(I, fx, fz) + 0.45, fz, (R() - 0.5) * 0.2, -a, 0, 0.06, 0.9, 0.08); } });
+    } else if (I.k === "skull") {
+        spots5(I, 70, R, (x, z, y, ins) => ins > 4 && y > 0.1 && clearAt5(I, x, z, 0.5), (x, z, y) => rocks(x, y, z, b("rock", lamb(0x3a3430)), 1.2));
+        spots5(I, 40, R, (x, z, y, ins) => ins > 4 && y > 0.1 && clearAt5(I, x, z, 0.5), (x, z, y) => crystals(x, y, z, b("jag", lamb(0x2a2420)), 2));
+        spots5(I, 26, R, land(8, 0.8), (x, z, y) => deadTree(x, y, z, b("dead", lamb(0x2a2420))));
+        spots5(I, 14, R, land(8, 0.6), (x, z, y) => { const bone = b("bone", lamb(0xe8e0cc)), ry = R() * 6.28; for (let i = 0; i < 5; i++) bone.add(BOX, x + Math.cos(ry) * (i - 2) * 0.35, y + 0.25, z - Math.sin(ry) * (i - 2) * 0.35, 0, ry, 0.7, 0.07, 0.7, 0.07); bone.add(ICO, x + Math.cos(ry) * 1.3, y + 0.22, z - Math.sin(ry) * 1.3, 0, ry, 0, 0.28, 0.24, 0.32); });
+        spots5(I, 12, R, land(8, 0.5), (x, z, y) => grave(x, y, z, b("grave", lamb(0x5a4a3a))));
+        spots5(I, 12, R, land(6, 0.5), (x, z, y) => barrel(x, y, z, b("barrel", lamb(0x6a4a2a)), b("hoop", lamb(0x2a2a2e))));
+        spots5(I, 50, R, land(8, 0.9), (x, z, y) => tufts(x, y, z, b("dry", lamb(0x8a7a3a)), 4, 0.6));
+        // lanterns on poles up Dead Man's Gulch
+        for (const [x, z] of TRAILS5.skull[0].pts) { const y = groundY5(x + 2.8, z); b("lpole", woodDark).add(CYL6, x + 2.8, y + 1.1, z, 0, 0, 0, 0.07, 2.2, 0.07); b("lglow", glowM(0x7affb0)).add(ICO, x + 2.8, y + 2.3, z, 0, 0, 0, 0.2, 0.26, 0.2); }
+    } else if (I.k === "frost") {
+        spots5(I, 50, R, land(6, 0.9), (x, z, y) => b("drift", lamb(0xf4fbff)).add(SPH, x, y - 0.1, z, 0, R() * 3, 0, 1 + R() * 1.6, 0.35 + R() * 0.3, 0.8 + R()));
+        spots5(I, 36, R, land(6, 0.9), (x, z, y) => crystals(x, y, z, b("ice", new THREE.MeshLambertMaterial({ color: 0xbff0ff, emissive: 0x1a4a6a, flatShading: true })), 1.2));
+        spots5(I, 30, R, land(6, 0.8, 0.25, 8), (x, z, y) => bush(x, y, z, b("fbush", lamb(0xc8e0e8)), 0.9));
+        spots5(I, 36, R, (x, z, y, ins) => ins > 5 && y > 0.2 && clearAt5(I, x, z, 0.5), (x, z, y) => { rocks(x, y, z, b("rock", lamb(0x6a7a8a)), 1.3); b("cap", lamb(0xf4fbff)).add(SPH, x, y + 0.7, z, 0, R() * 3, 0, 0.8, 0.25, 0.8); });
+        spots5(I, 5, R, land(10, 0.4, 0.25, 6), (x, z, y) => snowman(x, y, z, b("snow", lamb(0xf8fcff)), b("coal", lamb(0x1a1a1e)), b("carrot", lamb(0xff7a1a))));
+        spots5(I, 60, R, land(8, 0.9, 0.25, 4), (x, z, y) => tufts(x, y, z, b("tgrass", lamb(0x7a9a6a)), 4, 0.5));
+        // flags marking the summit trail
+        TRAILS5.frost[0].pts.forEach(([x, z], i) => { if (i % 3) return; const y = groundY5(x + 2.6, z); b("fpole", lamb(0x3a3a40)).add(CYL6, x + 2.6, y + 0.8, z, 0, 0, 0, 0.04, 1.6, 0.04); b("fflag", lamb(0xff5a3a)).add(BOX, x + 2.85, y + 1.45, z, 0, 0, 0, 0.5, 0.3, 0.02); });
+    } else {
+        spots5(I, 80, R, land(6, 0.9), (x, z, y) => bush(x, y, z, b("heather", lamb(0x8a4aa8)), 0.6));
+        spots5(I, 30, R, land(6, 0.9), (x, z, y) => { bush(x, y, z, b("gorse", lamb(0x4a6a2a)), 0.8); for (let k = 0; k < 5; k++) b("gflower", lamb(0xffd040)).add(ICO, x + (R() - 0.5) * 1.2, y + 0.6 + R() * 0.4, z + (R() - 0.5) * 1.2, 0, 0, 0, 0.07); });
+        spots5(I, 40, R, (x, z, y, ins) => ins > 5 && y > 0.2 && clearAt5(I, x, z, 0.5), (x, z, y) => rocks(x, y, z, b("rock", lamb(0x5a5a6a)), 1.2));
+        spots5(I, 18, R, land(6, 0.8), (x, z, y) => crystals(x, y, z, b("sglass", new THREE.MeshLambertMaterial({ color: 0x9a7aff, emissive: 0x3a1a8a, flatShading: true })), 1));
+        spots5(I, 12, R, land(10, 0.7), (x, z, y) => { const h = 1.8 + R() * 1.6; b("stone", lamb(0x6a6a7a)).add(BOX, x, y + h / 2 - 0.2, z, (R() - 0.5) * 0.2, R() * 3, (R() - 0.5) * 0.2, 0.7, h, 0.45); circles.push({ x, z, r: 0.5 }); });
+        spots5(I, 14, R, land(8, 0.8), (x, z, y) => deadTree(x, y, z, b("burnt", lamb(0x1a1418))));
+        spots5(I, 6, R, land(10, 0.5), (x, z, y) => { const a = R() * 3; for (let k = -3; k <= 3; k++) { const wx = x + Math.cos(a) * k * 0.9, wz = z + Math.sin(a) * k * 0.9; if (R() < 0.25) continue; b("wall", lamb(0x7a7a84)).add(BOX, wx, archTerrain(I, wx, wz) + 0.4, wz, 0, -a, 0, 0.95, 0.5 + R() * 0.5, 0.5); } });
+        spots5(I, 90, R, land(8, 0.9), (x, z, y) => tufts(x, y, z, b("moor", lamb(0x6a7a4a)), 4, 0.6));
+    }
+    for (const k in B) B[k].build();
+}
+// thousands of rocks, palms, posts and planks never move: work out where they are once, then stop walking them every frame
+function freezeStatic5(n0) {
+    const top = o => { while (o.parent && o.parent !== isle5G) o = o.parent; return o; }, dyn = new Set([ferryman5, isle5.boatArr, isle5.boatNext, isle5.stormHeart]);
+    for (const p of npcs5) dyn.add(top(p.g));
+    for (const k in isle5.flags) dyn.add(top(isle5.flags[k].g));
+    for (const k in isle5.crates) dyn.add(top(isle5.crates[k].g));
+    for (const l of isle5.lamps) dyn.add(top(l));
+    if (isle5.beam) dyn.add(top(isle5.beam));
+    for (const c of chests) dyn.add(top(c.g));
+    for (const f of fires) { dyn.add(top(f.flame)); dyn.add(top(f.core)); } // campfires flicker
+    for (const ch of isle5G.children.slice(n0)) if (!dyn.has(ch)) { ch.updateMatrixWorld(true); ch.matrixWorldAutoUpdate = false; }
+}
+// a ghost crew's crate: a spectral chest that fills up with whatever the crew chops
+function makeCrate5(x, z, rot, I) {
+    const y = groundY5(x, z), g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = rot; scene.add(g);
+    const m = new THREE.MeshLambertMaterial({ color: 0x5ab8d8, emissive: 0x0a3a4a, transparent: true, opacity: 0.85 });
+    part(g, BOX, m, 0, 0.45, 0, 1.4, 0.9, 1.0); part(g, BOX, lamb(0x1a3a4a), 0, 0.92, 0, 1.46, 0.08, 1.06);
+    for (const s of [-0.5, 0.5]) part(g, BOX, glowM(0x9fe8ff), s, 0.46, 0, 0.06, 0.92, 1.04);
+    const glow = part(g, ICO, aglow(0x9fe8ff, 0.35), 0, 1.1, 0, 0.4, 0.4, 0.4);
+    circles.push({ x, z, r: 0.9 });
+    const l = label("GHOST CREW CRATE", "#9fe8ff", 2.6, 0.6); l.position.set(x, y + 2.4, z); l.maxD = 40;
+    return { g, glow, l, x, z, I };
+}
+
+// =========================== Archipelago wildlife ===========================
+// every island has its own animals; none of them ever attack. Out at sea: whales, dolphin pods, gulls and flying fish
+const recolor = (g, map) => { g.traverse(o => { if (o.isMesh && map.has(o.material)) o.material = map.get(o.material); }); return g; };
+function makeTurtle() {
+    const g = new THREE.Group(), shell = amat(0x5a6a3a), scute = amat(0x3a4a26), skin = amat(0x8a9a6a), belly = amat(0xd8d0a0);
+    const body = pv(g, 0, 0.12, 0);
+    const dome = new THREE.Mesh(CAPG, shell); dome.scale.set(0.42, 0.24, 0.52); body.add(dome);
+    part(body, CYL8, belly, 0, 0, 0, 0.4, 0.04, 0.5);
+    for (let k = 0; k < 5; k++) part(body, SPH, scute, (k % 2 ? 0.12 : -0.12) * (k === 4 ? 0 : 1), 0.2, -0.24 + k * 0.12, 0.1, 0.04, 0.09);
+    const neck = pv(body, 0, 0.04, 0.48); part(neck, SPH, skin, 0, 0, 0.06, 0.07, 0.06, 0.1);
+    const head = pv(neck, 0, 0.02, 0.14); part(head, SPH, skin, 0, 0, 0.04, 0.09, 0.08, 0.11); aEyes(head, 0.06, 0.03, 0.08, 0.018, aglow(0x101010), false);
+    const fl = [-1, 1].map(s => { const p = pv(body, s * 0.36, 0.0, 0.26); part(p, BOX, skin, s * 0.16, 0, -0.04, 0.34, 0.04, 0.13, 0, s * 0.35, 0); return p; });
+    const bl = [-1, 1].map(s => { const p = pv(body, s * 0.3, 0.0, -0.38); part(p, BOX, skin, s * 0.08, 0, -0.04, 0.16, 0.035, 0.1, 0, -s * 0.4, 0); return p; });
+    part(body, CONE6, skin, 0, 0, -0.55, 0.03, 0.12, 0.03, -Math.PI / 2);
+    g.userData.rig = { body, neck, head, fl, bl };
+    return g;
+}
+function makeParrot() {
+    const pals = [[0xd8202a, 0xffd040, 0x2a6ad8], [0x2a9ad8, 0xffd040, 0x1a4a8a], [0x3ab04a, 0xff4a3a, 0x2a6ad8], [0xffd040, 0x3ab04a, 0x2a6ad8]], [c1, c2, c3] = pals[Math.floor(Math.random() * pals.length)];
+    const g = new THREE.Group(), m1 = amat(c1), m2 = amat(c2), m3 = amat(c3), beak = amat(0x2a2a2e), white = amat(0xf4f0e8), leg = amat(0x5a5a64);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, m1, 0, 0.3, -0.02, 0.11, 0.15, 0.13, -0.3); part(body, SPH, m1, 0, 0.22, 0.04, 0.09, 0.1, 0.09);
+    for (let k = 0; k < 3; k++) part(body, BOX, k === 1 ? m3 : m1, (k - 1) * 0.03, 0.12, -0.28 - k * 0.02, 0.035, 0.015, 0.34, 0.45); // long tail
+    const head = pv(body, 0, 0.44, 0.06);
+    part(head, SPH, m1, 0, 0.02, 0, 0.08, 0.08, 0.085); part(head, SPH, white, 0, 0.0, 0.06, 0.055, 0.05, 0.03);
+    part(head, CONE6, beak, 0, -0.02, 0.1, 0.032, 0.09, 0.04, Math.PI / 2 + 0.6); part(head, SPH, beak, 0, -0.04, 0.08, 0.03, 0.035, 0.03);
+    aEyes(head, 0.05, 0.03, 0.05, 0.015, aglow(0x101010), true);
+    const legs = [-1, 1].map(s => ({ p: aLeg(g, s * 0.04, 0.12, 0.02, 0.11, 0.012, leg, leg, 0.04), ph: s > 0 ? Math.PI : 0 }));
+    const wings = [-1, 1].map(s => { const sh = pv(body, s * 0.09, 0.33, 0.02); part(sh, BOX, m1, s * 0.13, 0, 0, 0.26, 0.025, 0.2); const el = pv(sh, s * 0.25, 0, 0); part(el, BOX, m2, s * 0.1, 0, -0.02, 0.2, 0.02, 0.17); part(el, BOX, m3, s * 0.22, 0, -0.05, 0.12, 0.015, 0.12); return { sh, el, s }; });
+    g.userData.rig = { body, head, legs, wings2: wings, stride: 8, swing: 0.6 };
+    return g;
+}
+function makeFlamingo() {
+    const g = new THREE.Group(), pink = amat(0xff8aa8), deep = amat(0xff5a8a), blk = amat(0x1a1a1e), leg = amat(0xff9ab0);
+    const body = pv(g, 0, 1.0, 0);
+    part(body, SPH, pink, 0, 0, 0, 0.2, 0.17, 0.32); part(body, BOX, deep, 0, 0.05, -0.32, 0.18, 0.06, 0.2, -0.3);
+    for (const s of [-1, 1]) part(body, SPH, deep, s * 0.15, 0.04, -0.04, 0.06, 0.12, 0.26);
+    const n0 = pv(body, 0, 0.1, 0.25, -0.5); part(n0, CYL6, pink, 0, 0.17, 0, 0.04, 0.34, 0.04);
+    const n1 = pv(n0, 0, 0.34, 0, 0.7); part(n1, CYL6, pink, 0, 0.17, 0, 0.035, 0.34, 0.035);
+    const head = pv(n1, 0, 0.34, 0, -0.2); part(head, SPH, pink, 0, 0.03, 0.02, 0.06, 0.06, 0.08);
+    part(head, CONE6, amat(0xf4e8e0), 0, -0.01, 0.11, 0.025, 0.1, 0.025, Math.PI / 2 + 0.5); part(head, CONE6, blk, 0, -0.06, 0.15, 0.02, 0.06, 0.02, Math.PI - 0.2);
+    aEyes(head, 0.04, 0.04, 0.04, 0.012, aglow(0xffe040), false);
+    const legs = [-1, 1].map(s => { const p = pv(body, s * 0.07, -0.1, 0); part(p, CYL6, leg, 0, -0.45, 0, 0.014, 0.9, 0.014); const shin = pv(p, 0, -0.9, 0); part(shin, BOX, leg, 0, -0.01, 0.05, 0.05, 0.015, 0.12); return { p, shin, s }; });
+    g.userData.rig = { body, n0, n1, head, legs };
+    return g;
+}
+function makePenguin() {
+    const g = new THREE.Group(), blk = amat(0x1a1c24), wht = amat(0xf4f6fa), org = amat(0xff9a2a), yel = amat(0xffd040);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, blk, 0, 0.32, -0.02, 0.2, 0.3, 0.18); part(body, SPH, wht, 0, 0.3, 0.06, 0.16, 0.26, 0.14);
+    const head = pv(body, 0, 0.62, 0.02); part(head, SPH, blk, 0, 0.04, 0, 0.13, 0.12, 0.13); for (const s of [-1, 1]) part(head, SPH, yel, s * 0.08, 0.04, 0.04, 0.03, 0.05, 0.05);
+    part(head, CONE6, org, 0, 0.0, 0.15, 0.03, 0.1, 0.03, Math.PI / 2); const eyes = aEyes(head, 0.05, 0.06, 0.1, 0.018);
+    const fl = [-1, 1].map(s => { const p = pv(body, s * 0.19, 0.42, 0); part(p, BOX, blk, s * 0.02, -0.12, 0, 0.04, 0.26, 0.1, 0, 0, s * 0.15); return p; });
+    const feet = [-1, 1].map(s => { const p = pv(g, s * 0.07, 0.03, 0.04); part(p, BOX, org, 0, 0, 0.04, 0.08, 0.03, 0.12); return p; });
+    g.userData.rig = { body, head, fl, feet, eyes };
+    return g;
+}
+function makeSeal() {
+    const g = new THREE.Group(), fur = amat([0x8a8a92, 0x6a6a74, 0xa8a49c][Math.floor(Math.random() * 3)]), spot = amat(0x4a4a54), dk = amat(0x2a2a30);
+    const root = pv(g, 0, 0.2, 0);
+    const s0 = pv(root, 0, 0, 0.1); part(s0, SPH, fur, 0, 0, 0, 0.26, 0.22, 0.36);
+    for (let k = 0; k < 4; k++) part(s0, SPH, spot, (k % 2 ? 0.12 : -0.1), 0.17, -0.2 + k * 0.12, 0.05, 0.02, 0.05);
+    const neck = pv(s0, 0, 0.05, 0.3, -0.3); part(neck, SPH, fur, 0, 0.08, 0.06, 0.16, 0.16, 0.16);
+    const head = pv(neck, 0, 0.18, 0.12, 0.3); part(head, SPH, fur, 0, 0, 0.02, 0.14, 0.13, 0.15); part(head, SPH, fur, 0, -0.03, 0.13, 0.08, 0.07, 0.07);
+    part(head, BOX, dk, 0, -0.02, 0.2, 0.04, 0.03, 0.02); for (const s of [-1, 1]) for (let k = 0; k < 3; k++) part(head, BOX, aglow(0xf0f0f0), s * 0.09, -0.04 - k * 0.012, 0.16, 0.1, 0.004, 0.004, 0, s * 0.3, s * (k - 1) * 0.15);
+    const eyes = aEyes(head, 0.06, 0.04, 0.1, 0.025);
+    const s1 = pv(s0, 0, -0.02, -0.34); part(s1, SPH, fur, 0, 0, -0.12, 0.2, 0.16, 0.26);
+    const s2 = pv(s1, 0, -0.04, -0.34); part(s2, SPH, fur, 0, 0, -0.06, 0.1, 0.08, 0.14); for (const s of [-1, 1]) part(s2, BOX, dk, s * 0.08, -0.02, -0.2, 0.14, 0.02, 0.16, 0, s * 0.4, 0);
+    const fl = [-1, 1].map(s => { const p = pv(s0, s * 0.22, -0.12, 0.12); part(p, BOX, dk, s * 0.08, -0.03, 0.02, 0.18, 0.03, 0.1, 0, 0, s * 0.3); return p; });
+    g.userData.rig = { root, chain: [s0, s1, s2], neck, head, fl, eyes };
+    return g;
+}
+function makeMonkey() {
+    const g = new THREE.Group(), fur = amat(0x6a4a2a), face = amat(0xe0b890), dk = amat(0x2a1a10);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, fur, 0, 0.42, 0, 0.16, 0.2, 0.22); part(body, SPH, face, 0, 0.4, 0.1, 0.1, 0.12, 0.1);
+    const neck = pv(body, 0, 0.52, 0.18, 0.2);
+    const head = pv(neck, 0, 0.12, 0.04, -0.2); part(head, SPH, fur, 0, 0.02, 0, 0.13, 0.12, 0.12); part(head, SPH, face, 0, -0.01, 0.07, 0.09, 0.08, 0.07);
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.13, 0.02, 0, 0, 0, 0); e.userData.rz0 = 0; part(e, SPH, face, s * 0.02, 0, 0, 0.04, 0.05, 0.02); return e; });
+    const eyes = aEyes(head, 0.04, 0.03, 0.12, 0.02); part(head, BOX, dk, 0, -0.05, 0.14, 0.05, 0.012, 0.01);
+    const legs = [[-0.08, 0.15, 0, 0.36], [0.08, 0.15, Math.PI, 0.36], [-0.09, -0.15, Math.PI, 0.3], [0.09, -0.15, 0, 0.3]].map(([x, z, ph, len]) => ({ p: aLeg(g, x, len, z, len, 0.035, fur, dk), ph }));
+    const t0 = pv(body, 0, 0.44, -0.2, -0.6); part(t0, CYL6, fur, 0, 0.12, 0, 0.022, 0.26, 0.022);
+    const t1 = pv(t0, 0, 0.25, 0, 0.9); part(t1, CYL6, fur, 0, 0.1, 0, 0.02, 0.22, 0.02);
+    const t2 = pv(t1, 0, 0.2, 0, 1.2); part(t2, CYL6, fur, 0, 0.06, 0, 0.018, 0.14, 0.018);
+    g.userData.rig = { body, neck, nx0: 0.2, ngraze: 1.0, nrun: 0.2, head, hx0: -0.2, legs, tail: [t0, t1, t2], wag: 2, wagA: 0.3, ears, eyes, stride: 6, swing: 0.7, bob: 0.06, sitTilt: true, sitDrop: 0.08, sleepDrop: 0.2 };
+    return g;
+}
+function makePig() {
+    const g = new THREE.Group(), skin = amat([0xf0a8a0, 0x6a4a3a, 0xe8b0a0][Math.floor(Math.random() * 3)]), snout = amat(0xd88a8a), dk = amat(0x3a2020);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, skin, 0, 0.36, 0, 0.22, 0.2, 0.34);
+    const neck = pv(body, 0, 0.4, 0.3, 0.2);
+    const head = pv(neck, 0, 0.02, 0.06, -0.2); part(head, SPH, skin, 0, 0, 0.04, 0.15, 0.14, 0.14); part(head, CYL8, snout, 0, -0.02, 0.18, 0.06, 0.05, 0.05, Math.PI / 2);
+    for (const s of [-1, 1]) part(head, BOX, dk, s * 0.02, -0.02, 0.205, 0.012, 0.025, 0.01);
+    const eyes = aEyes(head, 0.06, 0.04, 0.12, 0.016);
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.09, 0.1, 0.02, 0.4, 0, -s * 0.6); e.userData.rz0 = -s * 0.6; part(e, CONE4, skin, 0, 0.05, 0, 0.05, 0.1, 0.02); return e; });
+    const tail = pv(body, 0, 0.42, -0.34, -0.5); part(tail, TOR, skin, 0, 0.04, 0, 0.04, 0.04, 0.04);
+    const legs = [[-0.11, 0.18, 0], [0.11, 0.18, Math.PI], [-0.11, -0.2, Math.PI], [0.11, -0.2, 0]].map(([x, z, ph]) => ({ p: aLeg(g, x, 0.24, z, 0.24, 0.045, skin, dk), ph }));
+    g.userData.rig = { body, neck, nx0: 0.2, ngraze: 0.9, nrun: 0.1, head, hx0: -0.2, legs, tail: [tail], wag: 9, wagA: 0.5, ears, eyes, stride: 9, swing: 0.6, bob: 0.03 };
+    g.scale.setScalar(0.85);
+    return g;
+}
+function makePony() {
+    const g = new THREE.Group(), cols = [0x5a3a24, 0x8a6a4a, 0x2a2420, 0xb8a888], fur = amat(cols[Math.floor(Math.random() * cols.length)]), mane = amat(0x1a1410), hoof = amat(0x1a1410);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, fur, 0, 0.92, 0, 0.32, 0.32, 0.6); part(body, SPH, fur, 0, 0.94, 0.38, 0.3, 0.32, 0.3);
+    const neck = pv(body, 0, 1.08, 0.55, 0.55); part(neck, SPH, fur, 0, 0.22, 0, 0.14, 0.32, 0.18);
+    for (let k = 0; k < 5; k++) part(neck, BOX, mane, 0, 0.1 + k * 0.08, -0.14, 0.06, 0.12, 0.08);
+    const head = pv(neck, 0, 0.46, 0.04, -0.55); part(head, SPH, fur, 0, 0, 0.06, 0.12, 0.13, 0.2); part(head, SPH, fur, 0, -0.06, 0.24, 0.09, 0.09, 0.12); part(head, BOX, mane, 0, 0.12, -0.02, 0.08, 0.1, 0.16);
+    const eyes = aEyes(head, 0.1, 0.04, 0.06, 0.025);
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.07, 0.13, -0.04, 0, 0, -s * 0.2); e.userData.rz0 = -s * 0.2; part(e, CONE4, fur, 0, 0.06, 0, 0.04, 0.12, 0.02); return e; });
+    const t0 = pv(body, 0, 1.0, -0.62, 0.4); part(t0, BOX, mane, 0, -0.25, -0.04, 0.1, 0.55, 0.08);
+    const legs = [[-0.15, 0.36, 0], [0.15, 0.36, Math.PI], [-0.15, -0.38, Math.PI], [0.15, -0.38, 0]].map(([x, z, ph]) => ({ p: aLeg(g, x, 0.82, z, 0.8, 0.065, fur, hoof), ph }));
+    g.userData.rig = { body, neck, nx0: 0.55, ngraze: 1.75, nrun: 0.25, head, hx0: -0.55, legs, tail: [t0], tailFlick: 0.4, ears, eyes, stride: 3.4, swing: 0.55, bob: 0.05 };
+    return g;
+}
+function makeMoorSheep() {
+    const g = new THREE.Group(), wool = amat(0xe8e4dc), face = amat(0x2e2e3a), hoof = amat(0x1a1a22);
+    const body = pv(g, 0, 0, 0);
+    for (const [x, y, z, s] of [[0, 0.66, 0, 0.36], [0.16, 0.7, 0.22, 0.26], [-0.16, 0.7, 0.22, 0.26], [0.16, 0.68, -0.22, 0.27], [-0.16, 0.68, -0.22, 0.27], [0, 0.82, 0.05, 0.28], [0, 0.6, 0.32, 0.24], [0, 0.62, -0.36, 0.24]]) part(body, SPH, wool, x, y, z, s, s * 0.9, s);
+    const neck = pv(body, 0, 0.72, 0.38, 0.4); part(neck, SPH, wool, 0, 0.1, 0, 0.14, 0.18, 0.14);
+    const head = pv(neck, 0, 0.2, 0.05, -0.4); part(head, SPH, face, 0, 0, 0.08, 0.11, 0.12, 0.16); part(head, SPH, wool, 0, 0.1, 0, 0.14, 0.09, 0.13);
+    for (const s of [-1, 1]) { let p = pv(head, s * 0.1, 0.08, -0.02, 0, 0, -s * 0.5); for (let i = 0; i < 3; i++) { part(p, BOX, amat(0xb8a888), 0, 0.04, 0, 0.04, 0.08, 0.05); p = pv(p, 0, 0.07, 0, 0.9, 0, 0); } } // curly horns
+    const eyes = aEyes(head, 0.075, 0.03, 0.12, 0.022, aglow(0xd8b040));
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.1, 0.03, 0, 0, 0, -s * 1.4); e.userData.rz0 = -s * 1.4; part(e, SPH, face, 0, 0.07, 0, 0.03, 0.07, 0.018); return e; });
+    const tail = pv(body, 0, 0.68, -0.55); part(tail, SPH, wool, 0, 0, -0.05, 0.1, 0.1, 0.1);
+    const legs = [[-0.13, 0.25, 0], [0.13, 0.25, Math.PI], [-0.13, -0.25, Math.PI], [0.13, -0.25, 0]].map(([x, z, ph]) => ({ p: aLeg(g, x, 0.45, z, 0.43, 0.035, face, hoof), ph }));
+    g.userData.rig = { body, neck, nx0: 0.4, ngraze: 1.6, nrun: 0.2, head, hx0: -0.4, legs, tail: [tail], wag: 6, wagA: 0.3, ears, eyes, stride: 5, swing: 0.6, bob: 0.05 };
+    return g;
+}
+const arcticFox = () => recolor(makeFox(), new Map([[amat(0x9ab4dc, 0x0a1428), amat(0xf2f6fa)], [amat(0xeef4ff, 0x10141c), amat(0xffffff)], [amat(0x2a3050), amat(0x3a3a44)], [aglow(0xa8fff8), amat(0xffffff)], [aglow(0x7affff), aglow(0x101014)]]));
+const snowHare = () => { const g = makeRabbit(); g.traverse(o => { if (o.isMesh && o.material !== AMC["0xf0a0a8_0"] && o.material.color && o.material.color.getHex() !== 0xf0a0a8 && !(o.material.isMeshBasicMaterial)) o.material = amat(0xf8f8fc); }); return g; };
+const skullLizard = () => recolor(makeSalamander(), new Map([[amat(0x1e1612), amat(0x3a4a2a)], [amat(0x4a2414), amat(0xb8a870)], [aglow(0xff7a1a), aglow(0xffd040)]]));
+// ---- the big ones, out in the deep: whales and dolphins ----
+function makeWhale5() {
+    const g = new THREE.Group(), skin = amat(0x2a3a52), belly = amat(0xd8dce4), knob = amat(0x1a2a3a);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, skin, 0, 0, 0, 3.0, 2.4, 8.5); part(body, SPH, belly, 0, -1.0, 1.2, 2.5, 1.4, 6.6);
+    for (let i = 0; i < 7; i++) part(body, BOX, knob, 0, -2.1, -1 + i * 1.2, 2.0 - Math.abs(i - 3) * 0.3, 0.08, 0.12);
+    for (let i = 0; i < 6; i++) part(body, SPH, knob, (i % 2 ? 0.7 : -0.7), 2.1, 3.5 + i * 0.6, 0.25, 0.15, 0.25);
+    aEyes(body, 2.4, -0.2, 5.4, 0.3);
+    const fins = [-1, 1].map(s => { const p = pv(body, s * 2.4, -1.0, 3.2); part(p, SPH, skin, s * 2.6, 0, -0.6, 3.0, 0.22, 0.9, 0, s * 0.35, 0); part(p, SPH, belly, s * 2.6, -0.1, -0.6, 2.8, 0.15, 0.7, 0, s * 0.35, 0); return p; });
+    part(body, CONE4, skin, 0, 2.4, -3.5, 0.5, 1.0, 0.8, -0.5);
+    const t0 = pv(body, 0, 0.3, -7.6); part(t0, SPH, skin, 0, 0, -2.2, 1.4, 1.1, 3.2);
+    const t1 = pv(t0, 0, 0, -4.8); for (const s of [-1, 1]) part(t1, BOX, skin, s * 1.8, 0, -0.5, 3.6, 0.22, 1.6, 0, s * 0.35, 0);
+    g.userData.rig = { body, fins, t0, t1 };
+    g.scale.setScalar(1.3);
+    return g;
+}
+function makeDolphin() {
+    const g = new THREE.Group(), skin = amat(0x6a7a8e), belly = amat(0xe0e4ea);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, skin, 0, 0, 0, 0.38, 0.4, 1.3); part(body, SPH, belly, 0, -0.14, 0.2, 0.3, 0.26, 1.0);
+    part(body, SPH, skin, 0, -0.06, 1.35, 0.12, 0.1, 0.35); aEyes(body, 0.22, 0.05, 1.05, 0.04);
+    part(body, BOX, skin, 0, 0.42, -0.1, 0.06, 0.4, 0.4, -0.5);
+    for (const s of [-1, 1]) part(body, BOX, skin, s * 0.38, -0.2, 0.45, 0.4, 0.04, 0.2, 0, s * 0.3, s * 0.4);
+    const tail = pv(body, 0, 0, -1.2); part(tail, SPH, skin, 0, 0, -0.3, 0.16, 0.16, 0.5); for (const s of [-1, 1]) part(tail, BOX, skin, s * 0.3, 0, -0.75, 0.6, 0.04, 0.26, 0, s * 0.45, 0);
+    g.userData.rig = { body, tail };
+    return g;
+}
+// ---- island animal behaviours ----
+// sea turtles: plod about the sand, and pull their head in when you come close; now and then they swim out a little way
+function turtleAI(c, dt, dp, px, pz, live) {
+    const R = c.g.userData.rig, shy = live && dp < 4.5;
+    c.hideK = (c.hideK || 0) + ((shy ? 1 : 0) - (c.hideK || 0)) * Math.min(1, dt * 6);
+    let sp = 0;
+    if (!shy) {
+        if (c.t <= 0) { c.t = rand(3, 8); const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 3; c.tz = c.z + Math.cos(a) * 3; c.go = Math.random() < 0.7; }
+        if (c.go) { sp = 0.35; const dx = c.tx - c.x, dz = c.tz - c.z, d = Math.hypot(dx, dz); if (d < 0.15) c.go = false; else { const nx = c.x + dx / d * sp * dt, nz = c.z + dz / d * sp * dt, I = archAt(nx, nz), ins = archIn(I, nx, nz); if (ins > -10 && ins < 14 && !onDock5(nx, nz)) { c.x = nx; c.z = nz; } else c.go = false; c.g.rotation.y += angDiff(Math.atan2(dx, dz), c.g.rotation.y) * Math.min(1, 3 * dt); } }
+    }
+    c.gait = (c.gait || 0) + dt * (sp > 0 ? 5 : 0);
+    const wet = archTerrain(archAt(c.x, c.z), c.x, c.z) < -0.5;
+    R.fl.forEach((f, i) => { const s = i ? 1 : -1; f.rotation.y = s * Math.sin(c.gait) * (wet ? 0.8 : 0.5); f.rotation.z = wet ? s * Math.sin(c.gait) * 0.4 : 0; });
+    R.bl.forEach((f, i) => (f.rotation.y = (i ? -1 : 1) * Math.sin(c.gait + 1) * 0.3));
+    R.neck.scale.setScalar(1 - c.hideK * 0.7); R.neck.position.z = 0.48 - c.hideK * 0.2;
+    R.head.rotation.y = Math.sin(c.ph * 0.6) * 0.3 * (1 - c.hideK);
+    c.g.position.set(c.x, wet ? -0.55 : groundY5(c.x, c.z), c.z);
+    return true;
+}
+// flamingos: wade the lagoon shallows, dip for food, stand on one leg, stalk off if you come near
+function flamingoAI(c, dt, dp, px, pz, live) {
+    const R = c.g.userData.rig, scared = live && dp < 7;
+    let sp = 0;
+    if (scared) { const a = Math.atan2(c.x - px, c.z - pz); c.tx = c.x + Math.sin(a) * 4; c.tz = c.z + Math.cos(a) * 4; c.act = "walk"; c.t = 1; }
+    if (c.t <= 0) { const r = Math.random(); c.act = r < 0.4 ? "walk" : r < 0.75 ? "feed" : "rest"; c.t = rand(3, 8); if (c.act === "walk") { const a = Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 4; c.tz = c.z + Math.cos(a) * 4; } }
+    if (c.act === "walk") {
+        sp = scared ? 2.2 : 0.7;
+        const dx = c.tx - c.x, dz = c.tz - c.z, d = Math.hypot(dx, dz);
+        if (d < 0.2) c.act = "feed";
+        else { const nx = c.x + dx / d * sp * dt, nz = c.z + dz / d * sp * dt, h = archTerrain(ARCH_BY.coral, nx, nz); if (h > -1.7 && h < 0.8 && Math.hypot(nx - H5.lagoon.x, nz - H5.lagoon.z) < 34) { c.x = nx; c.z = nz; } else { c.act = "feed"; c.t = rand(1, 3); } c.g.rotation.y += angDiff(Math.atan2(dx, dz), c.g.rotation.y) * Math.min(1, 4 * dt); }
+    }
+    c.gait = (c.gait || 0) + dt * sp * 5;
+    const feed = c.act === "feed", rest = c.act === "rest";
+    R.legs.forEach((L, i) => { L.p.rotation.x = sp > 0 ? Math.sin(c.gait + i * Math.PI) * 0.5 : 0; L.shin.rotation.x = rest && i === 1 ? -2.6 : 0; L.p.position.y = rest && i === 1 ? 0.25 : -0.1; });
+    R.n0.rotation.x += ((feed ? 0.9 : -0.5) - R.n0.rotation.x) * Math.min(1, dt * 3); R.n1.rotation.x += ((feed ? 1.6 : 0.7) - R.n1.rotation.x) * Math.min(1, dt * 3);
+    R.head.rotation.x = feed ? 0.6 + Math.sin(c.ph * 7) * 0.15 : -0.2;
+    R.body.rotation.z = Math.sin(c.gait) * 0.05;
+    c.g.position.set(c.x, Math.max(archTerrain(ARCH_BY.coral, c.x, c.z), -1.6) + 0.02, c.z);
+    return true;
+}
+// penguins: waddle about in little groups, flap, and belly-slide away when you rush them
+function penguinAI(c, dt, dp, px, pz, live) {
+    const R = c.g.userData.rig;
+    let sp = 0;
+    if (live && dp < 5 && !(c.slide > 0)) { c.slide = rand(1.2, 2); const a = Math.atan2(c.x - px, c.z - pz) + rand(-0.4, 0.4); c.tx = c.x + Math.sin(a) * 8; c.tz = c.z + Math.cos(a) * 8; if (dp < 20) sfx(700, 0.15, "square", 0.025, 1.4); }
+    if (c.slide > 0) { c.slide -= dt; sp = 5; wStep(c, c.tx, c.tz, sp, dt); R.body.rotation.x += (-1.35 - R.body.rotation.x) * Math.min(1, dt * 10); c.yOff = -0.15; }
+    else {
+        R.body.rotation.x += (0 - R.body.rotation.x) * Math.min(1, dt * 6);
+        if (c.t <= 0) { c.t = rand(2, 6); const home = Math.hypot(c.x - c.hx, c.z - c.hz) > 8, a = home ? Math.atan2(c.hx - c.x, c.hz - c.z) : Math.random() * 6.283; c.tx = c.x + Math.sin(a) * 2.5; c.tz = c.z + Math.cos(a) * 2.5; c.go = Math.random() < 0.6; c.flap = Math.random() < 0.25 ? 1.2 : 0; }
+        if (c.go) { sp = 0.8; if (wStep(c, c.tx, c.tz, sp, dt) < 0.15) c.go = false; }
+    }
+    c.gait = (c.gait || 0) + dt * (sp > 0 && !(c.slide > 0) ? 9 : 0);
+    if (!(c.slide > 0)) R.body.rotation.z = Math.sin(c.gait) * 0.14 * (sp > 0 ? 1 : 0);
+    c.flap = Math.max(0, (c.flap || 0) - dt);
+    R.fl.forEach((f, i) => (f.rotation.z = (i ? 1 : -1) * (c.slide > 0 ? 1.2 : c.flap > 0 ? 0.3 + Math.abs(Math.sin(c.ph * 14)) * 0.9 : 0.1)));
+    R.feet.forEach((f, i) => (f.rotation.x = Math.sin(c.gait + i * Math.PI) * 0.4));
+    R.head.rotation.y = Math.sin(c.ph * 0.9) * 0.4;
+    if (R.eyes) { c.blink = (c.blink === undefined ? rand(1, 4) : c.blink) - dt; if (c.blink <= -0.13) c.blink = rand(2, 6); R.eyes.forEach(e => (e.scale.y = c.blink < 0 ? 0.12 : 1)); }
+    return false;
+}
+// seals: lounge, bark, lift a flipper; when you get close they galumph off
+function sealAI(c, dt, dp, px, pz, live) {
+    const R = c.g.userData.rig;
+    let sp = 0;
+    if (live && dp < 6 && !(c.run > 0)) { c.run = rand(1.5, 2.5); const a = Math.atan2(c.x - px, c.z - pz); c.tx = c.x + Math.sin(a) * 5; c.tz = c.z + Math.cos(a) * 5; if (dp < 25) { sfx(260, 0.18, "sawtooth", 0.035, 0.8); setTimeout(() => sfx(240, 0.2, "sawtooth", 0.03, 0.8), 220); } }
+    if (c.run > 0) { c.run -= dt; sp = 1.8; wStep(c, c.tx, c.tz, sp, dt); }
+    else if (c.t <= 0) { c.t = rand(3, 9); c.bark = Math.random() < 0.3 && dp < 30; if (c.bark) sfx(300, 0.16, "sawtooth", 0.03, 0.75); c.look = rand(-0.6, 0.6); }
+    c.gait = (c.gait || 0) + dt * (sp > 0 ? 8 : 0);
+    R.chain.forEach((s, i) => (s.rotation.x = sp > 0 ? Math.sin(c.gait - i * 1.1) * 0.22 : 0));
+    R.neck.rotation.x = c.bark ? -0.7 + Math.sin(c.ph * 10) * 0.1 : -0.3 + Math.sin(c.ph * 0.5) * 0.1;
+    R.head.rotation.y += ((c.look || 0) - R.head.rotation.y) * Math.min(1, dt * 2);
+    R.fl.forEach((f, i) => (f.rotation.z = (i ? 1 : -1) * (sp > 0 ? Math.sin(c.gait) * 0.6 : Math.sin(c.ph * 0.7 + i) * 0.15)));
+    if (R.eyes) { c.blink = (c.blink === undefined ? rand(1, 4) : c.blink) - dt; if (c.blink <= -0.13) c.blink = rand(2, 6); R.eyes.forEach(e => (e.scale.y = c.blink < 0 ? 0.12 : 1)); }
+    c.yOff = c.onIce ? 0.04 : 0;
+    return false;
+}
+// gulls: wheel over beaches and harbors, and a couple follow your boat
+function gullAI(c, dt, px, pz) {
+    const W = c.g.userData.wings;
+    let cx = c.cx, cz = c.cz, rad = c.rad, alt = c.alt;
+    if (c.follow && boating()) { cx = B5.x - Math.sin(B5.yaw) * 6; cz = B5.z - Math.cos(B5.yaw) * 6; rad = 4; alt = 5; }
+    c.ang = (c.ang ?? c.ph) + c.spd * dt * (c.follow && boating() ? 3 : 1);
+    const tx = cx + Math.cos(c.ang) * rad, tz = cz + Math.sin(c.ang) * rad, P = c.g.position;
+    P.x += (tx - P.x) * Math.min(1, dt * 1.5); P.z += (tz - P.z) * Math.min(1, dt * 1.5); P.y += (alt + Math.sin(c.ph * 0.8) * 1.5 - P.y) * Math.min(1, dt);
+    c.g.rotation.set(0, -c.ang + (c.spd > 0 ? 0 : Math.PI), (c.spd > 0 ? -1 : 1) * 0.3);
+    const flapping = Math.sin(c.ph * 0.4) > 0.3, a = flapping ? Math.sin(c.ph * 11) * 0.6 : 0.08;
+    W.forEach((w, i) => (w.rotation.z = (i ? -1 : 1) * a));
+    c.x = P.x; c.z = P.z;
+    c.g.visible = Math.hypot(P.x - px, P.z - pz) < 180;
+    if (c.g.visible && Math.random() < dt * 0.02 && Math.hypot(P.x - px, P.z - pz) < 40) sfx(1700, 0.25, "sawtooth", 0.015, 0.7);
+}
+// ---- where they live ----
+function wildOk5(x, z, walk) {
+    const I = archAt(x, z), inside = archIn(I, x, z);
+    if (inside < (walk ? 4 : 7) || onDock5(x, z)) return false;
+    if (I.k === "haven" && Math.hypot(x, z) < SAFE_R + (walk ? 1 : 4)) return false;
+    const y = archTerrain(I, x, z); if (y < 0.12) return false;
+    if (slope5(x, z) > (walk ? 1.15 : 0.9)) return false;
+    for (const lm of LM5) if (!lm.camp && Math.hypot(x - lm.x, z - lm.z) < lm.r + (walk ? 0.5 : 3)) return false;
+    if (Math.hypot(x - H5.casino.x, z - H5.casino.z) < 16) return false;
+    return true;
+}
+function wildSpot5(I = ARCH_BY[arch5], test) {
+    for (let i = 0; i < 120; i++) {
+        const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * (archR(I, a) - 6), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d;
+        if (test ? test(x, z, archTerrain(I, x, z), archIn(I, x, z)) : wildOk5(x, z)) return { x, z, y: groundY5(x, z) };
+    }
+    return null;
+}
+const WILD5 = {
+    monkey: (c, dt, dp, px, pz, live, night) => { grazerAI(c, dt, dp, px, pz, live, false, night, { alert: 12, flee: 6.5, walk: 1.4, run: 6.5, roam: 12, sit: true, snort: 900 }); if (c.sit && !c.sleep && c.g.userData.rig.legs) c.g.userData.rig.legs[1].p.rotation.x = -1.6 + Math.sin(c.ph * 8) * 0.4; },
+    pig: (c, dt, dp, px, pz, live, night) => grazerAI(c, dt, dp, px, pz, live, false, night, { alert: 10, flee: 6, walk: 1.0, run: 5.5, roam: 12, snort: 220 }),
+    pony: (c, dt, dp, px, pz, live, night) => grazerAI(c, dt, dp, px, pz, live, false, night, { alert: 20, flee: 10, walk: 1.3, run: 8, roam: 18, snort: 140 }),
+    msheep: (c, dt, dp, px, pz, live, night) => grazerAI(c, dt, dp, px, pz, live, false, night, { alert: 14, flee: 7, walk: 0.9, run: 5, roam: 12, bleat: true, snort: 520 }),
+    goat5: (c, dt, dp, px, pz, live, night) => grazerAI(c, dt, dp, px, pz, live, false, night, { alert: 16, flee: 8.5, walk: 1.1, run: 6.2, roam: 14, climb: true, bleat: true, snort: 300 }),
+    afox: (c, dt, dp, px, pz, live, night) => grazerAI(c, dt, dp, px, pz, live, false, night, { alert: 18, flee: 9.5, walk: 1.6, run: 8.5, roam: 18, sit: true, snort: 600 }),
+    hare: (c, dt, dp, px, pz, live) => hopperAI(c, dt, dp, px, pz, live, false, { flee: 7, run: 8 }),
+    lizard: (c, dt, dp, px, pz, live) => salamanderAI(c, dt, dp, px, pz, live, false),
+    parrot: (c, dt, dp, px, pz, live) => crowAI(c, dt, dp, px, pz, live, false),
+    turtle: turtleAI, flamingo: flamingoAI, penguin: penguinAI, seal: sealAI
+};
+const WILD5_FLY = { gull5: gullAI, skyparrot: (c, dt, px, pz, night) => skyAI(c, dt, px, pz, night), petrel: gullAI };
+Object.assign(SMALL_WILD, { parrot: 1, lizard: 1, hare: 1, turtle: 1, penguin: 1 });
+function populate5() {
+    const n = 5, put = (I, count, test, kind, mk, extra = {}) => { for (let i = 0; i < count; i++) { const p = wildSpot5(I, test); if (p) addWild(n, kind, mk(), p.x, p.z, Object.assign({ I: I.k }, typeof extra === "function" ? extra(p) : extra)); } };
+    const ok = (minIn = 7, maxS = 0.9) => (x, z, y, ins) => wildOk5(x, z) && ins > minIn && slope5(x, z) < maxS;
+    const beach = (x, z, y, ins) => ins > 4 && ins < 13 && y > 0.1 && y < 1.6 && !onDock5(x, z) && wildOk5(x, z, true);
+    const fly = (I, kind, mk, count, alt, extra = {}) => { for (let i = 0; i < count; i++) { const cx = I.x + rand(-20, 20), cz = I.z + rand(-20, 20); addWild(n, kind, mk(), cx, cz, Object.assign({ I: I.k, cx, cz, rad: rand(18, I.r * 0.7), spd: rand(0.06, 0.12) * (Math.random() < 0.5 ? 1 : -1), alt: rand(alt[0], alt[1]) }, extra)); } };
+    const H = ARCH_BY.haven, C = ARCH_BY.coral, S = ARCH_BY.skull, F = ARCH_BY.frost, T = ARCH_BY.storm;
+    // Port Haven: monkeys in the jungle, wild piglets, parrots, crabs, butterflies, turtles on the sand
+    put(H, 9, (x, z, y, ins) => ok(14)(x, z, y, ins) && Math.hypot(x - H5.jungle.x, z - H5.jungle.z) < 55, "monkey", makeMonkey, { tilt: 0.3 });
+    put(H, 7, ok(12), "pig", makePig, { tilt: 0.3 });
+    put(H, 8, ok(10), "parrot", makeParrot);
+    put(H, 12, beach, "crab5", makeCrab);
+    put(H, 12, ok(10), "butterfly", makeButterfly);
+    put(H, 4, beach, "turtle", makeTurtle);
+    fly(H, "skyparrot", makeParrot, 6, [14, 26], { day: true });
+    fly(H, "gull5", makeGull, 5, [10, 18]);
+    // Coral Key: flamingos in the lagoon, turtles, crabs, gulls
+    for (let i = 0; i < 12; i++) { const a = Math.random() * 6.283, d = rand(14, 28), x = H5.lagoon.x + Math.cos(a) * d, z = H5.lagoon.z + Math.sin(a) * d, h = archTerrain(C, x, z); if (h > -1.6 && h < 0.6) addWild(n, "flamingo", makeFlamingo(), x, z, { I: "coral" }); }
+    put(C, 9, beach, "turtle", makeTurtle);
+    put(C, 18, beach, "crab5", makeCrab);
+    put(C, 6, ok(8), "butterfly", makeButterfly);
+    fly(C, "gull5", makeGull, 6, [8, 16]);
+    fly(C, "skyparrot", makeParrot, 4, [12, 20], { day: true });
+    // Skull Rock: goats on the crags, lizards, crows, bats by night, crabs in the cove
+    put(S, 9, (x, z, y, ins) => wildOk5(x, z) && y > 4, "goat5", makeGoat, { tilt: 0.4 });
+    put(S, 12, ok(6, 1), "lizard", skullLizard);
+    put(S, 9, ok(8), "crow", makeCrow);
+    put(S, 6, beach, "crab5", makeCrab);
+    fly(S, "bat", () => makeBat(0x7affb0), 8, [12, 26], { night: true });
+    fly(S, "gull5", makeGull, 3, [14, 24]);
+    // Frostcap: penguins by the shore, seals on the beach and the ice, arctic foxes, snow hares
+    for (let g = 0; g < 3; g++) { const p = wildSpot5(F, beach); if (!p) continue; for (let i = 0; i < 6; i++) { const x = p.x + rand(-3, 3), z = p.z + rand(-3, 3); if (wildOk5(x, z, true)) addWild(n, "penguin", makePenguin(), x, z, { I: "frost" }); } }
+    put(F, 6, beach, "seal", makeSeal);
+    for (let i = 0; i < 3; i++) { const a = Math.random() * 6.283, d = rand(3, 9); addWild(n, "seal", makeSeal(), H5.lake.x + Math.cos(a) * d, H5.lake.z + Math.sin(a) * d, { I: "frost", onIce: true }); }
+    put(F, 5, ok(10), "afox", arcticFox, { tilt: 0.3 });
+    put(F, 9, ok(8), "hare", snowHare);
+    fly(F, "gull5", makeGull, 3, [12, 20]);
+    // Storm Isle: wild ponies and sheep on the moors and the plateau, petrels on the wind
+    put(T, 7, ok(10, 0.7), "pony", makePony, { tilt: 0.5 });
+    put(T, 11, ok(8, 0.8), "msheep", makeMoorSheep, { tilt: 0.4 });
+    fly(T, "petrel", makeBird, 7, [10, 22], { day: true });
+    fly(T, "gull5", makeGull, 3, [16, 26]);
+    // a couple of gulls that tail your boat
+    for (let i = 0; i < 2; i++) addWild(n, "gull5", makeGull(), 0, 0, { I: "haven", cx: HARBOR5.B.x, cz: HARBOR5.B.z, rad: 14, spd: 0.15 * (i ? 1 : -1), alt: 9, follow: true });
+}
+// ---- the sea: whales on long circuits, dolphin pods that race your boat, flying fish ----
+const sea5 = { whales: [], dolphins: [], fish: [], built: false, podT: 8, fishT: 3 };
+function buildSea5() {
+    sea5.built = true;
+    const prev = addTgt; addTgt = isle5G;
+    for (const [cx, cz, rad, spd] of [[130, 60, 120, 0.018], [-200, -40, 140, -0.015], [120, -330, 150, 0.014]]) { const g = makeWhale5(); g.rotation.order = "YXZ"; scene.add(g); sea5.whales.push({ g, cx, cz, rad, spd, ang: Math.random() * 6.28, ph: Math.random() * 30, blowT: 0 }); }
+    for (let i = 0; i < 6; i++) { const g = makeDolphin(); g.rotation.order = "YXZ"; g.visible = false; scene.add(g); sea5.dolphins.push({ g, on: false, ph: i * 1.3 }); }
+    const fm = amat(0xc8d8e8, 0x1a2a3a);
+    for (let i = 0; i < 10; i++) { const g = new THREE.Group(); part(g, SPH, fm, 0, 0, 0, 0.08, 0.06, 0.24); for (const s of [-1, 1]) part(g, BOX, fm, s * 0.14, 0.02, 0.04, 0.24, 0.01, 0.1); g.visible = false; scene.add(g); sea5.fish.push({ g, life: 0 }); }
+    addTgt = prev;
+}
+const spout = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+function updateSea5(dt) {
+    if (!sea5.built) buildSea5();
+    const px = player.pos.x, pz = player.pos.z;
+    for (const w of sea5.whales) {
+        w.ph += dt; w.ang += w.spd * dt;
+        const x = w.cx + Math.cos(w.ang) * w.rad, z = w.cz + Math.sin(w.ang) * w.rad, cyc = (w.ph % 34) / 34;
+        // a long glide just under the surface, a breath, then a dive with the flukes up
+        const depth = cyc < 0.55 ? -2.6 : cyc < 0.7 ? -2.6 - (cyc - 0.55) / 0.15 * 7 : cyc < 0.92 ? -9.6 : -9.6 + (cyc - 0.92) / 0.08 * 7;
+        const pitch = cyc > 0.55 && cyc < 0.7 ? 0.35 : cyc > 0.92 ? -0.25 : 0;
+        w.g.position.set(x, depth, z); w.g.rotation.set(pitch, -w.ang + (w.spd > 0 ? 0 : Math.PI), (w.spd > 0 ? -1 : 1) * 0.05);
+        const R = w.g.userData.rig; R.t0.rotation.x = Math.sin(w.ph * 0.8) * 0.18 - (cyc > 0.6 && cyc < 0.72 ? 0.5 : 0); R.t1.rotation.x = Math.sin(w.ph * 0.8 - 0.8) * 0.3;
+        R.fins.forEach((f, i) => (f.rotation.z = (i ? -1 : 1) * Math.sin(w.ph * 0.5) * 0.18));
+        const d = Math.hypot(x - px, z - pz); w.g.visible = d < 420;
+        if (cyc > 0.45 && cyc < 0.55 && (w.blowT -= dt) <= 0) { w.blowT = 0.06; const fx = Math.sin(w.g.rotation.y), fz = Math.cos(w.g.rotation.y); burst(V3(x + fx * 5, 0.2, z + fz * 5), 3, 2.2, [spout]); if (d < 160 && Math.random() < 0.05) sfx(90, 0.8, "sine", 0.05, 0.6); }
+    }
+    // a dolphin pod joins you when you're going fast across open water
+    const free = sea5.dolphins.filter(q => !q.on);
+    if (boating() && Math.abs(B5.speed) > 7 && free.length === sea5.dolphins.length && (sea5.podT -= dt) <= 0 && !landingSpot()) {
+        sea5.podT = rand(25, 55);
+        const n = 3 + Math.floor(Math.random() * 3);
+        free.slice(0, n).forEach((q, i) => { q.on = true; q.life = rand(18, 28); q.side = i % 2 ? 1 : -1; q.off = 3 + i * 1.6; q.lag = rand(-3, 4); q.g.visible = true; q.x = B5.x; q.z = B5.z; });
+        toast("A pod of dolphins is racing your boat!", "rare"); sfx(1900, 0.18, "sine", 0.03, 1.5); setTimeout(() => sfx(2200, 0.15, "sine", 0.025, 1.4), 200);
+    }
+    for (const q of sea5.dolphins) {
+        if (!q.on) continue;
+        q.life -= dt; q.ph += dt;
+        const fx = Math.sin(B5.yaw), fz = Math.cos(B5.yaw), peel = q.life < 3 ? (3 - q.life) * 6 : 0;
+        const tx = B5.x + fx * (q.lag + 4) + fz * q.side * (q.off + peel), tz = B5.z + fz * (q.lag + 4) - fx * q.side * (q.off + peel);
+        q.x += (tx - q.x) * Math.min(1, dt * 2.2); q.z += (tz - q.z) * Math.min(1, dt * 2.2);
+        const jump = Math.max(0, Math.sin(q.ph * 1.9 + q.off)), y = -0.9 + jump * jump * 2.6;
+        q.g.position.set(q.x, y, q.z); q.g.rotation.set(-Math.cos(q.ph * 1.9 + q.off) * 0.6 * (jump > 0 ? 1 : 0), B5.yaw, 0);
+        q.g.userData.rig.tail.rotation.x = Math.sin(q.ph * 9) * 0.35;
+        if (jump > 0.05 && jump < 0.15 && Math.random() < 0.3) burst(V3(q.x, -0.3, q.z), 3, 2, [wakeMat]);
+        if (q.life <= 0 || !isFinite(q.x) || (!boating() && q.life < 3)) { q.on = false; q.g.visible = false; }
+    }
+    // flying fish skip across the water ahead of the boat
+    if (boating() && Math.abs(B5.speed) > 5 && (sea5.fishT -= dt) <= 0) {
+        sea5.fishT = rand(2, 6);
+        const n = 2 + Math.floor(Math.random() * 4), a = B5.yaw + rand(-0.8, 0.8), d = rand(12, 26);
+        for (let i = 0; i < n; i++) { const f = sea5.fish.find(q => q.life <= 0); if (!f) break; f.life = f.max = rand(0.9, 1.4); f.x = B5.x + Math.sin(a) * d + rand(-2, 2); f.z = B5.z + Math.cos(a) * d + rand(-2, 2); f.dx = Math.sin(a + rand(-0.5, 0.5)) * 9; f.dz = Math.cos(a + rand(-0.5, 0.5)) * 9; f.g.visible = true; f.g.rotation.y = Math.atan2(f.dx, f.dz); }
+    }
+    for (const f of sea5.fish) if (f.life > 0) {
+        f.life -= dt; f.x += f.dx * dt; f.z += f.dz * dt; const k = 1 - f.life / f.max;
+        f.g.position.set(f.x, -0.4 + Math.sin(k * Math.PI) * 1.4, f.z); f.g.rotation.x = -Math.cos(k * Math.PI) * 0.6;
+        if (f.life <= 0) { f.g.visible = false; burst(V3(f.x, -0.35, f.z), 2, 1.4, [wakeMat]); }
+    }
+}
+
+// =====================================================================
+//  1.7.0: things to do on the Archipelago
+// =====================================================================
+for (const k of ["crew", "crate", "summits", "races", "medals"]) if (!save[k] || typeof save[k] !== "object") save[k] = {};
+if (!Array.isArray(save.bottles)) save.bottles = [];
+const ISL5 = ["haven", "coral", "skull", "frost", "storm"];
+// ---------- ghost crews: send ghost lumberjacks to work an island; they stash what they chop in that island's crate ----------
+const CREW_MATS = { haven: [["driftwood", 70], ["salt", 30]], coral: [["coral", 80], ["salt", 14], ["pearl", 6]], skull: [["tar", 85], ["driftwood", 10], ["pearl", 5]], frost: [["iceshard", 90], ["salt", 10]], storm: [["stormglass", 85], ["iceshard", 15]] };
+const crewOf = k => save.crew[k] || 0;
+const crewTotal = () => ISL5.reduce((a, k) => a + crewOf(k), 0);
+const freeGhosts = () => Math.max(0, (save.ghosts || 0) - crewTotal());
+const ghostsHere5 = () => freeGhosts() + (B5.on ? 0 : crewOf(arch5));
+const crateCap = () => 150 * Math.pow(2, save.crateLvl || 0);
+const crateN = k => Object.values(save.crate[k] || {}).reduce((a, b) => a + b, 0);
+const crewAcc = {};
+let crewTickT = 0;
+function crewTick(force) {
+    if (!force && (crewTickT += 1) % 30) return; // twice a second is plenty
+    const now = Date.now(), last = save.crewT || now, secs = Math.min((now - last) / 1000, 7200);
+    save.crewT = now;
+    if (!(secs > 0)) return;
+    for (const k of ISL5) {
+        const n = crewOf(k); if (!n || (isle === 5 && k === arch5 && !B5.on)) continue; // the crew on your island chops in front of you instead
+        crewAcc[k] = (crewAcc[k] || 0) + n * secs / 30;
+        while (crewAcc[k] >= 1) {
+            crewAcc[k]--;
+            if (crateN(k) >= crateCap()) { crewAcc[k] = 0; break; }
+            const tbl = CREW_MATS[k]; let r = Math.random() * 100, mat = tbl[0][0]; for (const [m, w] of tbl) { r -= w; if (r <= 0) { mat = m; break; } }
+            const amt = Math.min(crateCap() - crateN(k), mat === "pearl" ? 1 : 3 + Math.floor(Math.random() * 3));
+            (save.crate[k] || (save.crate[k] = {}))[mat] = (save.crate[k][mat] || 0) + amt;
+        }
+    }
+}
+function collectCrate(k) {
+    const c = save.crate[k] || {}, n = crateN(k);
+    if (!n) { toast(crewOf(k) ? "The crate's empty. Your crew is still out chopping." : `Nobody works ${ARCH_BY[k].name}. Ask the Ghost Captain at Port Haven to send a crew.`, ""); return; }
+    for (const [m, v] of Object.entries(c)) save.mats[m] = (save.mats[m] || 0) + v;
+    save.crate[k] = {}; save.crewHauled = (save.crewHauled || 0) + n;
+    toast(`Ghost crew haul: ${Object.entries(c).map(([m, v]) => `${v} ${MATS[m].name}`).join(", ")}`, "cash");
+    sfx(520, 0.2, "triangle", 0.08, 1.6); setTimeout(() => sfx(780, 0.25, "triangle", 0.07, 1.3), 140);
+    const cr = isle5.crates[k]; if (cr) burst(V3(cr.x, cr.g.position.y + 1, cr.z), 16, 3, [aglow(0x9fe8ff), aglow(0xffffff)]);
+    if (save.crewHauled >= 1500 && !(save.boat.paints || []).includes("ghost") && !save.ghostPaintTip) { save.ghostPaintTip = 1; toast("The Shipwright has something for you: the GHOST SHIP paint job is unlocked!", "rare"); }
+    writeSave();
+}
+function openCrew() { openPanel("crew"); }
+function renderCrew() {
+    const cap = crateCap(), free = freeGhosts();
+    const rows = ISL5.map(k => {
+        const I = ARCH_BY[k], n = crewOf(k), c = crateN(k), full = c >= cap;
+        const top = Object.entries(save.crate[k] || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([m, v]) => `<span class="cm"><img src="${iconURL("m:" + m)}">${v}</span>`).join("");
+        return `<div class="crow" style="--c:${I.col}"><div class="cname"><b>${I.name}</b><small>${CREW_MATS[k].map(([m]) => MATS[m].name).join(" · ")}</small></div>
+          <div class="cctl"><button data-crew="${k}" data-d="-1" ${n ? "" : "disabled"}>−</button><span>${n} 👻</span><button data-crew="${k}" data-d="1" ${free ? "" : "disabled"}>+</button></div>
+          <div class="cbox"><div class="cbar ${full ? "full" : ""}"><i style="width:${Math.round(c / cap * 100)}%"></i></div><small>${full ? "CRATE FULL! Sail over and empty it" : n ? `crate ${c} / ${cap}` : "nobody working here"}</small><div class="cms">${top}</div></div></div>`;
+    }).join("");
+    const lvl = save.crateLvl || 0, upCost = Math.round([60000, 180000, 500000, 1400000][lvl] * rebirthMult() || 0);
+    const html = `<div class="csub">You have <b>${save.ghosts || 0}</b> ghost lumberjacks · <b>${free}</b> follow you · crews on your island chop trees in front of you, crews elsewhere fill that island's crate (even while you're away, up to 2 hours)</div>${rows}
+      <div class="cfoot"><button id="crateUp" ${lvl >= 4 ? "disabled" : ""}>${lvl >= 4 ? "CRATES MAXED" : `BIGGER CRATES (${cap} → ${cap * 2}) · ${money(upCost)}`}</button><span>hauled home so far: <b>${(save.crewHauled || 0).toLocaleString()}</b> materials</span></div>`;
+    if ($("crewBody").dataset.h !== html) { $("crewBody").innerHTML = html; $("crewBody").dataset.h = html; }
+}
+document.addEventListener("click", e => {
+    if (panel !== "crew") return;
+    const b = e.target.closest("[data-crew]");
+    if (b && !b.disabled) {
+        crewTick(true);
+        const k = b.dataset.crew, d = +b.dataset.d;
+        if (d > 0 && freeGhosts() < 1) { toast("No free ghosts. Buy more Ghost Lumberjacks at the Sea Forge.", "bad"); return; }
+        save.crew[k] = Math.max(0, crewOf(k) + d); syncGhosts();
+        sfx(d > 0 ? 660 : 440, 0.12, "sine", 0.06, d > 0 ? 1.5 : 0.7); renderCrew(); writeSave(); return;
+    }
+    if (e.target.id === "crateUp") {
+        const lvl = save.crateLvl || 0; if (lvl >= 4) return;
+        const cost = Math.round([60000, 180000, 500000, 1400000][lvl] * rebirthMult());
+        if (save.money < cost) { toast("Not enough cash.", "bad"); return; }
+        save.money -= cost; save.crateLvl = lvl + 1; toast(`Every crew crate now holds ${crateCap()} materials.`, "good"); sfx(520, 0.2, "triangle", 0.1, 2); renderCrew(); writeSave();
+    }
+});
+// ---------- treasure maps: Captain Brine sells them and purple chests hide them. Dig at the X ----------
+function newTreasureMap(from) {
+    const k = ["coral", "skull", "skull", "frost", "storm", "haven"][Math.floor(Math.random() * 6)], I = ARCH_BY[k];
+    for (let i = 0; i < 200; i++) {
+        const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * (archR(I, a) - 14), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d;
+        if (archIn(I, x, z) < 12 || archTerrain(I, x, z) < 0.4 || slope5(x, z) > 0.6 || !clearAt5(I, x, z, 3)) continue;
+        if (k === "haven" && Math.hypot(x, z) < SAFE_R + 10) continue;
+        const ox = x + rand(-9, 9), oz = z + rand(-9, 9); // the map is only roughly right
+        save.tmap = { k, x, z, ox, oz, from };
+        titleCard("TREASURE MAP", `X marks a spot on ${I.name}. Check your map (M)`);
+        sfx(392, 0.2, "triangle", 0.08, 1.2); setTimeout(() => sfx(523, 0.3, "triangle", 0.08, 1.2), 160);
+        return true;
+    }
+    return false;
+}
+const xMark = (() => { const g = new THREE.Group(), m = new THREE.MeshBasicMaterial({ color: 0xc8202a }); part(g, BOX, m, 0, 0, 0, 1.6, 0.05, 0.28, 0, 0.785, 0); part(g, BOX, m, 0, 0, 0, 1.6, 0.05, 0.28, 0, -0.785, 0); g.visible = false; isle5G.add(g); return g; })();
+let digT = 0;
+function startDig() {
+    if (digT > 0) return;
+    digT = 1.6; mouseDown = false;
+    toast("You dig...", "");
+}
+function updateDig(dt) {
+    const T = save.tmap;
+    xMark.visible = !!T && isle === 5 && T.k === arch5 && Math.hypot(player.pos.x - T.x, player.pos.z - T.z) < 9;
+    if (xMark.visible) { xMark.position.set(T.x, groundY5(T.x, T.z) + 0.04, T.z); xMark.scale.setScalar(1 + Math.sin(time * 4) * 0.06); }
+    if (T && T.k === arch5 && Math.hypot(player.pos.x - T.x, player.pos.z - T.z) < 30 && Math.random() < dt * 0.5) burst(V3(T.x + rand(-1, 1), groundY5(T.x, T.z) + 0.3, T.z + rand(-1, 1)), 2, 1.2, [aglow(0xffe080)]);
+    if (digT <= 0) return;
+    digT -= dt;
+    player.pitch += (-1.05 - player.pitch) * Math.min(1, dt * 6);
+    if (Math.random() < dt * 7) { burst(V3(player.pos.x - Math.sin(player.yaw) * 1.2, player.pos.y - 1.5, player.pos.z - Math.cos(player.yaw) * 1.2), 4, 3, [lamb(0x8a6a4a), lamb(0x5a4a3a)]); sfx(120 + Math.random() * 60, 0.08, "square", 0.05, 0.4); }
+    if (digT <= 0) dugTreasure();
+}
+function dugTreasure() {
+    const T = save.tmap; if (!T) return;
+    const m = rebirthMult(), cash = Math.round(rand(4000, 7000) * m * 25), I = ARCH_BY[T.k], main = CREW_MATS[T.k][0][0];
+    const loot = { [main]: Math.round(rand(20, 40)), pearl: Math.round(rand(3, 6)), stormglass: Math.round(rand(2, 4)) };
+    save.money += cash; for (const [k, v] of Object.entries(loot)) save.mats[k] = (save.mats[k] || 0) + v;
+    save.boat.cans = Math.min(3, (save.boat.cans || 0) + 1);
+    save.tdug = (save.tdug || 0) + 1; save.tmap = null;
+    const prevAdd = addTgt; addTgt = isle5G; const c = makeChest(T.x, T.z, player.yaw, true); addTgt = prevAdd; chests.splice(chests.indexOf(c), 1); c.beacon.parent && c.beacon.parent.remove(c.beacon); c.g.position.y = groundY5(T.x, T.z) - 0.3; c.pivot.rotation.x = -1.6;
+    flash = 0.5; shake = 0.25;
+    titleCard("BURIED TREASURE!", `+${money(cash)} · ${Object.entries(loot).map(([k, v]) => `${v} ${MATS[k].name}`).join(" · ")} · a spare fuel can`);
+    sfx(523, 0.15, "triangle", 0.1, 1.5); setTimeout(() => sfx(659, 0.15, "triangle", 0.1, 1.5), 120); setTimeout(() => sfx(784, 0.15, "triangle", 0.1, 1.5), 240); setTimeout(() => sfx(1046, 0.4, "triangle", 0.1, 1.2), 360);
+    burst(V3(T.x, groundY5(T.x, T.z) + 0.5, T.z), 30, 6, [aglow(0xffd040), aglow(0xffffff)]);
+    writeSave();
+}
+// ---------- buoy races: three courses that start out past the harbor ----------
+const RACE_START = HARBOR5.pt(HARBOR5.LEN + 24, 0);
+function ringAround(I, a0, a1, n, out) { const pts = []; for (let i = 0; i < n; i++) { const a = lerp(a0, a1, i / Math.max(1, n - 1)); pts.push(polar(I, a, archR(I, a) + out)); } return pts; }
+const RACES5 = (() => {
+    const H = ARCH_BY.haven, C = ARCH_BY.coral, S = ARCH_BY.skull, F = ARCH_BY.frost, T = ARCH_BY.storm, h0 = Math.atan2(RACE_START.z, RACE_START.x);
+    const toward = (I, from) => Math.atan2(from.z - I.z, from.x - I.x);
+    const courses = [
+        { k: "sprint", name: "HARBOR SPRINT", desc: "Once round Port Haven, close to the rocks", gates: ringAround(H, h0 + 0.35, h0 + Math.PI * 2 - 0.25, 10, 26) },
+        { k: "coral", name: "CORAL RUN", desc: "Out round Coral Key and back", gates: [polar(H, h0 + 0.1, archR(H, h0) + 70), ...ringAround(C, toward(C, H) - 0.6, toward(C, H) - 0.6 + Math.PI * 1.9, 7, 24), polar(H, h0 - 0.25, archR(H, h0) + 70)] },
+        { k: "grand", name: "GRAND TOUR", desc: "Every island. Bring every can of fuel you own", gates: [polar(C, toward(C, H), archR(C, toward(C, H)) + 30), polar(C, toward(C, H) + 1.5, archR(C, toward(C, H) + 1.5) + 30), polar(T, toward(T, C), archR(T, toward(T, C)) + 30), polar(T, toward(T, C) - 1.6, archR(T, toward(T, C) - 1.6) + 30), polar(F, toward(F, T), archR(F, toward(F, T)) + 30), polar(F, toward(F, T) - 1.6, archR(F, toward(F, T) - 1.6) + 30), polar(S, toward(S, F), archR(S, toward(S, F)) + 40), polar(S, toward(S, F) - 1.5, archR(S, toward(S, F) - 1.5) + 40), polar(H, toward(H, S), archR(H, toward(H, S)) + 30)] }
+    ];
+    for (const C2 of courses) {
+        // push any gate that lands too close to land or a rock out into open water
+        for (const g of C2.gates) for (let k = 0; k < 40 && (wetH5(g.x, g.z) > -1.6 || ROCKS5.some(R => Math.hypot(g.x - R.x, g.z - R.z) < R.r + 10)); k++) { const I = archAt(g.x, g.z), a = Math.atan2(g.z - I.z, g.x - I.x); g.x += Math.cos(a) * 3; g.z += Math.sin(a) * 3; }
+        C2.gates.push({ x: RACE_START.x, z: RACE_START.z, finish: true });
+        let L = Math.hypot(C2.gates[0].x - RACE_START.x, C2.gates[0].z - RACE_START.z); for (let i = 1; i < C2.gates.length; i++) L += Math.hypot(C2.gates[i].x - C2.gates[i - 1].x, C2.gates[i].z - C2.gates[i - 1].z);
+        C2.len = L; C2.gold = Math.round(L / 19); C2.silver = Math.round(L / 15.5); C2.bronze = Math.round(L / 12.5);
+        C2.prize = Math.round(L * 150);
+    }
+    return courses;
+})();
+const race5 = { on: false, c: null, i: 0, t: 0, count: 0, objs: [] };
+// the start line: a floating platform out past the harbor, with a chequered flag and a scoreboard
+function buildRaceBuoy5() {
+    const g = new THREE.Group(), p = RACE_START; g.position.set(p.x, -0.3, p.z); g.rotation.y = Math.atan2(HARBOR5.DIR.x, HARBOR5.DIR.z); scene.add(g);
+    part(g, CYL8, lamb(0xf4f4f4), 0, 0.15, 0, 3.2, 0.5, 3.2); part(g, CYL8, lamb(0xd8202a), 0, 0.42, 0, 3.25, 0.1, 3.25);
+    for (const s of [-1, 1]) { part(g, CONE6, lamb(s < 0 ? 0xd8202a : 0xf4f4f4), s * 7, 1.2, 0, 0.55, 2.4, 0.55); part(g, ICO, glowM(0xffd040), s * 7, 2.6, 0, 0.18); }
+    part(g, CYL6, lamb(0x3a3a40), 0, 2.7, 0, 0.07, 4.6, 0.07);
+    const cv = document.createElement("canvas"); cv.width = cv.height = 64; const cx = cv.getContext("2d"); for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { cx.fillStyle = (i + j) % 2 ? "#111" : "#f4f4f4"; cx.fillRect(i * 8, j * 8, 8, 8); }
+    const ft = new THREE.CanvasTexture(cv); ft.magFilter = THREE.NearestFilter;
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.9), new THREE.MeshBasicMaterial({ map: ft, side: THREE.DoubleSide })); flag.position.set(0.72, 4.5, 0); g.add(flag);
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.0), new THREE.MeshBasicMaterial({ map: signTex("BUOY RACES", "DRIVE UP · PRESS F", "#ffe060"), side: THREE.DoubleSide })); board.position.set(0, 1.5, -1.2); g.add(board);
+    const l = label("🏁 BUOY RACES", "#ffe060", 3, 0.7); l.position.set(p.x, 6.2, p.z); l.maxD = 160;
+}
+function makeGate5(g, finish) {
+    const grp = new THREE.Group(), prev = addTgt; addTgt = isle5G; scene.add(grp); addTgt = prev;
+    const ang = Math.atan2(g.z - (g.pz ?? RACE_START.z), g.x - (g.px ?? RACE_START.x)), px = -Math.sin(ang), pz = Math.cos(ang);
+    grp.position.set(g.x, 0, g.z);
+    const red = lamb(finish ? 0x1a1a1a : 0xd8202a), wht = lamb(0xf4f4f4), on = new THREE.MeshBasicMaterial({ color: finish ? 0xffffff : 0xffe060, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
+    for (const s of [-1, 1]) { const b = new THREE.Group(); b.position.set(px * s * 7, -0.3, pz * s * 7); grp.add(b); part(b, CONE6, s < 0 ? red : wht, 0, 1.2, 0, 0.55, 2.4, 0.55); part(b, CYL8, s < 0 ? wht : red, 0, 0.3, 0, 0.7, 0.6, 0.7); part(b, ICO, glowM(finish ? 0xffffff : 0xffd040), 0, 2.6, 0, 0.18); }
+    const banner = part(grp, BOX, finish ? lamb(0xf4f4f4) : lamb(0xffd040), 0, 4.2, 0, 14, 0.5, 0.06, 0, -ang + Math.PI / 2, 0);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(6.6, 0.18, 6, 32), on); ring.position.y = 2.2; ring.rotation.y = -ang + Math.PI / 2; grp.add(ring);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 60, 8, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe060, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide, fog: false })); beam.position.y = 30; grp.add(beam);
+    return { grp, ring, beam, banner };
+}
+function startRace5(k) {
+    const C = RACES5.find(c => c.k === k); if (!C || race5.on) return;
+    if (!B5.on) { toast("Get in your boat first.", "bad"); return; }
+    race5.on = true; race5.c = C; race5.i = 0; race5.t = 0; race5.count = 3.2;
+    race5.objs = C.gates.map((g, i) => { const p = C.gates[i - 1] || RACE_START; g.px = p.x; g.pz = p.z; return makeGate5(g, g.finish); });
+    B5.x = RACE_START.x; B5.z = RACE_START.z; B5.yaw = Math.atan2(C.gates[0].x - RACE_START.x, C.gates[0].z - RACE_START.z); B5.speed = 0; player.yaw = B5.yaw + Math.PI; placeBoat();
+    closePanel();
+}
+function endRace5(done) {
+    if (!race5.on) return;
+    const C = race5.c, t = race5.t;
+    for (const o of race5.objs) { o.grp.parent && o.grp.parent.remove(o.grp); o.grp.traverse(m => { if (m.isMesh && m.geometry !== BOX && m.geometry !== CONE6 && m.geometry !== CYL8 && m.geometry !== ICO) m.geometry.dispose(); }); }
+    race5.objs = []; race5.on = false; say("");
+    if (!done) { toast(`${C.name}: race abandoned.`, "bad"); return; }
+    const best = save.races[C.k], medal = t <= C.gold ? 3 : t <= C.silver ? 2 : t <= C.bronze ? 1 : 0, had = save.medals[C.k] || 0;
+    let prize = Math.round(C.prize * rebirthMult() * (best ? 0.15 : 1));
+    if (medal > had) { prize += Math.round(C.prize * rebirthMult() * 0.6 * (medal - had)); save.medals[C.k] = medal; }
+    if (!best || t < best) save.races[C.k] = t;
+    save.money += prize;
+    titleCard(`${C.name}: ${fmtT(t)}`, `${["no medal", "BRONZE", "SILVER", "GOLD"][medal]}${!best || t < best ? " · NEW RECORD" : ""} · +${money(prize)}`);
+    sfx(523, 0.2, "triangle", 0.1, 1.5); setTimeout(() => sfx(784, 0.3, "triangle", 0.1, 1.5), 180); if (medal === 3) setTimeout(() => sfx(1046, 0.5, "triangle", 0.1, 1.2), 360);
+    writeSave();
+}
+const fmtT = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+function updateRace5(dt) {
+    if (!race5.on) return;
+    if (!B5.on || isle !== 5) { endRace5(false); return; }
+    const C = race5.c;
+    if (race5.count > 0) {
+        const before = Math.ceil(race5.count); race5.count -= dt; B5.speed = 0;
+        const n = Math.ceil(race5.count); if (n !== before && n > 0) sfx(440, 0.15, "square", 0.08, 1);
+        say(race5.count > 0 ? `${C.name} · ${Math.ceil(race5.count)}` : "GO!"); if (race5.count <= 0) { sfx(880, 0.4, "square", 0.1, 1); setTimeout(() => say(""), 700); }
+        return;
+    }
+    race5.t += dt;
+    const g = C.gates[race5.i];
+    race5.objs.forEach((o, i) => { const act = i === race5.i; o.ring.material.opacity = act ? 0.45 + Math.sin(time * 6) * 0.15 : 0.08; o.beam.visible = act; o.ring.visible = i >= race5.i; o.banner.visible = i >= race5.i; });
+    if (Math.hypot(B5.x - g.x, B5.z - g.z) < 7.5) {
+        race5.i++; sfx(660 + race5.i * 30, 0.12, "triangle", 0.09, 1.6); burst(V3(g.x, 1.5, g.z), 14, 4, [aglow(0xffe060), aglow(0xffffff)]);
+        if (race5.i >= C.gates.length) endRace5(true);
+    }
+}
+function raceItems() {
+    return RACES5.map(C => {
+        const best = save.races[C.k], md = save.medals[C.k] || 0;
+        return { name: `${C.name}${md ? " " + ["", "🥉", "🥈", "🥇"][md] : ""}`, col: ["#ffd040", "#d89a5a", "#d8e0f0", "#ffd040"][md], desc: `${C.desc} · ${C.gates.length} gates · ${Math.round(C.len)} m · gold ${fmtT(C.gold)} · silver ${fmtT(C.silver)} · bronze ${fmtT(C.bronze)}${best ? ` · your best ${fmtT(best)}` : ""} · first finish pays ${money(C.prize * rebirthMult())}`, act() { startRace5(C.k); }, actTxt: "START" };
+    });
+}
+// ---------- salvage: crates, fuel barrels and the odd golden chest floating between the islands ----------
+const salv5 = { items: [], t: 4 };
+function spawnSalvage() {
+    for (let i = 0; i < 40; i++) {
+        const a = Math.random() * 6.283, d = rand(60, 320), x = player.pos.x + Math.cos(a) * d, z = player.pos.z + Math.sin(a) * d;
+        if (Math.hypot(x, z) > 700 || wetH5(x, z) > -2.5) continue;
+        const I = archAt(x, z); if (archIn(I, x, z) > -22) continue;
+        if (ROCKS5.some(R => Math.hypot(x - R.x, z - R.z) < R.r + 12)) continue;
+        const r = Math.random(), kind = r < 0.06 ? "gold" : r < 0.32 ? "fuel" : "crate";
+        const g = new THREE.Group(), prev = addTgt; addTgt = isle5G; scene.add(g); addTgt = prev;
+        if (kind === "crate") { part(g, BOX, lamb(0x8a6a4a), 0, 0, 0, 1.1, 0.9, 1.1); part(g, BOX, lamb(0x5a3a1a), 0, 0, 0, 1.15, 0.12, 1.15); part(g, BOX, lamb(0x5a3a1a), 0, 0, 0, 0.12, 0.95, 1.15); }
+        else if (kind === "fuel") { part(g, CYL8, lamb(0xd8202a), 0, 0, 0, 0.45, 1.1, 0.45, 0, 0, Math.PI / 2); part(g, CYL8, lamb(0xf4f4f4), 0, 0, 0, 0.47, 0.18, 0.47, 0, 0, Math.PI / 2); }
+        else { part(g, BOX, lamb(0x4a2a5a), 0, 0, 0, 1.2, 0.7, 0.85); part(g, BOX, glowM(0xffd040), 0, 0.37, 0, 1.25, 0.08, 0.9); part(g, ICO, aglow(0xffe080, 0.3), 0, 0.6, 0, 0.9); }
+        g.position.set(x, -0.35, z);
+        salv5.items.push({ g, x, z, kind, life: 240, ph: Math.random() * 6 });
+        return;
+    }
+}
+function updateSalvage(dt) {
+    if ((salv5.t -= dt) <= 0) { salv5.t = rand(14, 28); if (salv5.items.length < 7) spawnSalvage(); }
+    for (const s of salv5.items) {
+        s.life -= dt; s.ph += dt;
+        s.g.position.y = -0.35 + Math.sin(s.ph * 1.6) * 0.12; s.g.rotation.set(Math.sin(s.ph) * 0.12, s.ph * 0.2, Math.cos(s.ph * 0.8) * 0.1);
+        s.g.visible = Math.hypot(s.x - player.pos.x, s.z - player.pos.z) < 300;
+        if (boating() && Math.hypot(s.x - B5.x, s.z - B5.z) < 4.2) { s.life = 0; grabSalvage(s); }
+    }
+    for (let i = salv5.items.length - 1; i >= 0; i--) if (salv5.items[i].life <= 0) { const s = salv5.items[i]; s.g.parent && s.g.parent.remove(s.g); salv5.items.splice(i, 1); }
+}
+function grabSalvage(s) {
+    const m = rebirthMult();
+    burst(V3(s.x, 0, s.z), 12, 3, [wakeMat, aglow(0xffffff)]); sfx(440, 0.12, "triangle", 0.08, 1.6);
+    if (s.kind === "fuel") { const add = boatMaxFuel() * 0.22; save.boat.fuel = Math.min(boatMaxFuel(), save.boat.fuel + add); toast(`Salvage: a barrel of fuel! +${Math.round(add)} fuel`, "good"); }
+    else if (s.kind === "gold") { const cash = Math.round(rand(3000, 6000) * m * 25), p = 2 + Math.floor(Math.random() * 3), sg = 1 + Math.floor(Math.random() * 3); save.money += cash; save.mats.pearl = (save.mats.pearl || 0) + p; save.mats.stormglass = (save.mats.stormglass || 0) + sg; titleCard("GOLDEN SALVAGE!", `+${money(cash)} · ${p} Pearls · ${sg} Stormglass`); }
+    else { const ks = ["driftwood", "salt", "coral", "tar", "iceshard"], k = ks[Math.floor(Math.random() * ks.length)], n = 4 + Math.floor(Math.random() * 7), cash = Math.round(rand(800, 1800) * m * 25); save.mats[k] = (save.mats[k] || 0) + n; save.money += cash; toast(`Salvage: +${money(cash)} and ${n} ${MATS[k].name}`, "cash"); }
+    save.salvaged = (save.salvaged || 0) + 1;
+}
+// ---------- messages in bottles: twelve of them, washed up on beaches all over the Archipelago ----------
+const BOTTLE_NOTES = [
+    "Day 1. The Merrow ran aground off a wreck-shaped rock. The crew's gone ashore. I'm writing this to whoever finds it. — Capt. E. Merrow",
+    "The monkeys on Port Haven stole my compass. The big one with the grey ears. If you see him, he owes me a compass.",
+    "There's an X on Skull Rock, I'm sure of it. Brine won't tell me where. He just laughs, which is worse.",
+    "The flamingos in Coral Key's lagoon stand on one leg to keep the other one warm. I tried it. It doesn't work for people.",
+    "Ran out of fuel halfway to Frostcap. Rowed the rest with a plank. Fill the tank, friend. Always fill the tank.",
+    "The penguins slide on their bellies when they're scared. I've started doing the same. Morale is improving.",
+    "At the top of Frostcap you can see every island at once. And something else, past the storm. A shape. Moving.",
+    "The Keeper on Storm Isle says the lighthouse isn't for ships. Says it's to keep something OUT. I didn't ask.",
+    "Found a pearl the size of my thumb in a Pearlbloom. Sold it. Regret it. It was beautiful.",
+    "Dolphins raced my boat today. They won. They always win. Faster engine next time.",
+    "The ghosts of Port Haven work for nothing but a purpose. The Captain says that's more than most of us get.",
+    "Last bottle. If you've found all twelve, you know the islands better than I ever did. Bess will want to meet you. — E.M."
+];
+function buildBottles5() {
+    const R = mkRng(777), per = { haven: 3, coral: 3, skull: 2, frost: 2, storm: 2 }, mat = new THREE.MeshLambertMaterial({ color: 0x7ad8a8, emissive: 0x0a3a2a, transparent: true, opacity: 0.85 }), cork = lamb(0x8a6a4a), paper = lamb(0xf4ecd8);
+    let id = 0;
+    for (const k of ISL5) {
+        const I = ARCH_BY[k];
+        for (let j = 0; j < per[k]; j++) {
+            let placed = false;
+            if (k === "coral" && j === 0) placed = putBottle(id, H5.islet.x + 0.9, H5.islet.z + 0.9, mat, cork, paper, R);
+            for (let i = 0; i < 300 && !placed; i++) {
+                const a = R() * 6.283, d = archR(I, a) - (5 + R() * 6), x = I.x + Math.cos(a) * d, z = I.z + Math.sin(a) * d, y = archTerrain(I, x, z);
+                if (y < 0.1 || y > 2.2 || !clearAt5(I, x, z, 2) || slope5(x, z) > 0.6) continue;
+                if (isle5.bottles.some(b => Math.hypot(b.x - x, b.z - z) < 25)) continue;
+                placed = putBottle(id, x, z, mat, cork, paper, R);
+            }
+            id++;
+        }
+    }
+}
+function putBottle(id, x, z, mat, cork, paper, R) {
+    const g = new THREE.Group(), y = groundY5(x, z); g.position.set(x, y + 0.12, z); g.rotation.set(0, R() * 6.28, 1.35); scene.add(g);
+    part(g, CYL8, mat, 0, 0, 0, 0.11, 0.36, 0.11); part(g, CYL8, mat, 0, 0.24, 0, 0.05, 0.14, 0.05); part(g, CYL8, cork, 0, 0.33, 0, 0.055, 0.06, 0.055); part(g, BOX, paper, 0, 0, 0, 0.1, 0.24, 0.02);
+    const glint = part(g, ICO, aglow(0xffffff, 0.6), 0, 0.1, 0.12, 0.06);
+    isle5.bottles.push({ id, g, glint, x, z, I: archAt(x, z).k });
+    g.visible = !save.bottles.includes(id);
+    return true;
+}
+function readBottle(b) {
+    if (save.bottles.includes(b.id)) return;
+    save.bottles.push(b.id); b.g.visible = false;
+    const cash = Math.round(25000 * rebirthMult());
+    save.money += cash;
+    sfx(660, 0.15, "sine", 0.07, 1.4); setTimeout(() => sfx(990, 0.25, "sine", 0.06, 1.2), 130);
+    startTalk(`MESSAGE IN A BOTTLE · ${save.bottles.length} / ${BOTTLE_NOTES.length}`, [BOTTLE_NOTES[b.id] || "The ink has run. You can't read it.", `There's a coin in the bottle too: +${money(cash)}.${save.bottles.length >= 4 ? " Beachcomber Bess on Coral Key collects these..." : ""}`]);
+    writeSave();
+}
+const BESS_REWARDS = [[4, 300000, { pearl: 4 }], [8, 900000, { pearl: 8, stormglass: 4 }], [12, 2500000, { pearl: 15, stormglass: 10 }]];
+function talkBess() {
+    save.bessGot = save.bessGot || 0;
+    const n = save.bottles.length, next = BESS_REWARDS.find((r, i) => i >= save.bessGot && n >= r[0]);
+    if (next) {
+        const [need, cash, mats] = next, c = Math.round(cash * rebirthMult() / 3);
+        save.bessGot++; save.money += c; for (const [k, v] of Object.entries(mats)) save.mats[k] = (save.mats[k] || 0) + v;
+        if (need >= 12) { save.boat.paints = [...new Set([...(save.boat.paints || ["classic"]), "pearl"])]; }
+        startTalk("BEACHCOMBER BESS", [`${need} bottles! Oh, let me read them... oh, poor Captain Merrow.`, `Here, take this for your trouble: ${money(c)} and ${Object.entries(mats).map(([k, v]) => `${v} ${MATS[k].name}`).join(" and ")}.${need >= 12 ? " And tell the Shipwright Bess says you can have the PEARL DIVER paint. On the house." : ""}`]);
+        sfx(784, 0.2, "triangle", 0.09, 1.4); writeSave(); return;
+    }
+    const left = ISL5.filter(k => isle5.bottles.some(b => b.I === k && !save.bottles.includes(b.id)));
+    const lines = n >= 12 ? ["You found every one of Merrow's bottles. I'll never forget it.", "Sometimes I still walk the beaches. Habit."]
+        : [`Messages in bottles wash up all over the Archipelago. You've found ${n} of ${BOTTLE_NOTES.length}.`, `Bring me news at 4, 8 and all 12 and I'll make it worth your while.${left.length ? ` Try the beaches of ${ARCH_BY[left[Math.floor(Math.random() * left.length)]].name}.` : ""}`];
+    startTalk("BEACHCOMBER BESS", lines);
+}
+// ---------- summits: plant your flag on the four high points ----------
+const SUMMITS5 = [
+    { k: "lookout", name: "LOOKOUT POINT", I: "haven", at: () => ({ x: H5.lookout.x - 1.2, z: H5.lookout.z - 1.2 }) },
+    { k: "crown", name: "SKULL'S CROWN", I: "skull", at: () => ({ x: H5.cragTop.x, z: H5.cragTop.z }) },
+    { k: "summit", name: "FROSTCAP SUMMIT", I: "frost", at: () => ({ x: TRAILS5.frost[0].pts.at(-1)[0] - 1.5, z: TRAILS5.frost[0].pts.at(-1)[1] + 1 }) },
+    { k: "stones", name: "THE STORM STONES", I: "storm", at: () => ({ x: H5.circle.x + 3, z: H5.circle.z - 3 }) }
+];
+function buildFlags5() {
+    for (const S of SUMMITS5) {
+        const p = S.at(), y = groundY5(p.x, p.z), g = new THREE.Group(); g.position.set(p.x, y, p.z); scene.add(g);
+        part(g, CYL6, lamb(0xd8d8e0), 0, 2.2, 0, 0.06, 4.4, 0.06); part(g, ICO, glowM(0xffd040), 0, 4.45, 0, 0.1);
+        part(g, BOX, lamb(0x6a6460), 0, 0.15, 0, 0.8, 0.3, 0.8);
+        const cloth = new THREE.Group(); g.add(cloth); part(cloth, BOX, lamb(0xd8202a), 0.45, 0, 0, 0.9, 0.55, 0.03); part(cloth, BOX, glowM(0xffd040), 0.45, 0, 0.02, 0.3, 0.3, 0.01);
+        const up = !!save.summits[S.k]; cloth.position.y = up ? 4.0 : 0.5;
+        isle5.flags[S.k] = { g, cloth, x: p.x, z: p.z, y, raise: 0 };
+    }
+}
+function plantFlag(S) {
+    if (save.summits[S.k]) return;
+    save.summits[S.k] = 1; isle5.flags[S.k].raise = 1.4;
+    const n = Object.keys(save.summits).length, cash = Math.round(120000 * rebirthMult()), all = n >= SUMMITS5.length, bonus = all ? Math.round(600000 * rebirthMult()) : 0;
+    save.money += cash + bonus;
+    const main = CREW_MATS[S.I][0][0]; save.mats[main] = (save.mats[main] || 0) + 25;
+    titleCard(`${S.name} CLIMBED`, `you plant your flag · +${money(cash)} · 25 ${MATS[main].name} · ${n} / ${SUMMITS5.length} summits${all ? ` · EVERY SUMMIT! +${money(bonus)}` : ""}`);
+    sfx(523, 0.2, "triangle", 0.1, 1.4); setTimeout(() => sfx(659, 0.2, "triangle", 0.1, 1.4), 170); setTimeout(() => sfx(784, 0.4, "triangle", 0.1, 1.2), 340);
+    writeSave();
+}
+// ---------- the islanders ----------
+function pirateItems() {
+    const cost = Math.round(60000 * rebirthMult()), has = !!save.tmap;
+    return [
+        { name: "Treasure Map", desc: has ? `You already carry a map: X marks a spot on ${ARCH_BY[save.tmap.k].name}. Dig it up first!` : "A map to a buried chest: cash, Pearls, Stormglass and a spare fuel can. Each one points somewhere new", cost, maxed: has, maxTxt: "DIG FIRST", buy() { newTreasureMap("brine"); } },
+        { name: "Old Sea Chart", desc: save.chart ? "Every bottle on the Archipelago is marked on your map" : "Marks every message in a bottle on your map (M)", cost: Math.round(150000 * rebirthMult()), owned: !!save.chart, maxed: !!save.chart, maxTxt: "OWNED", buy() { save.chart = 1; } },
+        { name: "Pirate's Grog", col: BUFFS.fury.col, desc: `+40% axe and gun damage for 4 min${buffLeft("fury") > 0 ? ` · ACTIVE ${mmss(buffLeft("fury"))}` : ""}`, cost: Math.round(12000 * rebirthMult()), quiet: true, buy() { giveBuff("fury", 240); toast("The grog burns all the way down. You feel UNSTOPPABLE.", "good"); } }
+    ];
+}
+function hermitItems() {
+    return [
+        { name: "Hot Cocoa", col: "#ffb070", desc: `Full health, and take 40% less damage for 4 min${buffLeft("ironhide") > 0 ? ` · ACTIVE ${mmss(buffLeft("ironhide"))}` : ""}`, cost: Math.round(8000 * rebirthMult()), quiet: true, buy() { player.hp = player.maxHp; giveBuff("ironhide", 240); toast("Warm all the way to your toes.", "good"); } },
+        { name: "Snowshoes Tonic", col: BUFFS.swift.col, desc: `+30% move speed for 4 min${buffLeft("swift") > 0 ? ` · ACTIVE ${mmss(buffLeft("swift"))}` : ""}`, cost: Math.round(9000 * rebirthMult()), quiet: true, buy() { giveBuff("swift", 240); } }
+    ];
+}
+function talkKeeper() {
+    const day = save.day, got = save.keeperDay === day;
+    if (!got) { save.keeperDay = day; save.mats.stormglass = (save.mats.stormglass || 0) + 5; toast("The Keeper hands you 5 Stormglass from the lamp room. \"Come back tomorrow.\"", "good"); }
+    startTalk("THE KEEPER", [["The lamp isn't for ships. It never was.", "Past the storm there's something big. It turns in its sleep and the sea turns with it.", "Climb to the stones at night. The storms crackle up there like nothing else.", "I trim the wick, I watch, I write it down. That's the job."][Math.floor(Math.random() * 4)], got ? "I've nothing more for you today." : "Stormglass from the lamp room. It gathers up there like frost. Take it."]);
+    writeSave();
+}
+// ---------- deep-sea and ice fishing ----------
+FISH.deep = [
+    { n: "Parrotfish", r: "common", v: 200, w: [1, 4], wt: 28 }, { n: "Yellowtail", r: "common", v: 260, w: [2, 8], wt: 24 }, { n: "Barracuda", r: "uncommon", v: 600, w: [4, 20], wt: 12 },
+    { n: "Grouper", r: "uncommon", v: 750, w: [5, 40], wt: 10 }, { n: "Mahi-mahi", r: "uncommon", v: 850, w: [4, 18], wt: 9 }, { n: "Lionfish", r: "rare", v: 1600, w: [0.5, 1.5], wt: 4 },
+    { n: "Blue Marlin", r: "rare", v: 3000, w: [40, 180], wt: 2.6 }, { n: "Octopus", r: "rare", v: 2200, w: [2, 10], wt: 5, night: true }, { n: "Hammerhead", r: "epic", v: 6000, w: [60, 250], wt: 3, storm: true },
+    { n: "Golden Marlin", r: "epic", v: 12000, w: [80, 300], wt: 0.6 }, { n: "Sunken Doubloon", r: "rare", v: 4000, wt: 1.6 }, { n: "Old Anchor", r: "junk", v: 5, wt: 6 }
+];
+FISH.ice = [
+    { n: "Glacier Cod", r: "common", v: 350, w: [1, 6], wt: 30 }, { n: "Frost Char", r: "common", v: 420, w: [0.5, 3], wt: 24 }, { n: "Ice Pike", r: "uncommon", v: 900, w: [3, 14], wt: 12 },
+    { n: "Crystal Eel", r: "rare", v: 2600, w: [1, 5], wt: 5, night: true }, { n: "Aurora Trout", r: "epic", v: 7000, w: [2, 8], wt: 1.2 }, { n: "Yeti's Sock", r: "junk", v: 2, wt: 6 }
+];
+ALL_FISH.push(...FISH.deep.map(f => ({ ...f, where: "Archipelago" })), ...FISH.ice.map(f => ({ ...f, where: "Frostcap ice" })));
+function fishSpot5() {
+    const px = player.pos.x, pz = player.pos.z, fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+    if (H5.hole && Math.hypot(px - H5.hole.x, pz - H5.hole.z) < 2.6 && !B5.on) return { kind: "ice", blocked: false, tx: H5.hole.x, tz: H5.hole.z };
+    if (B5.on) { if (Math.abs(B5.speed) > 0.8 || race5.on) return null; const tx = px + fx * 8, tz = pz + fz * 8; return { kind: "deep", blocked: wetH5(tx, tz) > -0.8, tx, tz }; }
+    const I = archAt(px, pz), dock = onDock5(px, pz);
+    if (dock || archIn(I, px, pz) < 8) { const tx = px + fx * 7, tz = pz + fz * 7, blocked = wetH5(tx, tz) > -0.6; if (blocked && !dock) return null; return { kind: "deep", blocked, tx, tz }; } // on a beach you only see the prompt when you face the sea
+    return null;
+}
+
+// =========================== entering, updating and talking ===========================
 function enterIsle5() {
     leaveWorld();
     if (!isle5Built) { buildIsle5(); buildCasino(5); snapWorld(5); } else loadWorld(5);
@@ -10303,46 +11824,98 @@ function enterIsle5() {
     smokeEmit.length = 0; isle5.emit.forEach(e => smokeEmit.push(e));
     RESPAWN.x = 2; RESPAWN.z = 4;
     arch5 = "haven"; terrainMesh[5] = isle5.terrain.haven;
-    boatHome(0); B5.on = false;
+    boatHome(0); B5.on = false; clampLast5.ok = false;
     syncGhosts();
     resetIsleTrees(archTreeTarget());
     resetChests();
+    crewTick(true);
 }
+let fallsT = 0;
 function updateIsle5(dt, animOnly) {
     if (!isle5Built || isle !== 5) return;
     updateNpcs(dt, npcs5);
     if (isle5.foam) isle5.foam.material.opacity = 0.42 + Math.sin(time * 0.8) * 0.14;
     if (isle5.fireLight) isle5.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
     if (isle5.beam) isle5.beam.rotation.y = time * 0.8;
+    if (isle5.falls) isle5.falls.tex.offset.y += dt * 1.4;
+    if (isle5.stormHeart) { isle5.stormHeart.rotation.y += dt * 1.5; isle5.stormHeart.position.y += (archTerrain(ARCH_BY.storm, H5.circle.x, H5.circle.z) + 1.6 + Math.sin(time * 2) * 0.25 - isle5.stormHeart.position.y) * Math.min(1, dt * 4); }
+    for (const l of isle5.lamps) l.scale.setScalar(0.3 + Math.sin(time * 3 + l.position.x) * 0.06);
+    for (const k in isle5.crates) { const c = isle5.crates[k], n = crateN(k); c.glow.visible = n > 0; c.glow.position.y = 1.1 + Math.sin(time * 2) * 0.12; c.l.el.textContent = n ? `GHOST CRATE · ${n}${n >= crateCap() ? " · FULL" : ""}` : "GHOST CREW CRATE"; }
+    for (const S of SUMMITS5) { const f = isle5.flags[S.k]; if (!f) continue; if (f.raise > 0) { f.raise -= dt; f.cloth.position.y = lerp(4.0, 0.5, Math.max(0, f.raise) / 1.4); } f.cloth.rotation.y = Math.sin(time * 3 + f.x) * 0.25; }
+    for (const b of isle5.bottles) if (b.g.visible) b.glint.material.opacity = 0.25 + Math.max(0, Math.sin(time * 2.5 + b.id)) * 0.6;
     for (const [b, ph] of [[isle5.boatArr, 0], [isle5.boatNext, 1.3]]) if (b) { b.position.y = -0.15 + Math.sin(time * 1.1 + ph) * 0.07; b.rotation.z = Math.sin(time * 0.9 + ph) * 0.03; }
-    if (!B5.on && B5.mesh) { B5.mesh.position.y = -0.32 + Math.sin(time * 1.2) * 0.05; B5.mesh.rotation.z = Math.sin(time * 0.9) * 0.025; }
+    if (!B5.on && B5.mesh) { B5.mesh.position.y = -0.32 + Math.sin(time * 1.2) * 0.05; B5.mesh.rotation.z = Math.sin(time * 0.9) * 0.025; B5.mesh.rotation.x = 0; }
+    if (B5.mesh) B5.mesh.userData.flag.rotation.y = Math.sin(time * 6) * 0.3 + (B5.on ? Math.min(0.6, Math.abs(B5.speed) * 0.04) : 0);
     if (ferryman5) { ferryman5.position.y = 0.3 + Math.sin(time * 1.2) * 0.02; const base = Math.atan2(NEXT5.DIR.x, NEXT5.DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN5.x, player.pos.z - FERRYMAN5.z) < 14; ferryman5.rotation.y += angDiff(near ? Math.atan2(player.pos.x - FERRYMAN5.x, player.pos.z - FERRYMAN5.z) : base, ferryman5.rotation.y) * Math.min(1, 3 * dt); }
+    if (isle5.captain) isle5.captain.g.position.y = 0.25 + Math.sin(time * 1.4) * 0.1;
     // island names show how far away they are
     if ((time * 2 | 0) !== ((time - dt) * 2 | 0)) for (const { l, I } of isle5.labels) { const d = Math.round(Math.hypot(player.pos.x - I.x, player.pos.z - I.z) - I.r); const t = d > 30 ? `${I.name} · ${d}m` : I.name; if (l.el.textContent !== t) l.el.textContent = t; }
+    updateWakes(dt); updateSea5(dt);
     if (animOnly || state !== "playing") return;
+    crewTick(); updateRace5(dt); updateSalvage(dt); updateDig(dt);
+    // the falls splash and roar when you're near
+    if (isle5.falls && arch5 === "haven") { const d = Math.hypot(player.pos.x - isle5.falls.x, player.pos.z - isle5.falls.z); if (d < 45 && (fallsT -= dt) <= 0) { fallsT = 0.12; burst(V3(isle5.falls.x + rand(-1, 1), -0.3, isle5.falls.z + rand(-1, 1)), 2, 2.2, [wakeMat]); if (d < 25 && Math.random() < 0.3) sfx(70 + Math.random() * 40, 0.3, "sawtooth", 0.012 * (1 - d / 25), 0.9); } }
+    // swimming: splashes as you paddle
+    if (swim5() && Math.hypot(player.vel.x, player.vel.z) > 1 && Math.random() < dt * 5) { burst(V3(player.pos.x, -0.4, player.pos.z), 2, 1.6, [wakeMat]); if (Math.random() < 0.3) sfx(180 + Math.random() * 80, 0.1, "sine", 0.02, 0.6); }
     // walking onto another island (from a dock) moves the trees there too
     if (!B5.on) { const I = archAt(player.pos.x, player.pos.z); if (I.k !== arch5 && archIn(I, player.pos.x, player.pos.z) > 0) setArch5(I.k); }
 }
 function nearest5() {
-    const px = player.pos.x, pz = player.pos.z, near = (p, r) => Math.hypot(px - p.x, pz - p.z) < r;
-    if (B5.on) return landingSpot() ? { k: "boatout" } : null;
+    const px = player.pos.x, pz = player.pos.z, near = (p, r) => !!p && Math.hypot(px - p.x, pz - p.z) < r;
+    if (B5.on) {
+        if (!race5.on && near(RACE_START, 16) && Math.abs(B5.speed) < 3) return { k: "race" };
+        if (landingSpot()) return { k: "boatout" };
+        const fs = fishSpot5(); if (fs && !fs.blocked) return { k: "fish", spot: fs };
+        return null;
+    }
+    if (digT > 0) return null;
     if (near(SMITH5_AT, 3.4)) return { k: "smith" };
     if (near(DEPOT5_AT, 3.4)) return { k: "depot" };
     if (near(WITCH5_AT, 3.4)) return { k: "witch" };
     if (near(BED5, 3.2)) return { k: "bed" };
     if (near(SHIPWRIGHT, 3.6)) return { k: "ship" };
+    if (near(CAPTAIN5, 3.0)) return { k: "captain" };
     if (near(FERRYMAN5, 3.4)) return { k: "ferry5" };
-    for (const D of DOCKS5) if (D.kind === "harbor" && near(pumpAt(D), 2.4)) return D.I.pump ? { k: "fuel", D } : { k: "bell", D };
-    if (B5.mesh && near({ x: B5.x, z: B5.z }, 5.2)) return { k: "boatin" };
+    if (near(H5.bess, 3.0)) return { k: "bess" };
+    if (near(H5.brine, 3.0)) return { k: "brine" };
+    if (near(H5.hermit, 3.2)) return { k: "hermit" };
+    if (near(H5.keeper, 3.0)) return { k: "keeper" };
+    for (const D of DOCKS5) if (D.kind === "harbor") { if (near(pumpAt(D), 2.4)) return D.I.pump ? { k: "fuel", D } : { k: "bell", D }; if (near(hailAt(D), 2.2)) return { k: "hail", D }; }
+    for (const k in isle5.crates) if (near(isle5.crates[k], 2.4)) return { k: "crate", I: k };
+    const T = save.tmap; if (T && T.k === arch5 && near(T, 2.2)) return { k: "dig" };
+    for (const b of isle5.bottles) if (b.g.visible && near(b, 2.2)) return { k: "bottle", b };
+    for (const S of SUMMITS5) { const f = isle5.flags[S.k]; if (f && !save.summits[S.k] && near(f, 3.2)) return { k: "flag", S }; }
+    if (canBoard()) return { k: "boatin" };
     for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
+    const fs = fishSpot5(); if (fs) return { k: "fish", spot: fs };
     return null;
 }
 const PROMPTS5 = {
     boatin: () => `[F] Drive the boat · fuel ${Math.round((save.boat.fuel / boatMaxFuel()) * 100)}%`, boatout: () => "[F] Get out",
-    fuel: () => (save.boat.fuel >= boatMaxFuel() - 0.5 ? "The tank is full" : `[F] Refuel the boat · ${money(Math.round((boatMaxFuel() - save.boat.fuel) * fuelPrice()))}`),
-    bell: () => `[F] Ring for the harbor tow back to Port Haven · ${money(Math.round(2500 * rebirthMult()))}`, ship: () => "[F] Talk to the Shipwright", ferry5: () => "[F] Talk to the Ferryman"
+    fuel: () => (save.boat.fuel >= boatMaxFuel() - 0.5 ? "The tank is full" : `[F] Refuel the boat · ${money(fillCost())}`),
+    bell: () => `[F] Ring for the harbor tow back to Port Haven · ${money(Math.round(2500 * rebirthMult()))}`, ship: () => "[F] Talk to the Shipwright", ferry5: () => "[F] Talk to the Ferryman",
+    hail: n => (boatNear(n.D) ? "Your boat is tied up right here" : `[F] Call your boat to this dock · ${Math.hypot(B5.x - n.D.B.x, B5.z - n.D.B.z) > 60 ? money(hailCost()) : "free"}`),
+    captain: () => "[F] Talk to the Ghost Captain", crate: n => (crateN(n.I) ? `[F] Empty the ghost crew's crate · ${crateN(n.I)} materials` : crewOf(n.I) ? "The crate is empty. The crew is out chopping" : "An empty crate. The Ghost Captain can send a crew here"),
+    race: () => "[F] Buoy races", dig: () => "[F] Dig here!", bottle: () => "[F] Pick up the message in a bottle", flag: n => `[F] Plant your flag on ${n.S.name}`,
+    bess: () => "[F] Talk to Beachcomber Bess", brine: () => "[F] Talk to Captain Brine", hermit: () => "[F] Visit the Hermit", keeper: () => "[F] Talk to the Keeper"
 };
-const ISLE5_ACT = { boatin: () => boatEnter(), boatout: () => boatExit(), fuel: () => refuel(), bell: () => ringTow(), ship: () => openShop("ship", ["She's fast, but she's thirsty. Mind the gauge.", "Bigger tank, bigger trips.", "I've pulled a lot of sailors out of the water. Most of them were already empty-handed.", "Spare cans. Cheapest life insurance there is."][Math.floor(Math.random() * 4)]), ferry5: () => openFerry5() };
+const pick5 = a => a[Math.floor(Math.random() * a.length)];
+const CAPTAIN_LINES = [
+    "Ahoy, living one. You've got ghosts trailing round after you, haven't you? I can always tell.",
+    "Good workers, ghosts. Never sleep, never grumble. But they're bored stiff, following you about.",
+    "Send them to me and I'll put them to work on the other islands. They'll chop all day and stash the haul in a crate on that island's harbor.",
+    "Sail over and empty the crates whenever you like. Need more hands? The Sea Forge sells Ghost Lumberjacks."
+];
+const ISLE5_ACT = {
+    boatin: () => boatEnter(), boatout: () => boatExit(), fuel: () => refuel(), bell: () => ringTow(), hail: n => hailBoat(n.D),
+    ship: () => openShop("ship", pick5(["She's fast, but she's thirsty. Mind the gauge.", "Bigger tank, bigger trips.", "Fancy a new coat of paint? I've got colours.", "Spare cans. Cheapest life insurance there is.", "Get out next to any beach and I'll have her tied up close for you."])),
+    captain: () => { if (!save.capTalk) { save.capTalk = 1; startTalk("THE GHOST CAPTAIN", CAPTAIN_LINES, openCrew); } else openCrew(); },
+    crate: n => collectCrate(n.I), race: () => openShop("race", "Through the gates in order, back to this buoy. Fastest time wins."),
+    dig: () => startDig(), bottle: n => readBottle(n.b), flag: n => plantFlag(n.S), bess: () => talkBess(),
+    brine: () => openShop("pirate", pick5(["Yarr. Looking for treasure, are ye? Everyone is.", "Maps, grog and charts. All honest. Mostly.", "I buried more gold than you'll ever see. Then I died. Funny old life."])),
+    hermit: () => openShop("hermit", pick5(["Brr. Come in out of the wind.", "The summit trail winds round and round. Follow the red flags.", "Penguins are terrible company. Lovely, but terrible."])),
+    keeper: () => talkKeeper(), ferry5: () => openFerry5()
+};
 function openFerry5() { ferryConfirm = 0; $("ferrySay").textContent = "“Beyond the storm there's something else. I can hear it at night. I'm not ready to sail there yet.”"; openPanel("ferry"); }
 function renderFerry5() {
     document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
@@ -10390,32 +11963,59 @@ function finishRebirth4() {
     }, 2200);
 }
 function drawMap5() {
-    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 470;
+    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 500, MR = 500;
     if (!mapBg5) {
-        const N = 360, oc = document.createElement("canvas"); oc.width = oc.height = N;
-        const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color();
+        const N = 420, oc = document.createElement("canvas"); oc.width = oc.height = N;
+        const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color(), W = MR * 2 / N;
         for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
-            const x = ((px + 0.5) / N - 0.5) * 940, z = ((py + 0.5) / N - 0.5) * 940, I = archAt(x, z), inside = archIn(I, x, z), i = (py * N + px) * 4;
-            if (inside < 0) { const k = clamp(-inside / 40, 0, 1); col.setRGB(lerp(0.3, 0.05, k), lerp(0.75, 0.2, k), lerp(0.8, 0.4, k)); }
-            else { const y = archTerrain(I, x, z); if (inside < 8) col.setRGB(0.9, 0.82, 0.6); else if (I.k === "frost") col.setRGB(0.85, 0.92, 1); else if (I.k === "skull") col.setRGB(0.35, 0.32, 0.3); else if (I.k === "storm") col.setRGB(0.42, 0.3, 0.55); else if (I.k === "coral") col.setRGB(0.95, 0.75, 0.75); else col.setRGB(0.3, 0.6, 0.3); col.multiplyScalar(0.85 + clamp(y / 30, 0, 0.3)); }
-            img.data[i] = col.r * 255; img.data[i + 1] = col.g * 255; img.data[i + 2] = col.b * 255; img.data[i + 3] = 255;
+            const x = ((px + 0.5) / N - 0.5) * MR * 2, z = ((py + 0.5) / N - 0.5) * MR * 2, I = archAt(x, z), inside = archIn(I, x, z), i = (py * N + px) * 4;
+            const rk = rockAt5(x, z);
+            if (rk) col.setRGB(rk.kind === "berg" ? 0.9 : rk.kind === "bar" ? 0.92 : 0.45, rk.kind === "berg" ? 0.97 : rk.kind === "bar" ? 0.85 : 0.42, rk.kind === "berg" ? 1 : rk.kind === "bar" ? 0.65 : 0.4);
+            else if (inside < -3 || archTerrain(I, x, z) < -0.45) { const k = clamp(-inside / 40, 0, 1); col.setRGB(lerp(0.3, 0.05, k), lerp(0.75, 0.2, k), lerp(0.8, 0.4, k)); }
+            else {
+                const y = archTerrain(I, x, z), tr = trailAt5(I, x, z), sl = slope5(x, z), shade = clamp(1 + (archTerrain(I, x - W, z - W) - archTerrain(I, x + W, z + W)) * 0.12, 0.6, 1.35);
+                if (tr.d < tr.w) col.setRGB(0.78, 0.66, 0.46);
+                else if (y < 1.4 && inside < 12) col.setRGB(0.9, 0.82, 0.6);
+                else if (I.k === "frost") y > 5 ? col.setRGB(0.92, 0.96, 1) : col.setRGB(0.55, 0.62, 0.55);
+                else if (I.k === "skull") col.setRGB(0.36, 0.32, 0.3);
+                else if (I.k === "storm") y > 12 ? col.setRGB(0.4, 0.42, 0.32) : col.setRGB(0.46, 0.34, 0.56);
+                else if (I.k === "coral") col.setRGB(0.95, 0.86, 0.68);
+                else col.setRGB(0.3, 0.58, 0.3);
+                if (sl > 1.3) col.multiplyScalar(0.7);
+                col.multiplyScalar(shade * (0.9 + clamp(y / 50, 0, 0.25)));
+            }
+            img.data[i] = clamp(col.r, 0, 1) * 255; img.data[i + 1] = clamp(col.g, 0, 1) * 255; img.data[i + 2] = clamp(col.b, 0, 1) * 255; img.data[i + 3] = 255;
         }
         og.putImageData(img, 0, 0); mapBg5 = oc;
     }
     g.clearRect(0, 0, S, S);
     g.fillStyle = "#0a1a2a"; g.beginPath(); g.arc(c, c, c - 6, 0, 7); g.fill(); g.strokeStyle = "rgba(120,200,255,.5)"; g.lineWidth = 3; g.stroke();
-    g.save(); g.beginPath(); g.arc(c, c, c - 8, 0, 7); g.clip(); g.drawImage(mapBg5, c - 470 * sc, c - 470 * sc, 940 * sc, 940 * sc); g.restore();
-    const X = x => c + x * sc, Z = z => c + z * sc;
-    g.textAlign = "center"; g.font = "bold 12px Consolas";
-    for (const I of ARCH) { g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(I.name, X(I.x), Z(I.z) - I.r * sc - 6); g.fillStyle = I.col; g.fillText(I.name, X(I.x), Z(I.z) - I.r * sc - 6); }
-    for (const D of DOCKS5) { const e = D.pt(D.LEN); g.strokeStyle = D.kind === "next" ? "#9fe8ff" : "#ffd890"; g.lineWidth = 3; g.beginPath(); g.moveTo(X(D.B.x), Z(D.B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); if (D.kind === "harbor") { const p = pumpAt(D); g.font = "bold 10px Consolas"; g.fillStyle = D.I.pump ? "#ffe070" : "#d8c8a0"; g.fillText(D.I.pump ? "⛽ FUEL" : "🔔 TOW", X(p.x), Z(p.z) + 14); } }
+    g.save(); g.beginPath(); g.arc(c, c, c - 8, 0, 7); g.clip(); g.drawImage(mapBg5, c - MR * sc, c - MR * sc, MR * 2 * sc, MR * 2 * sc);
+    const X = x => c + x * sc, Z = z => c + z * sc, txt = (t, x, y, col, f = "bold 11px Consolas") => { g.font = f; g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(t, x, y); g.fillStyle = col; g.fillText(t, x, y); };
+    g.textAlign = "center";
+    for (const I of ARCH) txt(I.name, X(I.x), Z(I.z) - archR(I, -Math.PI / 2) * sc - 6, I.col, "bold 12px Consolas");
+    for (const K of ROCKS5) if (K.name) txt(K.name, X(K.x), Z(K.z) - K.r * sc - 4, "#d8e8f0", "bold 9px Consolas");
+    for (const D of DOCKS5) { const e = D.pt(D.LEN); g.strokeStyle = D.kind === "next" ? "#9fe8ff" : "#ffd890"; g.lineWidth = 3; g.beginPath(); g.moveTo(X(D.B.x), Z(D.B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); if (D.kind === "harbor") { const p = pumpAt(D); txt(D.I.pump ? "⛽ FUEL" : "🔔 TOW", X(p.x), Z(p.z) + 14, D.I.pump ? "#ffe070" : "#d8c8a0", "bold 10px Consolas"); } }
     for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 3, Z(ch.z) - 3, 6, 6); }
-    g.font = "bold 18px Segoe UI Emoji, sans-serif"; g.fillText("⛵", X(B5.x), Z(B5.z) + 6);
-    const f = save.boat.fuel / boatMaxFuel(), range = save.boat.fuel / 2.8 * boatTop();
+    for (const k in isle5.crates) { const cr = isle5.crates[k], n = crateN(k); if (crewOf(k) || n) txt(`👻${n}`, X(cr.x), Z(cr.z) - 6, n >= crateCap() ? "#ff8a8a" : "#9fe8ff", "bold 10px Segoe UI Emoji, Consolas"); }
+    for (const S2 of SUMMITS5) { const f = isle5.flags[S2.k]; if (f) txt("▲", X(f.x), Z(f.z) + 4, save.summits[S2.k] ? "#7aff9a" : "#ffffff", "bold 13px Consolas"); }
+    for (const b of isle5.bottles) if (b.g.visible && save.chart) txt("🍾", X(b.x), Z(b.z) + 4, "#7affd8", "11px Segoe UI Emoji");
+    for (const [p, t] of [[H5.bess, "Bess"], [H5.brine, "Brine"], [H5.hermit, "Hermit"], [H5.keeper, "Keeper"], [CAPTAIN5, "Ghost Captain"]]) if (p) txt(t, X(p.x), Z(p.z) - 6, "#e8e0ff", "9px Consolas");
+    txt("🏁", X(RACE_START.x), Z(RACE_START.z) + 5, "#fff", "14px Segoe UI Emoji");
+    if (race5.on) { const gt = race5.c.gates[race5.i]; if (gt) { g.strokeStyle = "#ffe060"; g.lineWidth = 2; g.beginPath(); g.arc(X(gt.x), Z(gt.z), 6, 0, 7); g.stroke(); } }
+    for (const s of salv5.items) if (Math.hypot(s.x - player.pos.x, s.z - player.pos.z) < 300) { g.fillStyle = s.kind === "gold" ? "#ffd040" : s.kind === "fuel" ? "#ff6a6a" : "#d8b890"; g.beginPath(); g.arc(X(s.x), Z(s.z), 3, 0, 7); g.fill(); }
+    if (save.tmap) { const T = save.tmap; g.setLineDash([4, 4]); g.strokeStyle = "#ff4a3a"; g.lineWidth = 2; g.beginPath(); g.arc(X(T.ox), Z(T.oz), 13 * sc, 0, 7); g.stroke(); g.setLineDash([]); txt("✕", X(T.ox), Z(T.oz) + 5, "#ff4a3a", "bold 15px Consolas"); txt("TREASURE?", X(T.ox), Z(T.oz) - 13 * sc - 4, "#ffb0a0", "bold 9px Consolas"); }
+    g.font = "bold 18px Segoe UI Emoji, sans-serif"; g.fillStyle = "#fff"; g.fillText("⛵", X(B5.x), Z(B5.z) + 6);
+    const f = save.boat.fuel / boatMaxFuel(), range = save.boat.fuel / 2.8 * boatTop() + (save.boat.cans || 0) * boatMaxFuel() * 0.25 / 2.8 * boatTop();
     g.setLineDash([5, 6]); g.strokeStyle = f < 0.2 ? "rgba(255,90,90,.7)" : "rgba(160,230,255,.45)"; g.lineWidth = 1.5; g.beginPath(); g.arc(X(B5.x), Z(B5.z), range * sc, 0, 7); g.stroke(); g.setLineDash([]);
-    g.font = "bold 11px Consolas"; g.fillStyle = "#cfefff"; g.fillText(`fuel range ~${Math.round(range)}m`, X(B5.x), Z(B5.z) - 10);
+    txt(`fuel range ~${Math.round(range)}m`, X(B5.x), Z(B5.z) - 10, "#cfefff");
+    g.restore();
     g.fillStyle = "#fff"; g.font = "bold 12px Consolas"; g.fillText("N", c, 22);
     g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw); g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke(); g.restore();
+    // the log under the map: what there is to do, and how far along you are
+    const md = RACES5.map(C => ["—", "🥉", "🥈", "🥇"][save.medals[C.k] || 0]).join(" ");
+    const log = `<b>ARCHIPELAGO LOG</b> · bottles <b>${save.bottles.length}/${BOTTLE_NOTES.length}</b> · summits <b>${Object.keys(save.summits).length}/${SUMMITS5.length}</b> · treasure dug <b>${save.tdug || 0}</b>${save.tmap ? ` (map: ${ARCH_BY[save.tmap.k].name})` : ""} · salvage <b>${save.salvaged || 0}</b> · races ${md} · ghost crews <b>${crewTotal()}</b> working`;
+    if ($("mapLog")) { $("mapLog").style.display = ""; $("mapLog").innerHTML = log; }
 }
 // the boat's dashboard (bottom right, while you're driving)
 function boatHud() {
@@ -10423,12 +12023,13 @@ function boatHud() {
     e.style.display = B5.on ? "" : "none";
     if (!B5.on) return;
     const f = save.boat.fuel / boatMaxFuel(), kts = Math.abs(B5.speed) * 1.94;
-    e.innerHTML = `<small>SPEEDBOAT</small><div class="bspd"><b>${Math.round(kts)}</b> knots</div>
-      <div class="bfuel ${f < 0.2 ? "low" : ""}"><span>FUEL</span><div><i style="width:${Math.round(f * 100)}%"></i></div><em>${Math.round(f * 100)}%</em></div>
-      <div class="bhint">${save.boat.cans ? `${save.boat.cans} spare can${save.boat.cans === 1 ? "" : "s"} · ` : ""}W/S throttle · A/D steer · Shift boost · F out by land</div>`;
+    const rl = race5.on ? `<div class="brace">${race5.c.name} · gate ${Math.min(race5.i + 1, race5.c.gates.length)}/${race5.c.gates.length} · <b>${fmtT(race5.t)}</b>${save.races[race5.c.k] ? ` · best ${fmtT(save.races[race5.c.k])}` : ""}</div>` : "";
+    e.innerHTML = `<small>SEA CHOPPER</small><div class="bspd"><b>${Math.round(kts)}</b> knots</div>
+      <div class="bfuel ${f < 0.2 ? "low" : ""}"><span>FUEL</span><div><i style="width:${Math.round(f * 100)}%"></i></div><em>${Math.round(f * 100)}%</em></div>${rl}
+      <div class="bhint">${save.boat.cans ? `${save.boat.cans} spare can${save.boat.cans === 1 ? "" : "s"} · ` : ""}W/S throttle · A/D steer · Shift boost · F out by land · stop to fish</div>`;
 }
-const SMITH5_SAY = ["Salt in the steel keeps it hungry.", "Stormglass hums when lightning's near. Don't hold it in the rain.", "Pearls polish an edge like nothing else.", "Bring me tar and I'll make you something that floats AND cuts."];
-const DEPOT5_SAY = ["Driftwood by the ton, pearls by the one. I buy it all.", "Stormglass? You went out THAT far? Name your price.", "Coral's up today. The tourists love it."];
+const SMITH5_SAY = ["Salt in the steel keeps it hungry.", "Stormglass hums when lightning's near. Don't hold it in the rain.", "Pearls polish an edge like nothing else.", "Bring me tar and I'll make you something that floats AND cuts.", "Ghost Lumberjacks? I've a few in the back. The Ghost Captain will find them work."];
+const DEPOT5_SAY = ["Driftwood by the ton, pearls by the one. I buy it all.", "Stormglass? You went out THAT far? Name your price.", "Coral's up today. The tourists love it.", "Fish too! Marlin, grouper, whatever you've got."];
 
 // =====================================================================
 //  1.6.1: axe abilities. Every axe has its own special move on [Z]
@@ -10699,7 +12300,7 @@ function hud(dt) {
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
     if (isle >= 2) { const mh = isleMats().filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
     else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = inCasino() ? "THE CASINO · SAFE" : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : "AT SEA") : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    el.zone.textContent = inCasino() ? "THE CASINO · SAFE" : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : race5.on ? "RACING" : "AT SEA") : swim5() ? "SWIMMING" : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
     { // active potions and blessings, with time left
         const bh = Object.keys(BUFFS).filter(buffOn).map(k => `<span style="color:${BUFFS[k].col};border-color:${BUFFS[k].col}">${BUFFS[k].icon} ${BUFFS[k].name} ${mmss(buffLeft(k))}</span>`).join("") + (save.phoenix > 0 ? `<span style="color:#ffb060;border-color:#ffb060">🔥 PHOENIX ×${save.phoenix}</span>` : "");
         const be = $("buffs"); if (be.dataset.h !== bh) { be.innerHTML = bh; be.dataset.h = bh; }
@@ -10738,6 +12339,7 @@ function hud(dt) {
     { const en = !holdingGun() && enchTotal(save.equipped) ? "✦ " + enchShort(save.equipped) + " ✦" : "", e = $("enchLine"); if (e.textContent !== en) e.textContent = en; e.style.display = en ? "" : "none"; }
     if (panel === "inv") renderInv();
     if (panel === "shop") renderShop();
+    if (panel === "crew") renderCrew();
     if (panel === "ench") renderEnch();
     if (panel === "map") drawMap();
     if (panel === "ferry") renderFerry();
@@ -10815,7 +12417,7 @@ if (DEBUG) window.__ts4 = {
     setState(s) { state = s; renderMenu(); },
     interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, enterIsle4, startFight4, fight4, startEruption, getKing: () => king, VOLC, syncKing, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
     // the dev panel (dev.js) drives the game through these
-    lightPool, vLights, openShop, enterIsle5, B5, ARCH, setArch5, boatEnter, boatExit, loseAtSea, rebirth4Ready, finishRebirth4, getArch: () => arch5, landingSpot, useAbility, ABIL, abCd, CSG, DB, CR, MN, VP, SC, PL, enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
+    lightPool, vLights, openShop, enterIsle5, B5, ARCH, setArch5, H5, ROCKS5, RACES5, race5, startRace5, endRace5, sea5, salv5, spawnSalvage, newTreasureMap, dugTreasure, crewTick, collectCrate, isle5, PAINTS, repaintBoat, hailBoat, moorBoat, archTerrain, archAt, archIn, groundY5, slope5, TRAILS5, PADS5, SUMMITS5, plantFlag, readBottle, fishSpot5, wildOk5, populate5, refuel, fillCost, boatItems, paintItems, crateN, freeGhosts, ghostsHere5, RACE_START, CAPTAIN5, hullCount, wetH5, DOCKS5, boatTo, FERRYMAN4, getDig: () => digT, nearest5, studio5: { turtle: makeTurtle, parrot: makeParrot, flamingo: makeFlamingo, penguin: makePenguin, seal: makeSeal, monkey: makeMonkey, pig: makePig, pony: makePony, msheep: makeMoorSheep, afox: arcticFox, hare: snowHare, lizard: skullLizard, dolphin: makeDolphin, whale: makeWhale5, boat: makeSpeedboat }, boatEnter, boatExit, loseAtSea, rebirth4Ready, finishRebirth4, getArch: () => arch5, landingSpot, useAbility, ABIL, abCd, CSG, DB, CR, MN, VP, SC, PL, enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
     FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z }, FERRYMAN3: { x: FERRYMAN3.x, z: FERRYMAN3.z },
     setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
     freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)

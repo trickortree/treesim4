@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.6.2\n\n- Fixed cash turning into $NaN (from Christmas palm presents on the Archipelago). Saves that broke are reset to $0 cash.\n- The Casino now only stands on the newest island (Port Haven)."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.7.0 (THE ARCHIPELAGO, REBUILT)\n\n- FIXED: you couldn't buy fuel when the tank was only a little low (the pump said you couldn't afford it). Topping off works now, and Fill the Tank at the Shipwright shows the real price.\n- FIXED: park your boat away from the dock and you couldn't get back in. When you step off at a beach your boat now swings side-on and ties up close, and you can climb aboard from much further away.\n- BOAT HAIL: every harbor has a hail post. Whistle and your boat is brought round to that dock, wherever you left it.\n- A BRAND NEW SPEEDBOAT: a real V-hull, bow rail, windscreen, helm, seats and a big outboard. The wheel and engine turn as you steer and the wake peels off behind you. The Shipwright now sells PAINT JOBS (and one you have to earn).\n- NEW TERRAIN on every island: hills, ridges, cliffs you can't climb, trails up the mountains, a waterfall, a lagoon you can swim and sail into, and sea stacks, icebergs and wrecks out on the water.\n  - Port Haven: Lookout Ridge and its waterfall, jungle hills, a fishing hamlet.\n  - Coral Key: an atoll round a turquoise lagoon with a little islet in the middle.\n  - Skull Rock: jagged crags, a lantern-lit gulch up to the skull, a pirate cove with a wreck.\n  - Frostcap: a snow mountain with a flagged trail to the summit, a frozen lake and an igloo.\n  - Storm Isle: a plateau ringed by cliffs, the lighthouse and a circle of storm stones.\n- ANIMALS EVERYWHERE: monkeys, piglets, parrots, sea turtles, flamingos, mountain goats, lizards, penguins (they belly-slide!), seals, arctic foxes, snow hares, wild ponies and moor sheep. At sea: whales, dolphin pods that race your boat, flying fish and gulls. None of them attack.\n- GHOST CREWS: talk to the Ghost Captain at Port Haven harbor to send your ghost lumberjacks to work the other islands. They fill a crate at each island's harbor, even while the game is closed. Sail over and empty it.\n- TREASURE MAPS: buy them from Captain Brine on Skull Rock or find them in purple chests. Find the X and dig.\n- BUOY RACES: three courses starting past Port Haven harbor. Bronze, silver and gold times.\n- SALVAGE: crates, fuel barrels and the odd golden chest float between the islands. Drive over them.\n- 12 MESSAGES IN BOTTLES washed up on the beaches (Beachcomber Bess on Coral Key rewards you), and 4 SUMMITS to plant your flag on.\n- FISHING on the Archipelago: off any dock or beach, from your stopped boat, and through the ice on Frostcap. 18 new fish.\n- The Hermit sells hot cocoa, the Keeper gives you Stormglass every day, and the map (M) shows everything plus your progress.\n- Swimming: deep water slows you down."
     }
   }
 }

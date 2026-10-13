@@ -53,8 +53,8 @@ function parseAmt(s) {
     return Math.round(parseFloat(m[1]) * { "": 1, k: 1e3, m: 1e6, b: 1e9, t: 1e12 }[m[2]]);
 }
 const S = () => T.save;
-const ISLE_NAMES = { 1: "Pine Island", 2: "Highland Isle", 3: "Mooncap Isle", 4: "Ashfall Isle" };
-const allMats = () => [...T.MATS_BY_ISLE[2], ...T.MATS_BY_ISLE[3], ...T.MATS_BY_ISLE[4]];
+const ISLE_NAMES = { 1: "Pine Island", 2: "Highland Isle", 3: "Mooncap Isle", 4: "Ashfall Isle", 5: "the Archipelago" };
+const allMats = () => [...T.MATS_BY_ISLE[2], ...T.MATS_BY_ISLE[3], ...T.MATS_BY_ISLE[4], ...T.MATS_BY_ISLE[5]];
 const say = (m, k = "good") => T.toast("[dev] " + m, k);
 
 // ---------- the panel ----------
@@ -85,7 +85,7 @@ el.innerHTML = `
     </div>
     <div class="dvCard">
       <div class="dvH">WORLD <small id="dvWorld"></small></div>
-      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" data-isle="1">Pine Island</button><button class="dvB" data-isle="2">Highland Isle</button><button class="dvB" data-isle="3">Mooncap Isle</button><button class="dvB" data-isle="4">Ashfall Isle</button></div>
+      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" data-isle="1">Pine Island</button><button class="dvB" data-isle="2">Highland Isle</button><button class="dvB" data-isle="3">Mooncap Isle</button><button class="dvB" data-isle="4">Ashfall Isle</button><button class="dvB" data-isle="5">Archipelago</button></div>
       <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" data-hour="6">Dawn</button><button class="dvB" data-hour="12">Noon</button><button class="dvB" data-hour="18.5">Dusk</button><button class="dvB" data-hour="23">Midnight</button><button class="dvB" id="dvBlood">Blood moon now</button></div>
       <div class="dvRow"><label>Day</label><input class="dvIn" id="dvDay" style="width:90px"></div>
       <div class="dvRow"><label>Weather</label><span style="display:flex;gap:5px" id="dvWx"></span></div>
@@ -104,8 +104,15 @@ el.innerHTML = `
       <div class="dvBtns"><button class="dvB" id="dvToKing">Go fight the Cinder King</button><button class="dvB" id="dvKing10">King to 10%</button><button class="dvB warn" id="dvKingKill">Kill king</button><button class="dvB" id="dvKingRegrow">Regrow king</button><button class="dvB" id="dvErupt">Erupt now</button></div>
     </div>
     <div class="dvCard">
+      <div class="dvH">ARCHIPELAGO <small id="dvArchTxt"></small></div>
+      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" data-harbor="haven">Port Haven</button><button class="dvB" data-harbor="coral">Coral Key</button><button class="dvB" data-harbor="skull">Skull Rock</button><button class="dvB" data-harbor="frost">Frostcap</button><button class="dvB" data-harbor="storm">Storm Isle</button></div>
+      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" id="dvFuel">Fill the tank</button><button class="dvB" id="dvBoatMax">Max the boat</button><button class="dvB" id="dvGhosts">+5 ghost lumberjacks</button><button class="dvB" id="dvCrates">Fill every crew crate</button></div>
+      <div class="dvBtns"><button class="dvB" id="dvTMap">Treasure map</button><button class="dvB" id="dvSalv">Salvage near me</button><button class="dvB" id="dvSea">Reset bottles · flags · races</button></div>
+      <div class="dvHint">harbor buttons take you and your boat to that island's dock</div>
+    </div>
+    <div class="dvCard">
       <div class="dvH">REBIRTH RIDES <small>these really rebirth you: snapshot first!</small></div>
-      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" id="dvRide1">Ride: Pine → Highland</button><button class="dvB" id="dvRide2">Ride: Highland → Mooncap</button><button class="dvB" id="dvRide3">Ride: Mooncap → Ashfall</button></div>
+      <div class="dvBtns" style="margin-bottom:9px"><button class="dvB" id="dvRide1">Ride: Pine → Highland</button><button class="dvB" id="dvRide2">Ride: Highland → Mooncap</button><button class="dvB" id="dvRide3">Ride: Mooncap → Ashfall</button><button class="dvB" id="dvRide4">Ride: Ashfall → Archipelago</button></div>
       <div class="dvBtns"><button class="dvB" id="dvSnap">Snapshot save</button><button class="dvB warn" id="dvRestore">Restore snapshot</button></div>
       <div class="dvHint" id="dvSnapTxt"></div>
     </div>
@@ -178,6 +185,7 @@ function status() {
     // fields you're not editing follow the live game (money goes up while you play)
     for (const f2 of Object.values(fields)) if (f2.input && document.activeElement !== f2.input && !f2.input.classList.contains("dirty")) { const v = fmt(f2.read()); if (f2.input.value !== v) f2.input.value = v; }
     { const K = T.getKing(), f4 = T.fight4; $("dvKingTxt").textContent = T.getIsle() !== 4 ? "(go to Ashfall Isle)" : f4.on && K ? `FIGHTING · ${fmt(K.hp)} / ${fmt(K.maxHp)} HP · phase ${f4.phase}` : S().kingDay === S().day && S().kingKills ? "felled today" : `asleep · felled ${S().kingKills || 0}×`; }
+    $("dvArchTxt").textContent = T.getIsle() !== 5 ? "(go to the Archipelago)" : `on ${T.getArch()} · fuel ${Math.round(S().boat.fuel)} · ghosts ${S().ghosts || 0} (${T.freeGhosts()} free) · bottles ${S().bottles.length}/12${S().tmap ? " · map: " + S().tmap.k : ""}`;
     const snap = localStorage.getItem("ts4_dev_snapshot");
     $("dvSnapTxt").textContent = snap ? "snapshot: " + (JSON.parse(snap).note || "saved") : "no snapshot yet";
 }
@@ -200,7 +208,12 @@ el.addEventListener("click", e => {
     if (d.add) bump("dvMoney", v => v + +d.add);
     else if (d.set !== undefined) bump("dvMoney", () => +d.set);
     else if (d.relic !== undefined) { relicDraft[+d.relic] = relicDraft[+d.relic] ? 0 : 1; drawRelic(); refreshApply(); }
-    else if (d.isle) { const n = +d.isle; if (n !== T.getIsle()) { [, T.enterIsle1, T.enterIsle2, T.enterIsle3, T.enterIsle4][n](); S().rebirths = n - 1; teleport(n === 1 ? 0 : 3, n === 1 ? -0.5 : 4); T.writeSave(); say("now on " + ISLE_NAMES[n]); load(); buildGo(); } }
+    else if (d.isle) { const n = +d.isle; if (n !== T.getIsle()) { [, T.enterIsle1, T.enterIsle2, T.enterIsle3, T.enterIsle4, T.enterIsle5][n](); S().rebirths = n - 1; teleport(n === 1 ? 0 : 3, n === 1 ? -0.5 : 4); T.writeSave(); say("now on " + ISLE_NAMES[n]); load(); buildGo(); } }
+    else if (d.harbor) {
+        if (T.getIsle() !== 5) { say("go to the Archipelago first", "bad"); return; }
+        const D = T.DOCKS5.find(q => q.I.k === d.harbor && q.kind === "harbor"); T.B5.on = false; T.boatTo(D); T.setArch5(d.harbor, true);
+        const p = D.pt(5.5, -0.8); teleport(p.x, p.z, D.pt(D.LEN).x, D.pt(D.LEN).z); say("at " + D.I.name + " harbor");
+    }
     else if (d.hour) { T.setClock(+d.hour); say("time set"); }
     else if (d.wx) { T.setWeather(d.wx); }
     else if (d.speed) T.setSpeed(+d.speed);
@@ -260,6 +273,19 @@ el.addEventListener("click", e => {
             S().bossKills = Math.max(1, S().bossKills || 0); S().mats.heartwood = Math.max(5, S().mats.heartwood || 0); S().money = Math.max(S().money, 25000000);
             teleport(T.FERRYMAN3.x, T.FERRYMAN3.z - 2.5, T.FERRYMAN3.x, T.FERRYMAN3.z);
             T.togglePanel("dev"); setTimeout(() => T.startRebirthRide(3), 400); break;
+        }
+        case "dvFuel": S().boat.fuel = 100 * (1 + 0.45 * (S().boat.tank || 0)); say("tank full"); break;
+        case "dvBoatMax": Object.assign(S().boat, { tank: 5, engine: 5, cans: 3 }); S().boat.fuel = 100 * (1 + 0.45 * 5); T.writeSave(); say("biggest tank, fastest engine, three spare cans"); break;
+        case "dvGhosts": S().ghosts = (S().ghosts || 0) + 5; T.syncGhosts(); T.writeSave(); say(`${S().ghosts} ghost lumberjacks`); break;
+        case "dvCrates": for (const k of ["haven", "coral", "skull", "frost", "storm"]) S().crate[k] = { [{ haven: "driftwood", coral: "coral", skull: "tar", frost: "iceshard", storm: "stormglass" }[k]]: 150 }; say("every crate full"); break;
+        case "dvTMap": if (T.getIsle() !== 5) { say("go to the Archipelago first", "bad"); return; } S().tmap = null; T.newTreasureMap("dev"); say("treasure map: " + S().tmap.k); break;
+        case "dvSalv": if (T.getIsle() !== 5) { say("go to the Archipelago first", "bad"); return; } for (let i = 0; i < 4; i++) T.spawnSalvage(); say("salvage is floating nearby (check the map)"); break;
+        case "dvSea": Object.assign(S(), { bottles: [], summits: {}, races: {}, medals: {}, bessGot: 0, tdug: 0, salvaged: 0 }); T.writeSave(); say("bottles, flags and races reset (reload to see bottles again)"); break;
+        case "dvRide4": {
+            if (T.getIsle() !== 4) T.enterIsle4();
+            S().kingKills = Math.max(1, S().kingKills || 0); S().mats.molten = Math.max(2, S().mats.molten || 0); S().money = Math.max(S().money, 5000000);
+            teleport(T.FERRYMAN4.x, T.FERRYMAN4.z - 2.5, T.FERRYMAN4.x, T.FERRYMAN4.z);
+            T.togglePanel("dev"); setTimeout(() => T.startRebirthRide(4), 400); break;
         }
         case "dvSnap": T.writeSave(); localStorage.setItem("ts4_dev_snapshot", JSON.stringify({ note: `${ISLE_NAMES[T.getIsle()]}, day ${S().day}, $${fmt(S().money)} · ${new Date().toLocaleTimeString()}`, save: localStorage.getItem("ts4_save_v1") })); say("snapshot saved"); break;
         case "dvRestore": {
