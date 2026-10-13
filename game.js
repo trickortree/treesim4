@@ -299,6 +299,7 @@ if (!Array.isArray(save.gunOwned)) save.gunOwned = [];
 if (!save.gunAmmo || typeof save.gunAmmo !== "object") save.gunAmmo = {};
 if (typeof save.gunEq !== "number" || !save.gunOwned[save.gunEq]) save.gunEq = -1;
 if (!save.mats || typeof save.mats !== "object") save.mats = {};
+if (!Number.isFinite(save.money)) save.money = 0; // 1.6.1 could turn cash into NaN (Christmas palm presents)
 if (!save.casino || typeof save.casino !== "object") save.casino = { net: 0, big: 0, plays: 0, jack: 0, wheelDay: -1, visits: 0 };
 if (!Array.isArray(save.relic) || save.relic.length !== 6) save.relic = [0, 0, 0, 0, 0, 0];
 if (!save.buffs || typeof save.buffs !== "object") save.buffs = {};
@@ -2191,7 +2192,7 @@ function fellTree(t) {
 
 // a present falls out of every Christmas tree: cash that fits the island, a bandage, and (past Pine Island) a pile of materials
 function openGift(t, byGhost) {
-    const sc = [1, 1, 4, 30, 300][isle], cash = Math.round(rand(100, 240) * sc * rebirthMult() * (1 + 0.1 * (save.day - 1)));
+    const sc = [1, 1, 4, 30, 300, 1500][isle] || 1500, cash = Math.round(rand(100, 240) * sc * rebirthMult() * (1 + 0.1 * (save.day - 1)));
     save.money += cash; save.bandages++; save.giftsOpened = (save.giftsOpened || 0) + 1;
     let extra = "";
     if (isle >= 2) { const ks = isleMats().filter(k => !["heartwood", "molten", "star", "phoenixf"].includes(k)).slice(0, 4), k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(5, 10)); save.mats[k] = (save.mats[k] || 0) + n; extra = ` and ${n} ${MATS[k].name}`; }
@@ -3810,7 +3811,7 @@ const ROMAN = ["", "I", "II", "III", "IV", "V"];
 const ENCH_SAY = ["The runes are hungry. Feed them gold.", "Every blade remembers what you pour into it.", "The book turns its own pages. Don't read them out loud.", "Pick a rune. Any rune."];
 // placed beside each camp, clear of the buildings
 const ENCH_AT = { 1: { x: -8.5, z: 1.5 }, 2: { x: 0, z: -10.5 }, 3: { x: 0, z: -10.5 }, 4: { x: 0, z: -10.5 }, 5: { x: 0, z: -10.5 } };
-const enchCost = (k, lvl, i = save.equipped) => Math.round([0, 120, 1500, 15000, 150000][isle] * ENCH[k].k * Math.pow(2.1, lvl) * (1 + i * 0.12));
+const enchCost = (k, lvl, i = save.equipped) => Math.round(([0, 120, 1500, 15000, 150000, 600000][isle] || 600000) * ENCH[k].k * Math.pow(2.1, lvl) * (1 + i * 0.12));
 function enchItems() {
     const i = save.equipped, a = AXES[i];
     if (holdingGun()) return [{ name: "Put the gun away", desc: "Only axes take enchantments. Switch to an axe, then come back.", sell: true, value: 0, buy() {} }];
@@ -7228,7 +7229,7 @@ function finishRebirth3() {
 }
 function enterIsle4() {
     leaveWorld();
-    if (!isle4Built) { buildIsle4(); buildCasino(4); snapWorld(4); } else loadWorld(4);
+    if (!isle4Built) { buildIsle4(); snapWorld(4); } else loadWorld(4);
     if (casinos[4]) casino = casinos[4];
     isle = 4; save.isle = 4;
     showWorld(4);
@@ -8515,7 +8516,7 @@ function casinoTex(lines, w, h, bg) {
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 function buildCasino(n) {
-    const S = CASINO_STYLE[n]; if (!S || (n !== 4 && n !== 5)) return;
+    const S = CASINO_STYLE[n]; if (!S || n !== 5) return; // the casino only stands on the newest island
     const prev = addTgt, prevB = curBuild; addTgt = isleGroup(n); curBuild = n;
     const p = S.at(), x = p.x, z = p.z, face = Math.atan2(-x, -z), gy = S.gy(x, z) - 0.4;
     const g = new THREE.Group(); g.position.set(x, gy, z); g.rotation.y = face; scene.add(g);

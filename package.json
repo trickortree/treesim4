@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -54,7 +54,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.6.1 (MODERN GRAPHICS, AXE ABILITIES, THE HIGH ROLLER WING, REBIRTH 4)\n\n- NEW GRAPHICS: pick MODERN or RETRO the first time you start the game (change it any time in Settings). Modern is sharp and smooth, with real shadows, a glowing sky, swaying grass and trees, shimmering water and glowing lava and neon. Retro is the original chunky-pixel look. Modern has LOW / MEDIUM / HIGH quality: drop to LOW if it feels slow.\n- AXE ABILITIES: every axe has a special move on [Z], shown bottom-right with its cooldown. The Inferno Axe throws a long wall of fire; others freeze, blink, throw crescent waves, call meteors, open black holes and more.\n- THE HIGH ROLLER WING: walk through the arches behind the Wheel of Fortune. New: Tree Derby (bet on racing trees running a real track), Axe Rocket (cash out before it crashes), Plinko, Mines, Video Poker and Scratchers, plus a VIP desk with tiers, daily gifts and cashback.\n- The slots now have a PROGRESSIVE JACKPOT that grows with every spin. Line up 7 7 7 to win it all.\n- REBIRTH 4: THE ARCHIPELAGO (M + 2 Molten Cores from the Cinder King). Five islands: Port Haven, Coral Key, Skull Rock, Frostcap and Storm Isle, each with its own trees and materials.\n- Drive your own speedboat between the islands. Watch the fuel! Refuel at Port Haven or Coral Key. Run dry out at sea and you die and lose every material you are carrying. The Shipwright sells bigger tanks, faster engines and spare fuel cans.\n- The Casino tower also stands on Port Haven.\n- Casino nametag floats over the tower so you can find it from anywhere."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.6.2\n\n- Fixed cash turning into $NaN (from Christmas palm presents on the Archipelago). Saves that broke are reset to $0 cash.\n- The Casino now only stands on the newest island (Port Haven)."
     }
   }
 }
