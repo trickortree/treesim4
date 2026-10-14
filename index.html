@@ -263,6 +263,13 @@
   .vipTiers { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 8px; } .vipTiers div { border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: 8px 6px; display: flex; flex-direction: column; gap: 3px; color: var(--c); }
   .vipTiers div.on { border: 2px solid var(--c); box-shadow: 0 0 14px var(--c); } .vipTiers b { font: 900 13px Consolas; letter-spacing: 1px; } .vipTiers span { font-size: 11px; color: #fff; opacity: .7; } .vipTiers small { font-size: 10.5px; color: #fff; opacity: .65; line-height: 1.35; }
   .pjack { text-align: center; margin: 4px 0 10px; font: 900 15px Consolas; letter-spacing: 2px; color: #ff8a3a; text-shadow: 0 0 10px rgba(255,120,40,.6); } .pjack b { color: #6dffa0; font-size: 20px; }
+  .hlWrap { display: flex; gap: 26px; justify-content: center; align-items: center; flex-wrap: wrap; } .hlCard .pcard { width: 120px; height: 170px; } .hlCard .pcard i { font-size: 64px; } .hlCard .pcard b { font-size: 26px; }
+  .hlSide { max-width: 320px; font-size: 14px; line-height: 1.5; } .hlSide .gold { color: #ffd040; }
+  .knWrap { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; align-items: flex-start; }
+  .knGrid { display: grid; grid-template-columns: repeat(8, 46px); gap: 5px; }
+  .kn { width: 46px; height: 40px; border-radius: 8px; border: 2px solid #3a3a6a; background: #1a1a3a; color: #e8e8ff; font: 800 15px Consolas; cursor: pointer; }
+  .kn.pick { border-color: #ffd040; background: #4a3a10; color: #ffd040; } .kn.drawn { background: #2a5a9a; border-color: #7ab8ff; } .kn.hit { background: #2ac06a; border-color: #6dffa0; color: #031a0a; animation: csPop .3s; } .kn:disabled { cursor: default; }
+  .knSide { max-width: 230px; font-size: 13px; line-height: 1.5; } .knPay { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; } .knPay span { display: flex; justify-content: space-between; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,.05); font: 700 12px Consolas; } .knPay span.on { background: #ffd040; color: #2a1200; }
   .barList { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .drink { background: rgba(255,255,255,.05); border: 1px solid rgba(216,168,64,.5); border-radius: 10px; padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; } .drink:hover { background: rgba(255,200,90,.12); border-color: #ffd040; }
   .drink b { color: #ffd040; font-size: 16px; } .drink small { opacity: .75; } .drink span { font: 800 14px Consolas; color: #6dffa0; }

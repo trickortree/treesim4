@@ -230,8 +230,8 @@ let addTgt = null; // while set, scene.add puts new objects in this group
 let isle = 1; // 1 = Pine Island, 2 = the Highland Isle, 3 = Mooncap Isle
 let groundFn = null;
 const groundY = (x, z) => (x > 4500 ? 0 : groundFn ? groundFn(x, z) : 0); // x > 4500 is the casino's hall
-const curShoreAt = (x, z) => (isle === 5 ? shoreAt5(x, z) : isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
-const curShoreR = a => (isle === 5 ? shoreR5(a) : isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
+const curShoreAt = (x, z) => (isle === 6 ? shoreAt6(x, z) : isle === 5 ? shoreAt5(x, z) : isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
+const curShoreR = a => (isle === 6 ? shoreR6(a) : isle === 5 ? shoreR5(a) : isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
 
 // viewmodel (axe) gets its own scene + depth pass so it never clips into trees
 const viewScene = new THREE.Scene();
@@ -276,7 +276,7 @@ const shoreAt = (x, z) => shoreR(Math.atan2(z, x));
 const BED = { x: 2.75, z: 1.7 }, HOPPER = { x: 5, z: -7 };
 const MILL = { x: 17.5, z: -12.5 };
 const RESPAWN = { x: 1.0, z: 0.0 };
-const N_AXES = 16;
+const N_AXES = 18;
 
 // ---------- save ----------
 const SAVE_KEY = "ts4_save_v1";
@@ -313,7 +313,7 @@ const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; 
 const gunPow = () => { let p = 0; (save.gunOwned || []).forEach((o, i) => { if (o) p = Math.max(p, GUNS[i].pow); }); return p; };
 const gunTier = () => (save.gunOwned || []).filter(Boolean).length * 2;
 const bestDmg = () => Math.max(AXES[bestIdx()].dmg, gunPow());
-const isleHp = () => [1, 1, 1.7, 2.2, 2.8, 3.6][isle], isleRw = () => [1, 1, 1.6, 2.1, 2.8, 3.6][isle], isleDm = () => [1, 1, 1.5, 1.9, 2.4, 3.0][isle];
+const isleHp = () => [1, 1, 1.7, 2.2, 2.8, 3.6, 4.5][isle], isleRw = () => [1, 1, 1.6, 2.1, 2.8, 3.6, 4.5][isle], isleDm = () => [1, 1, 1.5, 1.9, 2.4, 3.0, 3.6][isle];
 // timed buffs from the Apothecary and the Moonwell (they tick on play time, so pausing doesn't waste them)
 const buffOn = k => (save.buffs[k] || 0) > save.seconds;
 const dmgBuff = () => (buffOn("fury") ? 1.4 : 1) * (buffOn("blessed") ? 1.25 : 1);
@@ -457,6 +457,7 @@ function applySky() {
     if (m3) sky3(d);
     if (m4) { scene.fog.near *= 1.6; scene.fog.far *= 2.4; sky4(d); } // the volcano should always loom over the island
     if (isle === 5) { scene.fog.near *= 2.2; scene.fog.far *= 3.6; } // the other islands stay in sight across the water
+    if (isle === 6 && !inCasino()) sky6(d, dusk, gray);
     if (inCasino()) casinoSky(); else if (inCave()) caveSky();
     if (MODERN) gfxSky();
 }
@@ -588,6 +589,7 @@ const grass = MODERN && GQ.grass ? (() => {
 // what counts as grassy ground on each island (by the ground's own colour)
 function grassAmt(h, s, l, y, isl) {
     if (y < -0.25) return 0;
+    if (isl === 6) return 0; // nothing grows through the snow
     if (isl === 5) return s > 0.28 && ((h > 0.19 && h < 0.45) || (h > 0.7 && h < 0.85)) && l < 0.44 ? 1 : h > 0.11 && h < 0.17 && s > 0.28 && l < 0.34 ? 0.6 : 0; // tropical grass, dune grass, tundra, moor, heather, Skull Rock's dry tufts
     if (isl === 4) return h > 0.11 && h < 0.3 && s > 0.15 ? 0.75 : 0;          // tough olive scrub in the ash
     if (isl === 3) return s > 0.3 && h > 0.44 && h < 0.84 && l < 0.34 ? 1 : 0; // teal and violet meadows
@@ -1265,6 +1267,7 @@ function ferrymanTex() {
 }
 function clampToIsland(p) {
     if (p.x > 4500) { clampCasino(p); return; }
+    if (isle === 6) { clampIsle6(p); return; }
     if (isle === 5) { clampIsle5(p); return; }
     if (isle === 4) { clampIsle4(p); return; }
     if (isle === 3) { clampIsle3(p); return; }
@@ -1924,7 +1927,7 @@ function pickType(px = 0, pz = 0) {
     for (const T of Object.values(TYPES)) if (ok(T)) total += tw(T);
     let r = Math.random() * total;
     for (const [k, T] of Object.entries(TYPES)) { if (!ok(T)) continue; r -= tw(T); if (r <= 0) return k; }
-    return isle === 5 ? ({ haven: "palm", coral: "coralwood", skull: "tarpine", frost: "frostpine", storm: "stormoak" })[arch5] : isle === 4 ? "ashwood" : isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
+    return isle === 6 ? "icepine" : isle === 5 ? ({ haven: "palm", coral: "coralwood", skull: "tarpine", frost: "frostpine", storm: "stormoak" })[arch5] : isle === 4 ? "ashwood" : isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
 }
 let lastRareToast = -99;
 function spawnTree(announce = true) {
@@ -1939,6 +1942,7 @@ function spawnTree(announce = true) {
         if (isle === 2 && Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 5) continue;
         if (isle === 3 && !treeOk3(x, z)) continue;
         if (isle === 4 && !treeOk4(x, z)) continue;
+        if (isle === 6 && !treeOk6(x, z)) continue;
         for (const o of trees) if (!o.gone && Math.hypot(x - o.x, z - o.z) < 6) { bad = true; break; }
         if (bad) continue;
         const key = pickType(x, z), T = TYPES[key], mk = T.rush ? null : rollMut();
@@ -2014,7 +2018,10 @@ const AXES = [
     { name: "Elder's Bane",   dmg: 450, cost: 0, steel: 0x3a0a1a, edge: 0xff4a7a, glow: 0x8a0a3a, scale: 1.82, rarity: "#ff5a8a", isle3: true },
     // forged in the Crucible on Ashfall Isle
     { name: "Cinderbrand",    dmg: 700, cost: 0, steel: 0x2a1410, edge: 0xff8a2a, glow: 0x8a3000, scale: 1.88, rarity: "#ff9a4a", isle3: true },
-    { name: "Volcano's Wrath", dmg: 1100, cost: 0, steel: 0x1a0a08, edge: 0xffd040, glow: 0xc04000, scale: 1.96, rarity: "#ffd040", isle3: true }
+    { name: "Volcano's Wrath", dmg: 1100, cost: 0, steel: 0x1a0a08, edge: 0xffd040, glow: 0xc04000, scale: 1.96, rarity: "#ffd040", isle3: true },
+    // forged at the Frost Forge on the Iceberg
+    { name: "Frostbite",      dmg: 1700, cost: 0, steel: 0x9ad8ff, edge: 0xffffff, glow: 0x3a8ad8, scale: 2.0, rarity: "#bff4ff", isle3: true },
+    { name: "Yeti's Fang",    dmg: 2600, cost: 0, steel: 0xe8f0f8, edge: 0x7af0ff, glow: 0x2a6aa8, scale: 2.1, rarity: "#7af0ff", isle3: true }
 ];
 const axeDmg = () => axeDmgFor(save.equipped);
 const ownedList = () => AXES.map((a, i) => i).filter(i => save.owned[i]);
@@ -2068,7 +2075,7 @@ function dropLogs(x, z, n, back, key = "pine") {
     const T = TYPES[key];
     const meshes = Math.min(n, 14), base = Math.floor(n / meshes), extra = n % meshes; // big drops are stacks of logs, not hundreds of meshes
     for (let i = 0; i < meshes; i++) {
-        const mk = isle >= 2 ? (T.mat || (isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood")) : null;
+        const mk = isle >= 2 ? (T.mat || (isle === 6 ? "icicle" : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood")) : null;
         const m = mk ? new THREE.Mesh(matGeo, matMeshMat[mk]) : new THREE.Mesh(logGeo, logMats[key] || logMat);
         const d = Math.random() * 2.5;
         m.position.set(x + back.x * d, groundY(x + back.x * d, z + back.z * d) + 0.4, z + back.z * d);
@@ -2109,7 +2116,7 @@ function newContract() {
     if (isNight() && roll < 0.5) save.contract = { type: "rare", goal: 1, prog: 0, reward: Math.round(170 * m), text: "Fell a rare tree" };
     else if (roll < 0.6) { const g = 4 + Math.floor(Math.random() * 5); save.contract = { type: "fell", goal: g, prog: 0, reward: Math.round(g * 14 * m), text: `Fell ${g} trees` }; }
     else { const g = 12 + Math.floor(Math.random() * 14); save.contract = { type: "sell", goal: g, prog: 0, reward: Math.round(g * 6 * m), text: isle >= 2 ? `Sell ${g} materials at the Trading Post` : `Sell ${g} logs at the mill` }; }
-    if (isle >= 3) save.contract.reward *= isle === 5 ? 1000 : isle === 4 ? 400 : 40; // later islands pay bigger money
+    if (isle >= 3) save.contract.reward *= isle === 6 ? 2500 : isle === 5 ? 1000 : isle === 4 ? 400 : 40; // later islands pay bigger money
 }
 function contractProgress(kind, n = 1) {
     const c = save.contract;
@@ -2139,6 +2146,7 @@ function onDawn() {
     if (typeof syncVeins === "function" && mineBuilt) syncVeins();
     if (isle === 3) dawn3();
     if (isle === 4) dawn4();
+    if (isle === 6) dawn6();
     if (!save.contract) newContract();
     writeSave();
 }
@@ -2180,7 +2188,7 @@ function hitTree(best, dmg, melee) {
 }
 function fellTree(t) {
     t.dying = true; t.t = 0;
-    if (t.boss) { (t.key === "cinderking" ? kingDefeated : bossDefeated)(t); return; }
+    if (t.boss) { (t.key === "yeti" ? yetiDefeated : t.key === "cinderking" ? kingDefeated : bossDefeated)(t); return; }
     save.felled++;
     if (isBlood()) bmFelled++;
     contractProgress("fell");
@@ -2192,7 +2200,7 @@ function fellTree(t) {
 
 // a present falls out of every Christmas tree: cash that fits the island, a bandage, and (past Pine Island) a pile of materials
 function openGift(t, byGhost) {
-    const sc = [1, 1, 4, 30, 300, 1500][isle] || 1500, cash = Math.round(rand(100, 240) * sc * rebirthMult() * (1 + 0.1 * (save.day - 1)));
+    const sc = [1, 1, 4, 30, 300, 1500, 4000][isle] || 4000, cash = Math.round(rand(100, 240) * sc * rebirthMult() * (1 + 0.1 * (save.day - 1)));
     save.money += cash; save.bandages++; save.giftsOpened = (save.giftsOpened || 0) + 1;
     let extra = "";
     if (isle >= 2) { const ks = isleMats().filter(k => !["heartwood", "molten", "star", "phoenixf"].includes(k)).slice(0, 4), k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(5, 10)); save.mats[k] = (save.mats[k] || 0) + n; extra = ` and ${n} ${MATS[k].name}`; }
@@ -2232,6 +2240,7 @@ function die() {
     }
     endFishing();
     if (isle === 4 && fight4.on) endFight4(false);
+    if (isle === 6 && fight6.on) endFight6(false);
     if (isle === 3 && fight3.on) endFight(false); // dying ends the fight: the Elder Heart goes back to sleep and you wake up in camp
     player.hp = 0;
     state = "dead";
@@ -2312,9 +2321,9 @@ function openChest(c) {
     const m = (1 + 0.15 * (save.day - 1)) * (isBlood() ? 2 : 1), r = Math.random();
     let msg;
     if (isle >= 3) { // Mooncap and Ashfall chests: real money and a handful of materials
-        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle === 5 ? 25 : isle === 4 ? 10 : 1)), ks = isle === 5 ? (c.special ? ["pearl", "iceshard", "stormglass"] : ["driftwood", "salt", "coral", "tar"]) : isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
+        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle === 6 ? 60 : isle === 5 ? 25 : isle === 4 ? 10 : 1)), ks = isle === 6 ? (c.special ? ["frostbloom", "aurora", "permafrost"] : ["icicle", "frostwood", "glacite"]) : isle === 5 ? (c.special ? ["pearl", "iceshard", "stormglass"] : ["driftwood", "salt", "coral", "tar"]) : isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
         save.money += cash; save.mats[k] = (save.mats[k] || 0) + n; if (c.special) save.bandages++;
-        msg = `${c.special ? (isle === 5 ? "Pirate chest" : isle === 4 ? "Scorched chest" : "Moonlit chest") : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
+        msg = `${c.special ? (isle === 6 ? "Frozen chest" : isle === 5 ? "Pirate chest" : isle === 4 ? "Scorched chest" : "Moonlit chest") : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
     } else if (c.special) { const cash = Math.round(rand(120, 260) * m); save.money += cash; save.bandages++; msg = `Cursed chest: +${money(cash)} and a bandage`; }
     else if (r < 0.6) { const cash = Math.round(rand(25, 85) * m); save.money += cash; msg = `Chest: +${money(cash)}`; }
     else if (r < 0.85) { const cash = Math.round(rand(10, 30) * m); save.money += cash; save.bandages++; msg = `Chest: a bandage and ${money(cash)}`; }
@@ -2402,7 +2411,7 @@ function shopItems() {
     if (shopTab === "race") return raceItems();
     if (shopTab === "pirate") return pirateItems();
     if (shopTab === "hermit") return hermitItems();
-    if (shopTab === "brew") return isle === 5 ? brewItems5() : brewItems();
+    if (shopTab === "brew") return isle === 6 ? brewItems6() : isle === 5 ? brewItems5() : brewItems();
     if (shopTab === "ench") return enchItems();
     if (shopTab === "sellaxe") return sellAxeItems();
     if (shopTab === "sell") return sellItems();
@@ -2449,7 +2458,7 @@ function buy(i) {
 const recipeHtml = r => '<span class="recipe">' + Object.entries(r).map(([k, n]) => { const have = save.mats[k] || 0; return `<span class="rp ${have >= n ? "ok" : "no"}"><img src="${iconURL("m:" + k)}">${Math.min(have, n)}/${n} ${MATS[k].name}</span>`; }).join("") + "</span>";
 function renderShop() {
     $("shopCash").textContent = money(save.money);
-    $("shopName").textContent = shopMode === "forge" && isle === 5 ? "THE SEA FORGE" : shopMode === "brew" && isle === 5 ? "THE SEA WITCH" : shopMode === "forge" && isle === 4 ? "THE CRUCIBLE" : shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : shopMode === "brew" && isle === 4 ? "THE ALCHEMIST" : SHOP_NAMES[shopMode];
+    $("shopName").textContent = shopMode === "forge" && isle === 6 ? "THE FROST FORGE" : shopMode === "brew" && isle === 6 ? "THE SNOW WITCH" : shopMode === "forge" && isle === 5 ? "THE SEA FORGE" : shopMode === "brew" && isle === 5 ? "THE SEA WITCH" : shopMode === "forge" && isle === 4 ? "THE CRUCIBLE" : shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : shopMode === "brew" && isle === 4 ? "THE ALCHEMIST" : SHOP_NAMES[shopMode];
     const tabs = SHOP_TABS[shopMode];
     if (!tabs.some(t => t[0] === shopTab)) shopTab = tabs[0][0];
     const th = tabs.length > 1 ? tabs.map(t => `<button class="tab ${t[0] === shopTab ? "on" : ""}" data-tab="${t[0]}">${t[1]}</button>`).join("") : "";
@@ -2709,7 +2718,7 @@ function updateNameplates() {
         if (!(nowMs - (t._occT || 0) < 120)) { t._occT = nowMs; t._occ = isOccluded(V3(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 1.5, t.z), t.solid); }
         if (t._occ || behindAxe(px, py)) { e.style.display = "none"; continue; }
         const T = t.type, dmg = treeDmg(t);
-        const tm = T.mat || (isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
+        const tm = T.mat || (isle === 6 ? "icicle" : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
         const mutHtml = t.mut ? '<i class="mut' + (t.mut === "rainbow" ? ' rbtxt' : '') + '" style="color:' + MUTS[t.mut].col + '">✦ ' + MUTS[t.mut].name + ' ×' + MUTS[t.mut].mult + ' ✦</i>' : '';
         const html = mutHtml + '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle >= 2 ? ' · <em style="color:' + MATS[tm].col + '">' + treeLogs(t) + ' ' + MATS[tm].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
         if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = t.mut ? MUTS[t.mut].col : T.col; e.className = "np" + (t.mut ? " mutd" + (t.mut === "rainbow" ? " rbw" : "") : ""); e.style.setProperty("--mc", t.mut ? MUTS[t.mut].col : T.col); }
@@ -2726,6 +2735,7 @@ function updateNameplates() {
 // ---------- map ----------
 function drawMap() {
     if ($("mapLog")) $("mapLog").style.display = "none";
+    if (isle === 6) { drawMap6(); return; }
     if (isle === 5) { drawMap5(); return; }
     if (isle === 4) { drawMap4(); return; }
     if (isle === 3) { drawMap3(); return; }
@@ -2943,6 +2953,7 @@ function nearest() {
     if (isle === 5 && B5.on) return nearest5();
     if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
     if (casino && casino.isle === isle && Math.hypot(player.pos.x - casino.door.x, player.pos.z - casino.door.z) < 3.4) return { k: "casino" };
+    if (isle === 6) return nearest6();
     if (isle === 5) return nearest5();
     if (isle === 4) return nearest4();
     if (isle === 3) return nearest3();
@@ -2965,13 +2976,14 @@ function interact() {
     const n = nearest();
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
+    if (n.k === "ferry6") { openFerry6(); return; }
     if (ISLE5_ACT[n.k]) { ISLE5_ACT[n.k](n); return; }
     if (n.k === "ench") { openEnch(pick(ENCH_SAY)); return; }
     if (n.k === "casino") { enterCasino(); return; }
     if (CS_PROMPTS[n.k]) { casinoInteract(n); return; }
     if (n.k === "smith") {
-        openShop("forge", pick(isle === 5 ? SMITH5_SAY : isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
-    } else if (n.k === "depot") openShop("trade", isle === 5 ? pick(DEPOT5_SAY) : isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
+        openShop("forge", pick(isle === 6 ? SMITH6_SAY : isle === 5 ? SMITH5_SAY : isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
+    } else if (n.k === "depot") openShop("trade", isle === 6 ? pick(DEPOT6_SAY) : isle === 5 ? pick(DEPOT5_SAY) : isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
     else if (n.k === "witch") openShop("brew", pick(WITCH_SAY));
     else if (n.k === "ferry3") { if (!save.ferry3Talk) { save.ferry3Talk = 1; startTalk("THE FERRYMAN", FERRY3_LINES, () => openFerry3()); } else openFerry3(); }
     else if (n.k === "ferry4") openFerry4();
@@ -3233,7 +3245,7 @@ function update(dt) {
     camera.getWorldDirection(fwd);
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
-    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt); updateIsle5(dt);
+    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt); updateIsle5(dt); updateIsle6(dt);
     updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateEnchTable(dt); updateWild(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
@@ -3824,8 +3836,8 @@ const ENCH = {
 const ROMAN = ["", "I", "II", "III", "IV", "V"];
 const ENCH_SAY = ["The runes are hungry. Feed them gold.", "Every blade remembers what you pour into it.", "The book turns its own pages. Don't read them out loud.", "Pick a rune. Any rune."];
 // placed beside each camp, clear of the buildings
-const ENCH_AT = { 1: { x: -8.5, z: 1.5 }, 2: { x: 0, z: -10.5 }, 3: { x: 0, z: -10.5 }, 4: { x: 0, z: -10.5 }, 5: { x: 0, z: -10.5 } };
-const enchCost = (k, lvl, i = save.equipped) => Math.round(([0, 120, 1500, 15000, 150000, 600000][isle] || 600000) * ENCH[k].k * Math.pow(2.1, lvl) * (1 + i * 0.12));
+const ENCH_AT = { 1: { x: -8.5, z: 1.5 }, 2: { x: 0, z: -10.5 }, 3: { x: 0, z: -10.5 }, 4: { x: 0, z: -10.5 }, 5: { x: 0, z: -10.5 }, 6: { x: 0, z: -10.5 } };
+const enchCost = (k, lvl, i = save.equipped) => Math.round(([0, 120, 1500, 15000, 150000, 600000, 2000000][isle] || 2000000) * ENCH[k].k * Math.pow(2.1, lvl) * (1 + i * 0.12));
 function enchItems() {
     const i = save.equipped, a = AXES[i];
     if (holdingGun()) return [{ name: "Put the gun away", desc: "Only axes take enchantments. Switch to an axe, then come back.", sell: true, value: 0, buy() {} }];
@@ -4104,7 +4116,8 @@ function openFerry() {
     openPanel("ferry");
 }
 function renderFerry() {
-    if (isle === 5) { renderFerry5(); return; }
+    if (isle === 6) { renderFerry6(); return; }
+    if (isle === 5) { renderFerry5v2(); return; }
     if (isle === 4) { renderFerry4v2(); return; }
     if (isle === 3) { renderFerry3(); return; }
     if (isle === 2) { renderFerry2(); return; }
@@ -4122,8 +4135,8 @@ function renderFerry() {
     b.classList.toggle("danger", !!ferryConfirm);
 }
 $("ferryBuy").addEventListener("click", () => {
-    if (isle === 5) return;
-    if (isle === 4 ? !rebirth4Ready() : isle === 3 ? !rebirth3Ready() : isle === 2 ? !rebirth2Ready() : save.money < rebirthCost()) return;
+    if (isle === 6) return;
+    if (isle === 5 ? !rebirth5Ready() : isle === 4 ? !rebirth4Ready() : isle === 3 ? !rebirth3Ready() : isle === 2 ? !rebirth2Ready() : save.money < rebirthCost()) return;
     if (!ferryConfirm) { ferryConfirm = 1; renderFerry(); setTimeout(() => { ferryConfirm = 0; if (panel === "ferry") renderFerry(); }, 5000); return; }
     if (isle >= 2) startRebirthRide(isle); else doRebirth();
 });
@@ -4178,7 +4191,8 @@ const GUNS = [
     { name: "Timber Rifle",       kind: "rifle",    dmg: 120, pel: 1, spread: 0.0015, mag: 5,  rate: 0.95, reload: 2.4, range: 140, auto: false, cost: 48000,  pack: 15,  packCost: 330,  pow: 38,  metal: 0x3a4a3a, wood: 0x8a5a34, col: "#6dffa0", muz: -1.0 },
     { name: "Lumberjack Minigun", kind: "minigun",  dmg: 16,  pel: 1, spread: 0.04,  mag: 150, rate: 0.05, reload: 4.0, range: 70,  auto: true,  cost: 150000, pack: 300, packCost: 1500, pow: 100, metal: 0x6a2a2a, wood: 0x2a1a1a, col: "#ff6a5a", muz: -0.95 },
     { name: "Moonbeam Lance",     kind: "lance",    dmg: 260, pel: 1, spread: 0.001, mag: 6,   rate: 0.55, reload: 2.2, range: 130, auto: false, cost: 0,      pack: 18,  packCost: 0,    pow: 220, metal: 0xd8e0f8, wood: 0x3a2a6a, col: "#c8a0ff", muz: -0.9, pierce: true },
-    { name: "Magma Launcher",     kind: "launcher", dmg: 900, pel: 1, spread: 0.002, mag: 4,   rate: 0.9,  reload: 2.6, range: 90,  auto: false, cost: 0,      pack: 12,  packCost: 0,    pow: 420, metal: 0x3a2a24, wood: 0x6a2a14, col: "#ff7a3a", muz: -0.95, splash: 5 }
+    { name: "Magma Launcher",     kind: "launcher", dmg: 900, pel: 1, spread: 0.002, mag: 4,   rate: 0.9,  reload: 2.6, range: 90,  auto: false, cost: 0,      pack: 12,  packCost: 0,    pow: 420, metal: 0x3a2a24, wood: 0x6a2a14, col: "#ff7a3a", muz: -0.95, splash: 5 },
+    { name: "Cryo Cannon",        kind: "rifle",    dmg: 1500, pel: 1, spread: 0.002, mag: 5, rate: 0.85, reload: 2.4, range: 120, auto: false, cost: 0,      pack: 15,  packCost: 0,    pow: 760, metal: 0xc8e8ff, wood: 0x2a4a6a, col: "#9fe8ff", muz: -1.0, cryo: true }
 ];
 const gunAm = i => save.gunAmmo[i] || (save.gunAmmo[i] = { mag: 0, res: 0 });
 const magSize = i => Math.round(GUNS[i].mag * (1 + 0.25 * (save.magLvl || 0)));
@@ -4320,6 +4334,7 @@ function fireGun() {
         if (hit) hits.set(hit.t, (hits.get(hit.t) || 0) + 1);
     }
     for (const [t, n] of hits) hitTree(t, dmg * n, false);
+    if (G.cryo) for (const [t] of hits) if (!t.boss && !t.dying && !t.gone) { t.stun = Math.max(t.stun || 0, 2.5); t.stunCol = 0x9fe8ff; t.atk = "idle"; burst(V3(t.x, t.gy + 1.5, t.z), 8, 3, [glowM(0x9fe8ff), glowM(0xffffff)]); } // the Cryo Cannon freezes what it hits
     shake = Math.min(0.6, shake + (G.kind === "minigun" ? 0.03 : 0.12)); fovKick = Math.max(fovKick, 0.4);
     const big = G.kind === "shotgun" || G.kind === "rifle";
     sfx(big ? 90 : 140, big ? 0.22 : 0.1, "sawtooth", big ? 0.22 : 0.13, 0.25);
@@ -5113,7 +5128,7 @@ function gunItems() {
     return out;
 }
 function gearItems2() {
-    const k3 = isle === 5 ? 200 : isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
+    const k3 = isle === 6 ? 600 : isle === 5 ? 200 : isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
     return [
         { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees and brings back their materials. Hits for ${ghostHit()} (80% of your axe). Owned: ${save.ghosts}`, cost: ghostCost() * 15, buy() { save.ghosts++; syncGhosts(); } },
         { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
@@ -5216,7 +5231,9 @@ const DECK = V3(0.55, 2.55, 3.0), deckV = new THREE.Vector3(); // where you stan
 const deckEye = (boat = ferryBoat) => { boat.updateMatrixWorld(); return deckV.copy(DECK).applyMatrix4(boat.matrixWorld); };
 function say(t) { const e = $("rideCap"); e.textContent = t; e.classList.toggle("show", !!t); }
 // which ferry you're riding: Pine Island's (to the Highland Isle) or the Highland Isle's (to Mooncap Isle)
-const rideCfg = n => (n === 4
+const rideCfg = n => (n === 5
+    ? { boat: isle5.boatNext, man: ferryman5, pt: (a, sd) => NEXT5.pt(a, sd), DIR: NEXT5.DIR, A: NEXT5.LEN - 7, S: 4.4, lines: ["The air turns sharp and cold. Ice knocks against the hull...", "A white mountain rises out of the sea."], finish: finishRebirth5 }
+    : n === 4
     ? { boat: isle4.boat4, man: ferryman4, pt: dock4Pt, DIR: D4DIR, A: D4LEN - 7, S: 4.4, lines: ["The smoke thins. The sea turns turquoise...", "Islands. Dozens of them, glittering in the sun."], finish: finishRebirth4 }
     : n === 3
     ? { boat: isle3.boat3, man: ferryman3, pt: dock3Pt, DIR: D3DIR, A: D3LEN - 7, S: 4.4, lines: ["The air turns hot. Ash drifts over the water...", "A mountain on fire rises out of the sea."], finish: finishRebirth3 }
@@ -5224,15 +5241,15 @@ const rideCfg = n => (n === 4
     ? { boat: ferryBoat2, man: ferryman2, pt: dock2Pt, DIR: D2DIR, A: D2LEN - 7, S: 4.4, lines: ["The violet light grows closer...", "Two moons rise over the water."], finish: finishRebirth2 }
     : { boat: ferryBoat, man: ferryman, pt: dockPt, DIR: FDIR, A: BOAT_A, S: BOAT_S, lines: ["The golden light grows closer...", "A new life awaits."], finish: finishRebirth });
 function startRebirthRide(from = 1) {
-    if (ride || (from === 4 ? !rebirth4Ready() : from === 3 ? !rebirth3Ready() : from === 2 ? !rebirth2Ready() : save.money < rebirthCost())) return;
+    if (ride || (from === 5 ? !rebirth5Ready() : from === 4 ? !rebirth4Ready() : from === 3 ? !rebirth3Ready() : from === 2 ? !rebirth2Ready() : save.money < rebirthCost())) return;
     closePanel();
     ride = { phase: "walk", t: 0, from: player.pos.clone(), fx: false, done: false, cfg: rideCfg(from) };
     mouseDown = false; endFishing();
     player.invuln = 99999; player.vel.set(0, 0, 0);
     const fl = labelList.find(l => l.el.textContent === "FERRYMAN" && l.isle === isle); if (fl) fl.visible = false;
-    $("rbSmall").textContent = from === 4 ? "REBIRTH 4 · THE ARCHIPELAGO" : from === 3 ? "REBIRTH 3 · ASHFALL ISLE" : from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
-    $("rebirthFx").classList.toggle("violet", from === 2); $("rebirthFx").classList.toggle("ember", from === 3); $("rebirthFx").classList.toggle("ocean", from === 4);
-    say(from === 4 ? "All aboard. Hold on to something." : from === 3 ? "All aboard. Mind the Heartwood, it's still warm." : from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
+    $("rbSmall").textContent = from === 5 ? "REBIRTH 5 · THE ICEBERG" : from === 4 ? "REBIRTH 4 · THE ARCHIPELAGO" : from === 3 ? "REBIRTH 3 · ASHFALL ISLE" : from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
+    $("rebirthFx").classList.toggle("violet", from === 2); $("rebirthFx").classList.toggle("ember", from === 3); $("rebirthFx").classList.toggle("ocean", from === 4 || from === 5);
+    say(from === 5 ? "All aboard. Wrap up warm." : from === 4 ? "All aboard. Hold on to something." : from === 3 ? "All aboard. Mind the Heartwood, it's still warm." : from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
     sfx(200, 0.9, "sine", 0.1, 2);
     writeSave();
 }
@@ -5660,10 +5677,11 @@ function leaveWorld() {
     if (isle === 3 && fight3.on) endFight(false, true);
     if (isle === 4 && fight4.on) endFight4(false, true);
     if (isle === 5) B5.on = false;
+    if (isle === 6 && fight6.on) endFight6(false, true);
     for (const p of smokePuffs) if (p.m.parent === isle1) { isle1.remove(p.m); scene.add(p.m); }
 }
 function showWorld(n) {
-    isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3; isle4G.visible = n === 4; isle5G.visible = n === 5;
+    isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3; isle4G.visible = n === 4; isle5G.visible = n === 5; isle6G.visible = n === 6; snow6.visible = n === 6; for (const a of isle6.aurora) a.visible = false;
     for (const G of [isle1, isle2G, isle3G, isle4G, isle5G]) G.matrixWorldAutoUpdate = G.visible; // a hidden island's thousands of objects don't need their matrices updated
     moon2.visible = false; for (const a of aurora) a.visible = false; spores3.visible = n === 3; ash4.visible = n === 4;
     wisps.material.color.setHex(n === 4 ? 0xffa060 : n === 3 ? 0xffb0f0 : 0x9dffd0);
@@ -6368,6 +6386,7 @@ function titleCard(big, small) {
     clearTimeout(titleT); titleT = setTimeout(() => e.classList.remove("show"), 3600);
 }
 function bossHurt(t, dmg) {
+    if (t.key === "yeti") { fight6.heart = 1; return; }
     if (t.key === "cinderking") { fight4.heart = 1; return; }
     fight3.heart = 1;
     if (Math.random() < 0.3) sfx(60 + Math.random() * 20, 0.15, "sine", 0.12, 0.6);
@@ -7627,8 +7646,8 @@ function updateEruption(dt) {
 // =====================================================================
 //  1.4.0: wildlife, a little ecosystem, and decorations on every island
 // =====================================================================
-const wildDone = {}, wildBy = { 1: [], 2: [], 3: [], 4: [], 5: [] };
-const isleGroup = n => [null, isle1, isle2G, isle3G, isle4G, isle5G][n];
+const wildDone = {}, wildBy = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+const isleGroup = n => [null, isle1, isle2G, isle3G, isle4G, isle5G, isle6G][n];
 // where wildlife may stand or walk: on land, out of camp, clear of landmarks, lakes, lava and the docks
 function wildOk(x, z, walk) {
     if (isle === 5) return wildOk5(x, z, walk);
@@ -7638,6 +7657,7 @@ function wildOk(x, z, walk) {
     if (isle === 2 && Math.hypot(x - LAKE2.x, z - LAKE2.z) < LAKE2.r + 3) return false;
     if (isle === 3 && !treeOk3(x, z)) return false;
     if (isle === 4 && !treeOk4(x, z)) return false;
+    if (isle === 6 && !treeOk6(x, z)) return false;
     return true;
 }
 function wildSpot() {
@@ -8318,6 +8338,10 @@ function populate(n) {
         P(10, (x, z) => addWild(n, "crow", makeCrow(), x, z));
         sky("bat", () => makeBat(0xff6a3a), 8, [14, 26], { night: true });
         sky("skycrow", makeCrow, 5, [20, 32], { day: true });
+    } else if (n === 6) { // the Iceberg: penguin huddles, polar bears and arctic foxes
+        for (let k = 0; k < 6; k++) { const p = wildSpot(); if (!p) continue; for (let i = 0; i < 5; i++) { const x = p.x + rand(-3, 3), z = p.z + rand(-3, 3); if (wildOk(x, z, true)) addWild(n, "penguin", makePenguin(), x, z); } }
+        P(6, (x, z) => addWild(n, "pbear", makePolarBear(), x, z, { tilt: 0.5 }));
+        P(8, (x, z) => addWild(n, "afox", arcticFox(), x, z, { tilt: 0.3 }));
     } else if (n === 5) populate5(); // every island has its own animals now
 }
 function buildWild(n) {
@@ -8520,6 +8544,7 @@ function updateAxeRunes() {
 const CASINO_ISLE = 4, casinos = {}; // the tower stands on Ashfall and on Port Haven
 const CASINO_STYLE = {
     4: { at: () => at4(-0.55, 104), gy: (x, z) => groundY4(x, z), base: 0x221c1a, wall: 0x2c2624, trim: 0x9a7a3a, glow: 0xff8a3a, dim: 0x5a2a10, roof: 0x161214, sign: "#ff9a4a", rock: 0x2a2424, lm: "#ffb060" },
+    6: { at: () => H6CASINO, gy: (x, z) => groundY6(x, z), base: 0xe8eef4, wall: 0xf4f8ff, trim: 0x7ab8e8, glow: 0x7af0ff, dim: 0x1a4a6a, roof: 0x2a4a6a, sign: "#7af0ff", rock: 0xc8d4e0, lm: "#bff4ff" },
     5: { at: () => ({ x: Math.cos(-0.75) * 60, z: Math.sin(-0.75) * 60 }), gy: (x, z) => groundY5(x, z), base: 0xe8e0d0, wall: 0xf4f0e8, trim: 0xd8a840, glow: 0x5ae8ff, dim: 0x1a6a8a, roof: 0x1a4a6a, sign: "#5ae8ff", rock: 0xc8b898, lm: "#7af0ff" }
 };
 let casino = null;
@@ -8532,7 +8557,7 @@ function casinoTex(lines, w, h, bg) {
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 function buildCasino(n) {
-    const S = CASINO_STYLE[n]; if (!S || n !== 5) return; // the casino only stands on the newest island
+    const S = CASINO_STYLE[n]; if (!S || n !== 6) return; // the casino only stands on the newest island
     const prev = addTgt, prevB = curBuild; addTgt = isleGroup(n); curBuild = n;
     const p = S.at(), x = p.x, z = p.z, face = Math.atan2(-x, -z), gy = S.gy(x, z) - 0.4;
     const g = new THREE.Group(); g.position.set(x, gy, z); g.rotation.y = face; scene.add(g);
@@ -8806,6 +8831,7 @@ function buildCasinoHall() {
         p.g.position.set(x, 0, z); p.g.rotation.y = ry; scene.add(p.g); p.yaw = ry; p.patron = true; casinoNpcs.push(p);
     }
     buildCasinoWing();
+    buildHall2();
     wain.build(); trimB.build();
     addTgt = prev; curBuild = prevB;
 }
@@ -8847,6 +8873,7 @@ function clampCasino(p) {
 }
 function nearestCasino() {
     const wn = nearestWing(); if (wn) return wn;
+    const h2 = nearestHall2(); if (h2) return h2;
     const px = player.pos.x, pz = player.pos.z;
     for (let i = 0; i < SLOT_Z.length; i++) if (px < CS_X0 + 4.6 && Math.abs(pz - SLOT_Z[i]) < 1.8) return { k: "cslot", i };
     if (Math.hypot(px - ROUL.x, pz - ROUL.z) < 4.9) return { k: "croul" };
@@ -8858,6 +8885,8 @@ function nearestCasino() {
 const CS_PROMPTS = { cslot: () => "[F] Play the slot machine", croul: () => "[F] Play roulette", cbj: () => "[F] Play blackjack", cwheel: () => (save.casino.wheelDay !== save.day ? "[F] Spin the Wheel of Fortune (FREE today!)" : "[F] Spin the Wheel of Fortune"), cbar: () => "[F] Order a drink" };
 function casinoInteract(n) {
     if (wingInteract(n)) return;
+    if (n.k === "chilo") { openCasino("hilo", ["Higher or lower, friend?", "Thirteen ranks. One guess."][Math.floor(Math.random() * 2)]); return; }
+    if (n.k === "ckeno") { openCasino("keno", ["Pick five. Feel lucky.", "Ten balls. Your five numbers."][Math.floor(Math.random() * 2)]); return; }
     const pick = a => a[Math.floor(Math.random() * a.length)];
     if (n.k === "cslot") { CS.slot = n.i; openCasino("slots", pick(["Pull the lever, hotshot.", "Three sevens. That's all you need.", "This one's been running hot all night."])); }
     else if (n.k === "croul") openCasino("roulette", pick(["Place your bets.", "Red or black? Trust your gut.", "No more bets... after you bet."]));
@@ -10662,7 +10691,7 @@ function buildIsle5() {
             // the ghost crew's crate (Port Haven's is at the Ghost Captain)
             if (D.I.k !== "haven") { const cp = D.pt(2.2, -3.6); isle5.crates[D.I.k] = makeCrate5(cp.x, cp.z, yaw, D.I); }
         } else {
-            const [a1, a2, c1] = D.kind === "arr" ? ["WELCOME TO", "PORT HAVEN", "#ffd890"] : ["REBIRTH 5", "COMING SOON", "#9fe8ff"];
+            const [a1, a2, c1] = D.kind === "arr" ? ["WELCOME TO", "PORT HAVEN", "#ffd890"] : ["REBIRTH 5", "THE ICEBERG", "#9fe8ff"];
             const s1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(a1, a2, c1) })); s1.position.copy(D.pt(3.5, 0, 3.3)); s1.rotation.y = D.kind === "arr" ? yaw : yaw + Math.PI; scene.add(s1);
             const s2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(D.kind === "arr" ? "ARRIVALS" : "PORT HAVEN", D.kind === "arr" ? "FROM ASHFALL ISLE" : "THIS WAY ↑", c1) })); s2.position.copy(D.pt(3.5, 0, 3.3)); s2.rotation.y = D.kind === "arr" ? yaw + Math.PI : yaw; scene.add(s2);
             for (const sd of [-2.0, 2.0]) { const p = D.pt(3.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
@@ -11815,7 +11844,7 @@ function fishSpot5() {
 // =========================== entering, updating and talking ===========================
 function enterIsle5() {
     leaveWorld();
-    if (!isle5Built) { buildIsle5(); buildCasino(5); snapWorld(5); } else loadWorld(5);
+    if (!isle5Built) { buildIsle5(); snapWorld(5); } else loadWorld(5);
     isle = 5; save.isle = 5;
     showWorld(5);
     if (casinos[5]) casino = casinos[5];
@@ -11916,7 +11945,7 @@ const ISLE5_ACT = {
     hermit: () => openShop("hermit", pick5(["Brr. Come in out of the wind.", "The summit trail winds round and round. Follow the red flags.", "Penguins are terrible company. Lovely, but terrible."])),
     keeper: () => talkKeeper(), ferry5: () => openFerry5()
 };
-function openFerry5() { ferryConfirm = 0; $("ferrySay").textContent = "“Beyond the storm there's something else. I can hear it at night. I'm not ready to sail there yet.”"; openPanel("ferry"); }
+function openFerry5() { ferryConfirm = 0; $("ferrySay").textContent = "“Past the storm the sea freezes. There's an iceberg out there the size of a country. Bring me Stormglass and I'll get us through.”"; openPanel("ferry"); }
 function renderFerry5() {
     document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
     const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage, +${(save.rebirths || 0) * 50} max HP)</span></div>
@@ -12032,6 +12061,687 @@ const SMITH5_SAY = ["Salt in the steel keeps it hungry.", "Stormglass hums when 
 const DEPOT5_SAY = ["Driftwood by the ton, pearls by the one. I buy it all.", "Stormglass? You went out THAT far? Name your price.", "Coral's up today. The tourists love it.", "Fish too! Marlin, grouper, whatever you've got."];
 
 // =====================================================================
+//  REBIRTH 5: THE ICEBERG. One huge berg adrift in a frozen sea: a snow plateau on ice cliffs,
+//  Yeti Peak, a frozen lake, polar bears, penguins and arctic foxes, and the Yeti in his den.
+//  The Casino moves here (it always stands on the newest island).
+// =====================================================================
+const shoreR6 = th => 152 + 10 * Math.sin(2 * th + 0.7) + 7 * Math.sin(3 * th + 2.2) + 5 * Math.sin(5 * th + 0.9) + 2.5 * Math.sin(11 * th + 1.4);
+const shoreAt6 = (x, z) => shoreR6(Math.atan2(z, x));
+const PLAT6 = 7;                                                    // the plateau sits 7 m above the sea
+const at6 = (th, d) => ({ x: Math.cos(th) * d, z: Math.sin(th) * d });
+const PEAK6 = { ...at6(-2.55, 86), r: 50, h: 44 };                 // Yeti Peak
+const DEN6 = { ...at6(-1.75, 104), r: 21 };                         // the Yeti's Den: a flat snow bowl below the peak
+const LAKE6 = { ...at6(0.45, 82), r: 19 };                          // the frozen lake
+const DENY = PLAT6 + 2.5;
+function mkDock6(th, len, kind) {
+    const DIR = V3(Math.cos(th), 0, Math.sin(th)), PERP = V3(-DIR.z, 0, DIR.x), R = shoreR6(th) - 3;
+    return { kind, th, LEN: len, DIR, PERP, B: V3(DIR.x * R, 0, DIR.z * R), pt(a, s = 0, y = 0) { return V3(this.B.x + this.DIR.x * a + this.PERP.x * s, y, this.B.z + this.DIR.z * a + this.PERP.z * s); } };
+}
+const ARR6 = mkDock6(2.15, 22, "arr"), NEXT6 = mkDock6(-0.55, 24, "next"), DOCKS6 = [ARR6, NEXT6];
+const FERRYMAN6 = (() => { const p = NEXT6.pt(NEXT6.LEN - 3.5, -0.9); return { x: p.x, z: p.z }; })();
+const BED6 = { x: -9, z: 6 }, SMITH6 = { x: -11, z: -7 }, DEPOT6 = { x: 11, z: -7 }, WITCH6 = { x: 10, z: 8 };
+const SMITH6_AT = standPt(SMITH6), DEPOT6_AT = standPt(DEPOT6), WITCH6_AT = standPt(WITCH6);
+const LM6 = [
+    { name: "IGLOO CAMP", x: 0, z: 0, r: 24, col: "#bfe8ff", camp: true },
+    { name: "YETI PEAK", x: PEAK6.x, z: PEAK6.z, r: 16, col: "#e8f6ff" },
+    { name: "THE YETI'S DEN", x: DEN6.x, z: DEN6.z, r: DEN6.r + 2, col: "#7af0ff" },
+    { name: "FROZEN LAKE", x: LAKE6.x, z: LAKE6.z, r: LAKE6.r + 2, col: "#9fe8ff" }
+];
+// how far inland a point is from a dock (for the ramps cut into the ice cliff)
+function rampH6(x, z, h) {
+    for (const D of DOCKS6) {
+        const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP);
+        if (along < -36 || along > 6 || Math.abs(side) > 7) continue;
+        const ramp = lerp(0.35, PLAT6, clamp(-along / 32, 0, 1));
+        h = lerp(ramp, h, sstep(3.6, 7, Math.abs(side)));
+    }
+    return h;
+}
+function terrain6(x, z) {
+    const d = Math.hypot(x, z), inside = shoreAt6(x, z) - d;
+    if (inside < 2.5) return Math.max(-3.4, -(2.5 - inside) * 0.7);
+    let h = PLAT6 * sstep(2.5, 11, inside);                                                       // the berg's ice wall
+    h += Math.max(0, fbm2(x * 0.019 + 1.3, z * 0.019 - 4.1, 4) - 0.42) * 15 * sstep(30, 64, d) * sstep(8, 26, inside); // snowdrift hills
+    h += fbm2(x * 0.08, z * 0.08, 2) * 0.7 * sstep(4, 14, inside);
+    const dp = Math.hypot(x - PEAK6.x, z - PEAK6.z);
+    if (dp < PEAK6.r) h = Math.max(h, PLAT6 + PEAK6.h * Math.pow(1 - dp / PEAK6.r, 1.7) * (0.9 + fbm2(x * 0.05, z * 0.05, 2) * 0.2));
+    h = lerp(PLAT6, h, sstep(18, 34, d));                                                         // a flat camp
+    const dl = Math.hypot(x - LAKE6.x, z - LAKE6.z); h = lerp(h, PLAT6 - 0.4, sstep(LAKE6.r + 7, LAKE6.r + 0.5, dl));
+    const dd = Math.hypot(x - DEN6.x, z - DEN6.z); h = lerp(h, DENY, sstep(DEN6.r + 9, DEN6.r + 1, dd));
+    const dc = Math.hypot(x - H6CASINO.x, z - H6CASINO.z); h = lerp(h, PLAT6, sstep(20, 12, dc)); // a flat pad for the casino
+    return rampH6(x, z, h);
+}
+function groundY6(x, z) {
+    for (const D of DOCKS6) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 3 && along < D.LEN + 3 && Math.abs(side) < 3) return 0; }
+    return Math.max(-0.4, terrain6(x, z));
+}
+const fight6 = { on: false, phase: 1, cd: 3, atk: null, atkT: 0, minions: [], dyingT: -1, lag: 1, heart: 0, fired: false, seen: false };
+function clampIsle6(p) {
+    for (const D of DOCKS6) {
+        const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP);
+        if (along > 3.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; }
+    }
+    const lim = shoreAt6(p.x, p.z) - 3, d = Math.hypot(p.x, p.z);
+    if (d > lim) { p.x *= lim / d; p.z *= lim / d; }
+    if (fight6.on) { const dx = p.x - DEN6.x, dz = p.z - DEN6.z, dd = Math.hypot(dx, dz), R = DEN6.r - 1; if (dd > R) { p.x = DEN6.x + dx / dd * R; p.z = DEN6.z + dz / dd * R; } } // the ice wall round the den
+}
+const treeOk6 = (x, z) => Math.hypot(x - LAKE6.x, z - LAKE6.z) > LAKE6.r + 4 && Math.hypot(x - DEN6.x, z - DEN6.z) > DEN6.r + 6 && Math.hypot(x - PEAK6.x, z - PEAK6.z) > 14 && DOCKS6.every(D => Math.hypot(x - D.B.x, z - D.B.z) > 16) && Math.hypot(x - H6CASINO.x, z - H6CASINO.z) > 16;
+const H6CASINO = at6(1.45, 62);
+
+// ---- materials, trees, recipes ----
+Object.assign(MATS, {
+    icicle: { name: "Icicles", col: "#d8f4ff", price: 230, hex: 0xc8ecff },
+    frostwood: { name: "Frostwood", col: "#a8d0e8", price: 340, hex: 0x8ab0c8 },
+    glacite: { name: "Glacite", col: "#5ab8ff", price: 480, hex: 0x3a98e8 },
+    frostbloom: { name: "Frostbloom", col: "#c8a8ff", price: 700, hex: 0xb08aff },
+    aurora: { name: "Aurora Crystal", col: "#6affc8", price: 1250, hex: 0x4affb8 },
+    permafrost: { name: "Permafrost Core", col: "#7ad8ff", price: 1900, hex: 0x5ac8ff },
+    yetiheart: { name: "Yeti Heart", col: "#9ff8ff", price: 26000, hex: 0x8af0ff }
+});
+MATS_BY_ISLE[6] = ["icicle", "frostwood", "glacite", "frostbloom", "aurora", "permafrost", "yetiheart"];
+GLOW_MATS.push("glacite", "aurora", "permafrost", "yetiheart");
+for (const k of MATS_BY_ISLE[6]) matMeshMat[k] = new THREE.MeshLambertMaterial({ color: MATS[k].hex, flatShading: true, emissive: GLOW_MATS.includes(k) ? MATS[k].hex : 0x000000, emissiveIntensity: 0.35 });
+const TYPES6 = {
+    icepine:     { name: "Ice Pine",        leaf: [0xd8f0ff, 0xb8e0f8], trunk: 0x5a6a7a, hp: 3.6, logs: 1.3, dmg: 1.4, speed: 1,   bonus: 0,   wd: 0.55, wn: 0.45, col: "#bfe8ff", isl: [6], mat: "icicle" },
+    frostbirch:  { name: "Frost Birch",     leaf: [0xeaf6ff, 0xc8e4f4], trunk: 0xe8eef4, hp: 4.0, logs: 1.4, dmg: 1.5, speed: 1,   bonus: 0,   wd: 0.4,  wn: 0.35, col: "#e8f6ff", isl: [6], mat: "frostwood", minTier: 2 },
+    glacieroak:  { name: "Glacier Oak",     leaf: [0x7ab8e8, 0x5a98d8], trunk: 0x3a4a5a, glow: 0x0a1a3a, hp: 4.6, logs: 1.5, dmg: 1.7, speed: 0.9, bonus: 0, wd: 0.35, wn: 0.35, col: "#7ab8ff", isl: [6], mat: "glacite", minTier: 4 },
+    frostbloomt: { name: "Frostbloom Tree", leaf: [0xc8a8ff, 0xe0c8ff], trunk: 0x4a3a6a, hp: 5.0, logs: 1.5, dmg: 1.8, speed: 1,   bonus: 0,   wd: 0.28, wn: 0.3,  col: "#d8b8ff", isl: [6], mat: "frostbloom", minTier: 6 },
+    auroraspire: { name: "Aurora Spire",    leaf: [0x6affc8, 0x8a7aff], trunk: 0x2a3a4a, glow: 0x1a4a3a, hp: 3.0, logs: 0.8, dmg: 1.6, speed: 1.2, bonus: 90, wd: 0.02, wn: 0.12, col: "#6affc8", isl: [6], rare: true, night: true, mat: "aurora" },
+    frozencolossus: { name: "Frozen Colossus", leaf: [0x9ad0f0, 0xb8e0ff], trunk: 0x2a3a4a, hp: 10, logs: 7, dmg: 3.2, speed: 0.6, bonus: 140, wd: 0.05, wn: 0.05, col: "#9ad8ff", isl: [6], minTier: 9, titan: true, mat: "permafrost" },
+    snowling:    { name: "Snowling",        leaf: [0xf4f8ff, 0xdde8f4], trunk: 0x8a9aaa, hp: 0.6, logs: 0.6, dmg: 0.9, speed: 2.6, bonus: 0, wd: 0, wn: 0, col: "#ffffff", isl: [], rush: true, mat: "icicle" },
+    xmasice:     { name: "Aurora Christmas Fir", leaf: [0x1e5a4e, 0x24685a], trunk: 0x4a3a30, hp: 2.6, logs: 2.6, dmg: 1.2, speed: 0.9, bonus: 40, wd: 0.05, wn: 0.06, col: "#ff6a6a", isl: [6], rare: true, xmas: true, mat: "frostwood" }
+};
+Object.assign(TYPES, TYPES6);
+Object.assign(TREE_STYLE, { icepine: { s: "conifer", snow: true }, frostbirch: { s: "birch", dots: 0x8aa0b4 }, glacieroak: { s: "round", dots: 0xbff4ff }, frostbloomt: { s: "round", dots: 0xffffff }, auroraspire: { s: "crystal", dots: 0xb8ffe8 },
+    frozencolossus: { s: "conifer", snow: true, dots: 0x9ff8ff }, snowling: { s: "spiky", dots: 0x7af0ff }, xmasice: { s: "xmas", dots: 0xbff4ff, snow: true, orn: [0x6affc8, 0xff6ad8, 0x7ab8ff], star: 0xbff4ff } });
+for (const [k, T] of Object.entries(TYPES6)) {
+    const base = { flatShading: true }; if (T.glow !== undefined) base.emissive = T.glow;
+    typeMats[k] = { trunk: new THREE.MeshLambertMaterial({ color: T.trunk, ...base }), leaves: T.leaf.map(c => windy(new THREE.MeshLambertMaterial({ color: c, ...base }))) };
+}
+Object.assign(HIT_COL, { icepine: [0xd8f0ff, 0xffffff], frostbirch: [0xeaf6ff, 0x8aa0b4], glacieroak: [0x7ab8e8, 0xbff4ff], frostbloomt: [0xc8a8ff, 0xffffff], auroraspire: [0x6affc8, 0x8a7aff], frozencolossus: [0x9ad0f0, 0xffffff], snowling: [0xffffff, 0x7af0ff], yeti: [0xffffff, 0x7af0ff] });
+const AXE_RECIPES6 = [null, { icicle: 8 }, { icicle: 12, frostwood: 4 }, { icicle: 16, frostwood: 8 }, { frostwood: 14, glacite: 4 }, { frostwood: 20, glacite: 10 }, { frostwood: 26, glacite: 12, frostbloom: 4 }, { glacite: 20, frostbloom: 10 },
+    { frostbloom: 18, aurora: 4 }, { glacite: 20, frostbloom: 26, aurora: 10 }, { frostbloom: 30, aurora: 22, permafrost: 2 }, { frostwood: 60, aurora: 34, permafrost: 5 }, { frostbloom: 50, aurora: 60, permafrost: 10 }, { frostbloom: 60, aurora: 80, permafrost: 16 },
+    { aurora: 90, permafrost: 22 }, { aurora: 110, permafrost: 30 }, { frostbloom: 80, aurora: 60, permafrost: 40 }, { aurora: 80, permafrost: 60, yetiheart: 3 }];
+const GUN_RECIPES6 = [{ icicle: 10, frostwood: 6 }, { icicle: 20, frostwood: 12, glacite: 4 }, { frostwood: 26, glacite: 12 }, { frostwood: 30, glacite: 18, frostbloom: 6 }, { glacite: 40, frostbloom: 40, aurora: 18 }, { frostbloom: 30, aurora: 40, permafrost: 8 }, { aurora: 60, permafrost: 12 }, { aurora: 50, permafrost: 30, yetiheart: 2 }];
+const AMMO_RECIPES6 = [{ icicle: 2, frostwood: 1 }, { icicle: 3, frostwood: 3 }, { frostwood: 4, glacite: 2 }, { frostwood: 3, glacite: 3 }, { glacite: 10, frostbloom: 4 }, { frostbloom: 3, aurora: 2 }, { glacite: 8, aurora: 3 }, { frostbloom: 6, aurora: 3 }];
+for (const list of [AXE_RECIPES6, GUN_RECIPES6]) for (const rc of list) if (rc) for (const k in rc) rc[k] = Math.max(1, Math.round(rc[k] * 0.6));
+RECIPES[6] = [AXE_RECIPES6, GUN_RECIPES6, AMMO_RECIPES6];
+function brewItems6() {
+    const b = (k, name, desc, secs, craft, cost) => ({ name, col: BUFFS[k].col, desc: `${desc} for ${secs / 60} min${buffLeft(k) > 0 ? ` · ACTIVE ${mmss(buffLeft(k))} (drinking adds more time)` : ""}`, craft, cost, verb: "Brewed", quiet: true, buy() { giveBuff(k, secs); } });
+    return [
+        b("swift", "Snowshoe Tonic", "+30% move speed", 240, { icicle: 6 }, 25000),
+        b("ironhide", "Walrus Hide Draught", "Take 40% less damage", 240, { icicle: 4, frostwood: 6 }, 50000),
+        b("fury", "Blizzard Brew", "+40% axe and gun damage", 240, { frostwood: 6, glacite: 5 }, 100000),
+        b("lucky", "Aurora Elixir", "+50% materials from every tree", 300, { frostbloom: 8, aurora: 2 }, 150000),
+        { name: "Phoenix Tear", icon: "phoenix", col: "#ffb060", desc: `If you would die, you rise again with 60% health instead. You have ${save.phoenix || 0} (max 3)`, craft: { aurora: 3, permafrost: 1 }, cost: 900000, verb: "Brewed", maxed: (save.phoenix || 0) >= 3, buy() { save.phoenix = (save.phoenix || 0) + 1; } }
+    ];
+}
+const SMITH6_SAY = ["Glacite holds an edge colder than a lie.", "Bring me a Yeti Heart and I'll forge you the Fang.", "Keep your hands off the anvil. It's minus forty.", "Aurora crystal sings when it's sharp."];
+const DEPOT6_SAY = ["Icicles by the bucket, Yeti Hearts by the... are you serious?", "Permafrost is up today. Everything's up, it's cold.", "Frostbloom smells like mint and regret."];
+
+// ---- the polar bear (a big gentle grazer; it only grumbles at you) ----
+function makePolarBear() {
+    const g = new THREE.Group(), fur = amat(0xf2f0e8), shade = amat(0xdcd8cc), dk = amat(0x1a1a1e), paw = amat(0x2a2a30);
+    const body = pv(g, 0, 0, 0);
+    part(body, SPH, fur, 0, 0.95, 0, 0.55, 0.52, 0.85); part(body, SPH, fur, 0, 1.05, -0.45, 0.52, 0.55, 0.5); part(body, SPH, shade, 0, 0.78, 0.1, 0.42, 0.3, 0.7);
+    const neck = pv(body, 0, 1.0, 0.65, 0.3); part(neck, SPH, fur, 0, 0.12, 0.08, 0.3, 0.32, 0.34);
+    const head = pv(neck, 0, 0.18, 0.38, -0.3); part(head, SPH, fur, 0, 0, 0, 0.26, 0.24, 0.28); part(head, SPH, fur, 0, -0.06, 0.22, 0.14, 0.12, 0.2); part(head, SPH, dk, 0, -0.04, 0.4, 0.06, 0.05, 0.04);
+    const eyes = [-1, 1].map(s => { const e = pv(head, s * 0.12, 0.07, 0.17); part(e, SPH, aglow(0x101014), 0, 0, 0, 0.03, 0.03, 0.02); return e; });
+    const ears = [-1, 1].map(s => { const e = pv(head, s * 0.16, 0.2, -0.04); e.userData.rz0 = 0; part(e, SPH, fur, 0, 0, 0, 0.07, 0.07, 0.04); return e; });
+    const tail = pv(body, 0, 1.0, -0.92, -0.4); part(tail, SPH, fur, 0, 0, 0, 0.1, 0.1, 0.08);
+    const legs = [[-0.32, 0.5, 0], [0.32, 0.5, Math.PI], [-0.32, -0.45, Math.PI], [0.32, -0.45, 0]].map(([x, z, ph]) => { const p = aLeg(g, x, 0.75, z, 0.72, 0.15, fur, paw); part(p, SPH, fur, 0, -0.15, 0, 0.2, 0.3, 0.22); return { p, ph }; });
+    g.userData.rig = { body, neck, nx0: 0.3, ngraze: 1.1, nrun: 0.1, head, hx0: -0.3, legs, tail: [tail], wag: 3, wagA: 0.2, ears, eyes, stride: 3.2, swing: 0.5, bob: 0.05 };
+    g.scale.setScalar(1.15);
+    return g;
+}
+Object.assign(WILD5, { pbear: (c, dt, dp, px, pz, live, night) => { if (live && dp < 8 && (c.growl = (c.growl || 0) - dt) <= 0) { c.growl = rand(4, 7); sfx(70, 0.7, "sawtooth", 0.06 * (1 - dp / 8), 0.6); } return grazerAI(c, dt, dp, px, pz, live, false, night, { alert: 14, flee: 6, walk: 1.0, run: 5.5, roam: 18, snort: 400 }); } });
+
+// ---- the island in 3D ----
+const isle6G = new THREE.Group(); isle6G.visible = false; scene.add(isle6G);
+const isle6 = { waterGeo: null, foam: null, emit: [], fireLight: null, boatArr: null, boatNext: null, aurora: [], lake: null };
+let isle6Built = false, ferryman6 = null, mapBg6 = null;
+const npcs6 = [];
+// falling snow
+const snow6 = (() => {
+    const N = 700, p = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) { p[i * 3] = rand(-40, 40); p[i * 3 + 1] = rand(0, 18); p[i * 3 + 2] = rand(-40, 40); }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.12, color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false }));
+    pts.visible = false; pts.frustumCulled = false; scene.add(pts); return pts;
+})();
+function updateSnow6(dt) {
+    const p = snow6.geometry.attributes.position, cx = player.pos.x, cz = player.pos.z, cy = player.pos.y;
+    for (let i = 0; i < p.count; i++) {
+        let x = p.getX(i) + Math.sin(time * 0.6 + i) * dt * 0.5 + dt * 0.8, y = p.getY(i) - dt * (1.1 + (i % 5) * 0.2), z = p.getZ(i) + Math.cos(time * 0.5 + i * 1.3) * dt * 0.5;
+        if (x - cx > 40) x -= 80; else if (x - cx < -40) x += 80;
+        if (z - cz > 40) z -= 80; else if (z - cz < -40) z += 80;
+        if (y < cy - 4) y = cy + 16;
+        p.setXYZ(i, x, y, z);
+    }
+    p.needsUpdate = true;
+}
+const cNightFog6 = new THREE.Color(0x0a1834), cDayFog6 = new THREE.Color(0xcfe6f6), cDusk6 = new THREE.Color(0xff9ab8), cNightAmb6 = new THREE.Color(0x6a7ac8), cDayAmb6 = new THREE.Color(0xeef6ff);
+function sky6(d, dusk, gray) {
+    const c = gfxT6.c.copy(cNightFog6).lerp(cDayFog6, d).lerp(cDusk6, dusk * 0.6).lerp(cGray, gray * 0.4);
+    scene.background.copy(c); scene.fog.color.copy(c);
+    scene.fog.near *= 1.2; scene.fog.far *= 1.7;
+    ambL.color.copy(cNightAmb6).lerp(cDayAmb6, d);
+    snow6.material.opacity = 0.65 + (1 - d) * 0.25;
+    const ao = inCasino() ? 0 : clamp(1 - d * 2.2, 0, 1) * (1 - wx.cloud * 0.6);
+    isle6.aurora.forEach((a, i) => { a.visible = ao > 0.02; a.material.opacity = ao * (0.55 + 0.25 * Math.sin(time * 0.4 + i * 1.7)); a.position.copy(camera.position).add(a.userData.off); });
+}
+const gfxT6 = { c: new THREE.Color() };
+function makeAurora() { // tall ribbons of green and violet light, high in the night sky
+    const tex = (() => { const cv = document.createElement("canvas"); cv.width = 8; cv.height = 128; const g = cv.getContext("2d"), grd = g.createLinearGradient(0, 0, 0, 128); grd.addColorStop(0, "rgba(160,90,255,0)"); grd.addColorStop(0.35, "rgba(140,120,255,.6)"); grd.addColorStop(0.75, "rgba(80,255,180,.9)"); grd.addColorStop(1, "rgba(80,255,180,0)"); g.fillStyle = grd; g.fillRect(0, 0, 8, 128); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+    for (let k = 0; k < 3; k++) {
+        const geo = new THREE.PlaneGeometry(420, 70, 60, 1), p = geo.attributes.position;
+        for (let i = 0; i < p.count; i++) { const x = p.getX(i); p.setZ(i, Math.sin(x * 0.012 + k * 2) * 40 + Math.sin(x * 0.031 + k) * 14); }
+        const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+        m.userData.off = V3(Math.cos(k * 2.1) * 60, 150 + k * 18, -180 + k * 70); m.rotation.y = k * 0.7; m.visible = false; m.renderOrder = -50; m.frustumCulled = false;
+        scene.add(m); isle6.aurora.push(m);
+    }
+}
+function buildIsle6() {
+    isle6Built = true; curBuild = 6;
+    const prevAdd = addTgt; addTgt = isle6G;
+    colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
+    // ----- the ice: snow on top, blue ice walls down to the sea -----
+    {
+        const g = new THREE.PlaneGeometry(330, 330, 200, 200); g.rotateX(-Math.PI / 2);
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) pos.setY(i, terrain6(pos.getX(i), pos.getZ(i)));
+        g.computeVertexNormals();
+        const nor = g.attributes.normal, col = [], c = new THREE.Color();
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), z = pos.getZ(i), y = pos.getY(i), ny = nor.getY(i), d = Math.hypot(x, z), rn = Math.random();
+            if (y < -0.5) c.setHSL(0.55, 0.45, 0.22 + rn * 0.04);
+            else if (ny < 0.72) c.setHSL(0.55, 0.55, 0.55 + rn * 0.08);                                     // blue glacier ice on the cliffs
+            else if (Math.hypot(x - LAKE6.x, z - LAKE6.z) < LAKE6.r + 1) c.setHSL(0.54, 0.5, 0.62 + rn * 0.04);
+            else if (d < SAFE_R + 1) c.setHSL(0.58, 0.12, 0.66 + rn * 0.04);                                 // trampled camp snow
+            else if (Math.hypot(x - DEN6.x, z - DEN6.z) < DEN6.r + 1) c.setHSL(0.56, 0.18, 0.6 + rn * 0.05);
+            else c.setHSL(0.58, 0.14 + rn * 0.06, 0.74 + rn * 0.06);                                         // snow
+            col.push(c.r, c.g, c.b);
+        }
+        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        scene.add(terrainMesh[6] = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+        const wg = new THREE.PlaneGeometry(900, 900, 150, 150); wg.rotateX(-Math.PI / 2);
+        const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), shallow = new THREE.Color(0x6ac8e0), mid = new THREE.Color(0x2a6a9a), deep = new THREE.Color(0x0e2a4a);
+        for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), k = clamp((Math.hypot(x, z) - shoreAt6(x, z)) / 40, 0, 1); cc.copy(shallow).lerp(mid, clamp(k * 2, 0, 1)).lerp(deep, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
+        wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3)); isle6.waterGeo = wg;
+        // floating ice floes and small bergs round the island
+        const floe = batch(lamb(0xe8f6ff)), berg = batch(new THREE.MeshLambertMaterial({ color: 0xbfe8ff, emissive: 0x0a2a3a, flatShading: true }));
+        for (let i = 0; i < 70; i++) { const a = srand() * 6.283, r = shoreR6(a) + srange(6, 90), x = Math.cos(a) * r, z = Math.sin(a) * r; if (DOCKS6.some(D => Math.hypot(x - D.pt(D.LEN).x, z - D.pt(D.LEN).z) < 30)) continue; floe.add(CYL6, x, -0.35, z, 0, srand() * 3, 0, srange(1.5, 5), 0.3, srange(1.5, 5)); }
+        for (let i = 0; i < 9; i++) { const a = srand() * 6.283, r = shoreR6(a) + srange(40, 160), x = Math.cos(a) * r, z = Math.sin(a) * r; berg.add(ICO, x, srange(2, 6), z, srand(), srand() * 3, srand(), srange(6, 14), srange(8, 18), srange(6, 14)); }
+        floe.build(); berg.build();
+    }
+    // ----- the frozen lake -----
+    {
+        const ice = new THREE.Mesh(new THREE.CircleGeometry(LAKE6.r + 0.5, 40), new THREE.MeshLambertMaterial({ color: 0xbfeaff, emissive: 0x0a2a40, transparent: true, opacity: 0.92 }));
+        ice.rotation.x = -Math.PI / 2; ice.position.set(LAKE6.x, PLAT6 - 0.35, LAKE6.z); scene.add(ice); isle6.lake = ice;
+        const cracks = batch(new THREE.MeshBasicMaterial({ color: 0xf4fcff }));
+        for (let i = 0; i < 18; i++) { const a = srand() * 6.283, d = srange(2, LAKE6.r - 2); cracks.add(BOX, LAKE6.x + Math.cos(a) * d, PLAT6 - 0.33, LAKE6.z + Math.sin(a) * d, 0, srand() * 3, 0, srange(1.5, 4), 0.01, 0.06); }
+        cracks.build();
+        const l = label("FROZEN LAKE", "#9fe8ff", 3.2, 0.8); l.position.set(LAKE6.x, PLAT6 + 4, LAKE6.z);
+    }
+    // ----- Igloo Camp -----
+    {
+        const stones = batch(lamb(0x6a6a74)); for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, PLAT6 + 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); } stones.build();
+        const lg = batch(woodDark); for (let i = 0; i < 4; i++) lg.add(CYL6, 0, PLAT6 + 0.25, -3, Math.PI / 2, i * 0.8, 0, 0.12, 1.3, 0.12); lg.build();
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.7, 6), glowM(0xff8a2a)); flame.position.set(0, PLAT6 + 1.05, -3);
+        const core = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 5), glowM(0xffe070)); core.position.set(0, PLAT6 + 0.72, -3);
+        scene.add(flame, core); fires.push({ flame, core, ph: srand() * 6 });
+        const fl = new THREE.PointLight(0xff9a40, 18, 18, 1.6); fl.position.set(0, PLAT6 + 2, -3); scene.add(fl); isle6.fireLight = fl;
+        circles.push({ x: 0, z: -3, r: 1.3 }); isle6.emit.push({ x: 0, y: PLAT6 + 2, z: -3, rate: 1.0, acc: 0.3 });
+        const cl = label("IGLOO CAMP", "#bfe8ff", 3.4, 0.8); cl.position.set(0, PLAT6 + 4.6, -3); cl.maxD = 90;
+        // igloos: the bed is in the big one
+        const snowM = lamb(0xf4f8ff), blockM = lamb(0xdce8f4);
+        const igloo = (x, z, s, bed) => {
+            const g = new THREE.Group(); g.position.set(x, PLAT6, z); g.rotation.y = Math.atan2(-x, -z); scene.add(g);
+            const dome = new THREE.Mesh(new THREE.SphereGeometry(2.2 * s, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), snowM); g.add(dome);
+            for (let r = 0; r < 3; r++) { const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2 * s * Math.cos(r * 0.45 + 0.2), 0.04, 4, 20), blockM); ring.rotation.x = Math.PI / 2; ring.position.y = 2.2 * s * Math.sin(r * 0.45 + 0.2); g.add(ring); }
+            part(g, CYL8, snowM, 0, 0.55 * s, 2.1 * s, 0.75 * s, 1.1 * s, 1.2 * s, Math.PI / 2); part(g, CYL8, new THREE.MeshBasicMaterial({ color: 0x1a2a3a }), 0, 0.5 * s, 2.72 * s, 0.55 * s, 0.05, 0.9 * s, Math.PI / 2);
+            if (bed) { part(g, BOX, wood, 0, 0.3, 0, 1.4, 0.3, 2.3); part(g, BOX, lamb(0x8a2a3a), 0, 0.52, -0.3, 1.3, 0.14, 1.5); }
+            circles.push({ x, z, r: 2.2 * s });
+        };
+        igloo(BED6.x - 2.5, BED6.z + 1.5, 1.2, true); igloo(-16, -16, 1, false); igloo(17, 14, 0.9, false); igloo(-20, 3, 0.8, false);
+        const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(BED6.x, PLAT6 + 3.6, BED6.z);
+        const gS = stall3(SMITH6, "THE FROST FORGE", "CRAFT AXES · GUNS", "#7ad8ff", 0x2a4a6a);
+        const smith = makeHumanoid({ face: "smith", skin: 0xe8b890, shirt: 0x3a5a7a, pants: 0x2a2a3a, apron: 0x3a2a1a, beard: 0xd8d0c8, hat: "cap", hatCol: 0xc8202a, wide: 1.3, belly: true });
+        smith.g.position.set(0, 0, -0.6); gS.add(smith.g); smith.yaw = gS.rotation.y; npcs6.push(smith);
+        const hm = new THREE.Group(); hm.position.set(0, -0.64, 0.05); smith.armR.add(hm); part(hm, BOX, lamb(0x6a4a2a), 0, 0, 0.22, 0.05, 0.05, 0.5); smith.hammer = part(hm, BOX, lamb(0x2a2a30), 0, 0, 0.48, 0.24, 0.13, 0.13);
+        const l1 = label("THE FROST FORGE", "#7ad8ff", 3.2, 0.8); l1.position.set(SMITH6.x, PLAT6 + 6.2, SMITH6.z);
+        const gD = stall3(DEPOT6, "TRADING POST", "SELL MATERIALS", "#ffd040", 0x4a3020);
+        const clerk = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0xc8202a, vest: 0xf2f2f2, pants: 0x2a2a3a, hair: 0x8a5a2a, hat: "cap", hatCol: 0xf2f2f2 });
+        clerk.g.position.set(0, 0, -0.6); gD.add(clerk.g); clerk.yaw = gD.rotation.y; npcs6.push(clerk);
+        const l2 = label("TRADING POST", "#ffd040", 3.6, 0.8); l2.position.set(DEPOT6.x, PLAT6 + 6.2, DEPOT6.z);
+        const gW = stall3(WITCH6, "SNOW WITCH", "BREWS · TONICS", "#bff4ff", 0x3a4a6a);
+        const witch = makeHumanoid({ face: "witch", skin: 0xd8e8f4, shirt: 0x3a4a7a, pants: 0x1a2a3a, hair: 0xf4f8ff, hat: "witch", hatCol: 0x2a3a5a });
+        witch.g.position.set(0, 0, -0.6); gW.add(witch.g); witch.yaw = gW.rotation.y; npcs6.push(witch);
+        const l3 = label("SNOW WITCH", "#bff4ff", 3.2, 0.8); l3.position.set(WITCH6.x, PLAT6 + 6.2, WITCH6.z);
+        for (const g of [gS, gD, gW]) g.position.y = PLAT6;
+        // signposts out of camp
+        const post = (to, name, col) => {
+            const dir = Math.atan2(to.x, to.z), x = Math.sin(dir) * 22, z = Math.cos(dir) * 22, y = groundY6(x, z), far = Math.round(Math.hypot(to.x - x, to.z - z) - (to.r || 0));
+            const p = new THREE.Mesh(CYL6, woodDark); p.scale.set(0.09, 2.4, 0.09); p.position.set(x, y + 1.2, z); scene.add(p);
+            const out = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex(name, `AHEAD ↑ ${far}m`, col) })); out.position.set(x, y + 2.6, z); out.rotation.y = dir + Math.PI; scene.add(out);
+            const home = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.9), new THREE.MeshBasicMaterial({ map: signTex("IGLOO CAMP", "AHEAD ↑", "#bfe8ff") })); home.position.set(x, y + 2.6, z); home.rotation.y = dir; scene.add(home);
+        };
+        post(DEN6, "THE YETI'S DEN", "#7af0ff"); post(LAKE6, "FROZEN LAKE", "#9fe8ff"); post({ x: NEXT6.B.x, z: NEXT6.B.z }, "REBIRTH 6 FERRY", "#ffd890");
+    }
+    // ----- docks -----
+    for (const D of DOCKS6) {
+        const yaw = Math.atan2(D.DIR.x, D.DIR.z);
+        const planks = batch(lamb(D.kind === "arr" ? 0x6a5a5a : 0x5a5a6a)), posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(glowM(D.kind === "arr" ? 0xbfe8ff : 0xffd890));
+        for (let i = 0; i < D.LEN; i++) { const p = D.pt(i + 0.5); planks.add(BOX, p.x, 0.22, p.z, 0, yaw, 0, 3.6, 0.14, 0.92); }
+        for (let i = 0; i <= D.LEN; i += 3) for (const sd of [-1.9, 1.9]) { const p = D.pt(i, sd); posts.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) bulbs.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
+        for (let i = 0; i < D.LEN; i++) for (const sd of [-1.9, 1.9]) { const p = D.pt(i + 0.5, sd, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
+        planks.build(); posts.build(); rails.build(); bulbs.build();
+        const [a1, a2, c1] = D.kind === "arr" ? ["WELCOME TO", "THE ICEBERG", "#bfe8ff"] : ["REBIRTH 6", "COMING SOON", "#ffd890"];
+        const s1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(a1, a2, c1) })); s1.position.copy(D.pt(5.5, 0, 3.3)); s1.rotation.y = D.kind === "arr" ? yaw : yaw + Math.PI; scene.add(s1);
+        const s2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(D.kind === "arr" ? "ARRIVALS" : "IGLOO CAMP", D.kind === "arr" ? "FROM PORT HAVEN" : "THIS WAY ↑", c1) })); s2.position.copy(D.pt(5.5, 0, 3.3)); s2.rotation.y = D.kind === "arr" ? yaw + Math.PI : yaw; scene.add(s2);
+        for (const sd of [-2.0, 2.0]) { const p = D.pt(5.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
+        const dl = label(D.kind === "arr" ? "ARRIVALS" : "REBIRTH 6 FERRY", c1, 3.2, 0.7); dl.position.copy(D.pt(5.5, 0, 4.6)); dl.maxD = 80;
+        const b = makeBoat3(D.kind === "arr" ? 0x1a2a3a : 0x2a2a3a, D.kind === "arr" ? 0x4a7a9a : 0x8a8a9a, D.kind === "arr" ? 0x9fe8ff : 0xffd890);
+        b.position.copy(D.pt(D.LEN - 7, 4.4, -0.15)); b.rotation.y = yaw; scene.add(b);
+        if (D.kind === "arr") isle6.boatArr = b; else isle6.boatNext = b;
+        // lanterns up the ramp and on to camp
+        const lp = batch(woodDark), lgl = batch(glowM(0xffd890)), land = Math.hypot(D.B.x, D.B.z);
+        for (let s = 4, k = 0; s < land - 26; s += 9, k++) { const sd = k % 2 ? 3.2 : -3.2, x = D.B.x - D.DIR.x * s + D.PERP.x * sd, z = D.B.z - D.DIR.z * s + D.PERP.z * sd, y = groundY6(x, z); lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lgl.add(ICO, x, y + 2.5, z, 0, 0, 0, 0.18, 0.24, 0.18); }
+        lp.build(); lgl.build();
+    }
+    {
+        const yaw = Math.atan2(NEXT6.DIR.x, NEXT6.DIR.z);
+        ferryman6 = makeFerrymanFigure(0x2a2a3a, 0x8a8a9a, 0xffd890); ferryman6.position.set(FERRYMAN6.x, 0.3, FERRYMAN6.z); ferryman6.rotation.y = yaw + Math.PI; scene.add(ferryman6);
+        const fm = label("FERRYMAN", "#ffd890", 2.6, 0.6); fm.position.set(FERRYMAN6.x, 4.7, FERRYMAN6.z); fm.maxD = 60;
+    }
+    // ----- Yeti Peak: an ice crown on the summit -----
+    {
+        const y = terrain6(PEAK6.x, PEAK6.z), ice = new THREE.MeshLambertMaterial({ color: 0xbff0ff, emissive: 0x1a4a6a, transparent: true, opacity: 0.92, flatShading: true });
+        for (let k = 0; k < 8; k++) { const a = (k / 8) * 6.28, m = new THREE.Mesh(CONE6, ice); m.scale.set(1.2, srange(5, 10), 1.2); m.position.set(PEAK6.x + Math.cos(a) * 2.5, y + 2, PEAK6.z + Math.sin(a) * 2.5); m.rotation.set(Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3); scene.add(m); }
+        const l = label("YETI PEAK", "#e8f6ff", 3.4, 0.8); l.position.set(PEAK6.x, y + 16, PEAK6.z); l.maxD = 400; l.blurK = 0.3;
+    }
+    // ----- the den and the Yeti -----
+    buildDen6();
+    // ----- scenery: snowdrifts, ice spikes, frozen logs, rocks -----
+    const okSpot6 = (x, z) => { const d = Math.hypot(x, z); return d > SAFE_R + 2 && d < shoreAt6(x, z) - 12 && treeOk6(x, z); };
+    const scatter6 = (count, fn) => { let made = 0, guard = 0; while (made < count && guard++ < count * 40) { const a = srand() * 6.283, d = srange(SAFE_R + 2, shoreR6(a) - 12), x = Math.cos(a) * d, z = Math.sin(a) * d; if (!okSpot6(x, z)) continue; fn(x, z, terrain6(x, z)); made++; } };
+    {
+        const drift = batch(lamb(0xf4f8ff)), spike = batch(new THREE.MeshLambertMaterial({ color: 0xbff0ff, emissive: 0x0a2a3a, flatShading: true })), rock = batch(lamb(0x5a6070)), logsB = batch(lamb(0x5a6a7a));
+        scatter6(110, (x, z, y) => drift.add(SPH, x, y - 0.1, z, 0, srand() * 3, 0, srange(1, 3), srange(0.3, 0.8), srange(1, 2.4)));
+        scatter6(60, (x, z, y) => { for (let k = 0; k < 3; k++) spike.add(CONE6, x + srange(-0.6, 0.6), y + 0.6, z + srange(-0.6, 0.6), srange(-0.3, 0.3), 0, srange(-0.3, 0.3), 0.2, srange(0.8, 2.2), 0.2); });
+        scatter6(50, (x, z, y) => { const s = srange(0.5, 1.6); rock.add(ICO, x, y + s * 0.3, z, srand() * 3, srand() * 3, 0, s, s * 0.7, s); if (s > 1.2) circles.push({ x, z, r: s * 0.85 }); });
+        scatter6(18, (x, z, y) => logsB.add(CYL6, x, y + 0.3, z, Math.PI / 2, srand() * 3, 0, 0.3, srange(2.2, 4), 0.3));
+        drift.build(); spike.build(); rock.build(); logsB.build();
+    }
+    for (let i = 0; i < 10; i++) { let guard = 0; while (guard++ < 60) { const a = srand() * 6.283, d = srange(36, 125), x = Math.cos(a) * d, z = Math.sin(a) * d; if (d > shoreAt6(x, z) - 14 || !okSpot6(x, z)) continue; const c = makeChest(x, z, srand() * 6, i % 4 === 0); const y = terrain6(x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; break; } }
+    makeAurora();
+    isle6.emit.forEach(e => smokeEmit.push(e));
+    addTgt = prevAdd; curBuild = 1;
+}
+
+// =========================== THE YETI ===========================
+const YETI_H = 18, YETI_R = 3.0;
+const YETI_T = { name: "The Yeti", col: "#9ff8ff", hp: 1, logs: 0, dmg: 1, speed: 0, bonus: 0, rare: true, wd: 0, wn: 0 };
+let yeti = null, yetiG = null, yetiLabel = null, yetiStump = null, yetiWall = null;
+const yfx = { rings: [], balls: [], spikes: [] };
+const yetiMaxHp = () => Math.ceil(600 * hpScale() * (1 + 0.25 * (save.yetiKills || 0)));
+const yetiDmg = (k = 1) => Math.round(30 * isleDm() * (1 + 0.04 * (save.day - 1)) * k);
+function buildDen6() {
+    const y0 = DENY;
+    // a wall of ice that rises round the den while you fight
+    yetiWall = new THREE.Group(); yetiWall.position.set(DEN6.x, y0, DEN6.z); yetiWall.visible = false; scene.add(yetiWall);
+    const wallM = new THREE.MeshLambertMaterial({ color: 0xbff0ff, emissive: 0x1a4a6a, transparent: true, opacity: 0.85, flatShading: true });
+    for (let i = 0; i < 34; i++) { const a = (i / 34) * Math.PI * 2; part(yetiWall, CONE6, wallM, Math.cos(a) * (DEN6.r + 0.5), 1.6, Math.sin(a) * (DEN6.r + 0.5), 0.9, srange(2.6, 4.4), 0.9); }
+    // the den: bones, a rough boulder ring
+    const bone = batch(lamb(0xe8e0d0)), boul = batch(lamb(0x8a9aaa));
+    for (let i = 0; i < 18; i++) { const a = srand() * 6.283, d = srange(DEN6.r - 4, DEN6.r + 3); boul.add(ICO, DEN6.x + Math.cos(a) * (DEN6.r + 3.5), y0 + 0.8, DEN6.z + Math.sin(a) * (DEN6.r + 3.5), srand(), srand() * 3, 0, srange(1.2, 2.4), srange(1, 2), srange(1.2, 2.4)); bone.add(CYL6, DEN6.x + Math.cos(a) * d * 0.6, y0 + 0.1, DEN6.z + Math.sin(a) * d * 0.6, Math.PI / 2, srand() * 3, 0, 0.07, srange(0.6, 1.4), 0.07); }
+    bone.build(); boul.build();
+    // the Yeti: a giant shaggy white tree with a frost crown and blue eyes
+    yetiG = new THREE.Group(); yetiG.position.set(DEN6.x, y0 - 0.1, DEN6.z); scene.add(yetiG);
+    const body = new THREE.Group(); yetiG.add(body);
+    const fur = new THREE.MeshLambertMaterial({ color: 0xf2f4f8, flatShading: true }), furD = new THREE.MeshLambertMaterial({ color: 0xc8d4e0, flatShading: true }), bark = new THREE.MeshLambertMaterial({ color: 0x4a5a6a, flatShading: true });
+    const tg = new THREE.CylinderGeometry(YETI_R * 0.7, YETI_R * 1.3, YETI_H, 10, 6);
+    { const p = tg.attributes.position; for (let i = 0; i < p.count; i++) { const u = p.getY(i) / YETI_H + 0.5, k = 1 + 0.1 * Math.sin(u * 9 + p.getX(i) * 2); p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); } tg.computeVertexNormals(); }
+    const trunk = new THREE.Mesh(tg, bark); trunk.position.y = YETI_H / 2; body.add(trunk);
+    for (let i = 0; i < 46; i++) { const a = srand() * 6.283, y = srange(1.5, YETI_H * 0.92), rr = YETI_R * (1.3 - 0.55 * (y / YETI_H)); part(body, ICO, i % 3 ? fur : furD, Math.cos(a) * rr, y, Math.sin(a) * rr, srange(0.9, 1.6), srange(1.1, 2.2), srange(0.9, 1.6)); }
+    const crown = new THREE.Group(); crown.position.y = YETI_H; body.add(crown);
+    let crownMesh = null;
+    for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2, s = part(crown, ICO, i % 2 ? fur : furD, Math.cos(a) * 2.6, 1.2, Math.sin(a) * 2.6, 2.2, 2.4, 2.2); if (!crownMesh) crownMesh = s; }
+    const iceM = new THREE.MeshLambertMaterial({ color: 0x9ff0ff, emissive: 0x2a6a8a, flatShading: true });
+    for (let i = 0; i < 7; i++) { const a = (i / 7) * Math.PI * 2; part(crown, CONE6, iceM, Math.cos(a) * 1.6, 3.6, Math.sin(a) * 1.6, 0.5, srange(2.5, 4), 0.5, Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4); }
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMats.calm); face.scale.setScalar(4.8); face.position.set(0, 11, YETI_R * 1.05 + 0.4); body.add(face);
+    for (const s of [-1, 1]) part(body, ICO, glowM(0x7af0ff), s * 1.0, 11.8, YETI_R * 1.05 + 0.45, 0.35, 0.3, 0.1);
+    const arms = [], aGeo = armGeometry(8);
+    for (const s of [-1, 1]) { const pivot = new THREE.Group(); pivot.position.set(s * YETI_R * 0.9, 12.5, 0.3); const arm = new THREE.Mesh(aGeo, bark); arm.scale.set(2.8, 1, 2.8); arm.rotation.z = -s * 2.2; pivot.add(arm); for (let k = 0; k < 6; k++) part(arm, ICO, fur, 0, 1 + k * 1.1, 0, 0.3, 0.4, 0.3); body.add(pivot); arms.push({ pivot, arm, s }); }
+    yeti = { boss: true, key: "yeti", type: YETI_T, g: yetiG, body, face, arms, h: YETI_H, r: YETI_R, x: DEN6.x, z: DEN6.z, gy: y0, hp: 1, maxHp: 1, solid: [trunk, crownMesh], dying: false, burn: false, gone: true, t: 0, hurt: 0, mode: "calm", armUp: 0, slam: 0 };
+    circles.push({ x: DEN6.x, z: DEN6.z, r: YETI_R * 1.35 });
+    yetiStump = new THREE.Group(); yetiStump.position.set(DEN6.x, y0, DEN6.z); yetiStump.visible = false; scene.add(yetiStump);
+    part(yetiStump, new THREE.CylinderGeometry(YETI_R * 1.1, YETI_R * 1.4, 2, 10), bark, 0, 1, 0, 1, 1, 1);
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * 6.28; part(yetiStump, ICO, fur, Math.cos(a) * YETI_R, 1.6, Math.sin(a) * YETI_R, 0.8, 0.8, 0.8); }
+    yetiLabel = label("THE YETI · sleeping", "#9ff8ff", 2.8, 0.7); yetiLabel.position.set(DEN6.x, y0 + YETI_H + 7, DEN6.z); yetiLabel.maxD = 120;
+    // attack pieces: warning rings, snowballs, ice spikes
+    const ringM = new THREE.MeshBasicMaterial({ color: 0x7af0ff, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
+    for (let i = 0; i < 20; i++) { const g = new THREE.Group(), ring = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 28), ringM.clone()), fill = new THREE.Mesh(new THREE.CircleGeometry(1, 28), ringM.clone()); ring.rotation.x = fill.rotation.x = -Math.PI / 2; fill.material.opacity = 0.2; g.add(ring, fill); g.visible = false; scene.add(g); yfx.rings.push({ g, ring, fill, t: -1, life: 1 }); }
+    for (let i = 0; i < 10; i++) { const m = new THREE.Mesh(SPH, fur); m.scale.setScalar(1.1); m.visible = false; scene.add(m); yfx.balls.push({ m, on: false }); }
+    for (let i = 0; i < 12; i++) { const m = new THREE.Mesh(CONE6, iceM); m.visible = false; scene.add(m); yfx.spikes.push({ m, t: -1 }); }
+}
+function syncYeti() {
+    if (!yetiG) return;
+    const dead = save.yetiDay === save.day && save.yetiKills > 0;
+    yetiG.visible = !dead; yetiStump.visible = dead;
+    yetiLabel.el.textContent = dead ? "THE YETI · regrows at dawn" : "THE YETI · sleeping";
+    yetiLabel.visible = !fight6.on;
+    if (!dead) { yeti.body.rotation.set(0, 0, 0); yeti.dying = false; }
+}
+function yRing(x, z, r, life) { const o = yfx.rings.find(q => q.t < 0); if (!o) return null; o.t = 0; o.life = life; o.g.position.set(x, groundY(x, z) + 0.08, z); o.g.scale.setScalar(r); o.g.visible = true; return o; }
+const yetiDist = () => Math.hypot(player.pos.x - DEN6.x, player.pos.z - DEN6.z);
+function yetiHit(k, sx, sz) { if (player.invuln > 0) return; hurtPlayer(yetiDmg(k), sx, sz); }
+function startFight6() {
+    const f = fight6;
+    Object.assign(f, { on: true, phase: 1, cd: 3, atk: null, atkT: 0, minions: [], dyingT: -1, lag: 1, heart: 0 });
+    yeti.maxHp = yeti.hp = yetiMaxHp(); yeti.dying = false; yeti.gone = false; yeti.hurt = 0;
+    if (!trees.includes(yeti)) trees.push(yeti);
+    yetiWall.visible = true; yetiLabel.visible = false;
+    $("bossName").textContent = "THE YETI"; $("bossBar").classList.add("show"); $("bossPh").textContent = ""; $("bossBar").classList.remove("rage");
+    roar(0.6); shake = 1.1; flash = 0.3;
+    titleCard("THE YETI", "the mountain's oldest tree wakes up hungry");
+    toast("An ice wall seals the den. Win, or wake up in camp.", "bad");
+    if (!f.seen) { f.seen = true; setTimeout(() => { if (fight6.on) toast("Step out of the blue rings. Snowballs land where the rings are. Kill his Snowlings fast.", "rare"); }, 3500); }
+}
+function endFight6(won, quiet) {
+    const f = fight6;
+    f.on = false; f.atk = null;
+    $("bossBar").classList.remove("show");
+    yetiWall.visible = false;
+    for (const t of f.minions) if (!t.gone && !t.dying) t.burn = true;
+    f.minions = [];
+    for (const r of yfx.rings) { r.t = -1; r.g.visible = false; }
+    for (const b of yfx.balls) { b.on = false; b.m.visible = false; }
+    for (const s of yfx.spikes) { s.t = -1; s.m.visible = false; }
+    if (!won) { yeti.hp = yeti.maxHp; yeti.gone = true; yetiLabel.visible = true; if (!quiet) setTimeout(() => toast("The Yeti grumbles and settles back into the snow...", "rare"), 1500); }
+}
+function yetiDefeated(t) {
+    fight6.dyingT = 0; t.gone = true;
+    endFight6(true);
+    save.yetiKills = (save.yetiKills || 0) + 1; save.yetiDay = save.day;
+    save.felled++; contractProgress("fell"); contractProgress("rare");
+    roar(0.45); shake = 1.2; flash = 1; hitstop = 0.25;
+    titleCard("THE YETI FALLS", "the snow will raise him again at dawn");
+    writeSave();
+}
+function yetiRewards() {
+    const k = save.yetiKills, first = k === 1, cash = Math.round(2500000 * rebirthMult() * (1 + 0.3 * (k - 1)));
+    save.money += cash;
+    for (const [m, n] of [["yetiheart", first ? 3 : 1 + (Math.random() < 0.5 ? 1 : 0)], ["permafrost", 20 + Math.floor(Math.random() * 16)], ["aurora", 15 + Math.floor(Math.random() * 12)], ["glacite", 30 + Math.floor(Math.random() * 20)]]) dropMatsAt(DEN6.x, DEN6.z, m, n, 2, 6);
+    toast(`+${money(cash)} from the Yeti${first ? " · FIRST KILL!" : ""}`, "cash");
+    toast("Yeti Hearts, Permafrost, Aurora and Glacite spill across the den. Grab them!", "rare");
+    if (first) setTimeout(() => toast("The Frost Forge can now make the Yeti's Fang and the Cryo Cannon.", "good"), 2500);
+    burst(V3(DEN6.x, yeti.gy + 3, DEN6.z), 60, 9, [glowM(0x7af0ff), glowM(0xffffff), chipMats[2]]);
+    sfx(392, 0.6, "triangle", 0.12, 1.5); setTimeout(() => sfx(523, 0.6, "triangle", 0.12, 1.5), 160); setTimeout(() => sfx(784, 1.0, "triangle", 0.12, 1.2), 340);
+    writeSave();
+}
+function pickYetiAttack() {
+    const f = fight6, d = yetiDist(), alive = f.minions.filter(t => !t.gone && !t.dying && !t.burn).length, o = [];
+    if (d < 11) o.push(["slam", 3]);
+    o.push(["snowballs", 3], ["spikes", 2.4]);
+    if (alive < (f.phase >= 2 ? 4 : 2)) o.push(["summon", 1]);
+    if (f.phase >= 2) o.push(["avalanche", 1.4]);
+    let r = Math.random() * o.reduce((a, q) => a + q[1], 0);
+    for (const [k, w] of o) { r -= w; if (r <= 0 && k !== f.last) return k; }
+    return o[0][0];
+}
+function inDen(x, z, m = 1.5) { const dx = x - DEN6.x, dz = z - DEN6.z, d = Math.hypot(dx, dz), lim = DEN6.r - m; return d > lim ? [DEN6.x + dx / d * lim, DEN6.z + dz / d * lim] : [x, z]; }
+function startYetiAttack(k) {
+    const f = fight6, P = player.pos; f.atk = k; f.atkT = 0; f.last = k; f.fired = false; f.step = 0;
+    if (k === "slam") { f.ring = yRing(DEN6.x, DEN6.z, 10, 1.1); floatWorld(V3(DEN6.x, yeti.gy + 13, DEN6.z), "!", "warn"); sfx(140, 0.5, "sawtooth", 0.08, 0.5); }
+    if (k === "snowballs") {
+        const n = f.phase === 1 ? 3 : 5; f.targets = [];
+        for (let i = 0; i < n; i++) { const a = Math.random() * 6.283, dd = i ? rand(2, 6) : 0, [x, z] = inDen(P.x + player.vel.x * 0.9 + Math.cos(a) * dd, P.z + player.vel.z * 0.9 + Math.sin(a) * dd); f.targets.push({ x, z, delay: i * 0.25 }); }
+        sfx(220, 0.3, "triangle", 0.08, 0.6);
+    }
+    if (k === "spikes") { const n = f.phase === 1 ? 4 : 7; f.targets = []; for (let i = 0; i < n; i++) { const a = Math.random() * 6.283, dd = i ? rand(2, 7) : 0, [x, z] = inDen(P.x + Math.cos(a) * dd, P.z + Math.sin(a) * dd); f.targets.push({ x, z, ring: yRing(x, z, 1.9, 0.9) }); } sfx(1200, 0.3, "triangle", 0.05, 0.4); }
+    if (k === "avalanche") { toast("AVALANCHE! Get out of the rings!", "bad"); f.targets = []; for (let i = 0; i < 12; i++) { const [x, z] = inDen(DEN6.x + rand(-DEN6.r, DEN6.r), DEN6.z + rand(-DEN6.r, DEN6.r)); f.targets.push({ x, z, delay: 0.5 + i * 0.12 }); } sfx(50, 1.8, "sawtooth", 0.14, 0.5); shake = 0.6; }
+    if (k === "summon") roar(0.9);
+}
+function throwSnowball(x, z, flight) { const b = yfx.balls.find(q => !q.on); if (!b) return; b.on = true; b.t = 0; b.flight = flight; b.x = x; b.z = z; b.sx = DEN6.x; b.sz = DEN6.z; b.sy = yeti.gy + 14; b.y = groundY(x, z); b.ring = yRing(x, z, 2.4, flight); b.m.visible = true; }
+function updateFight6(dt) {
+    const f = fight6, B = yeti, d = yetiDist();
+    yetiG.rotation.y += angDiff(Math.atan2(player.pos.x - B.x, player.pos.z - B.z), yetiG.rotation.y) * Math.min(1, (f.phase >= 2 ? 1.6 : 1) * dt);
+    const frac = B.hp / B.maxHp;
+    if (f.phase === 1 && frac <= 0.5) { f.phase = 2; roar(0.5); shake = 0.9; flash = 0.3; $("bossPh").textContent = "· FURIOUS"; $("bossBar").classList.add("rage"); toast("The Yeti is FURIOUS! Avalanches incoming!", "bad"); }
+    if (!f.atk) { f.cd -= dt; if (f.cd <= 0) startYetiAttack(pickYetiAttack()); }
+    else {
+        f.atkT += dt;
+        const A = f.atk;
+        if (A === "slam") { if (f.atkT < 1.1) B.armUp = lerp(B.armUp, 1.4, Math.min(1, 6 * dt)); else if (!f.fired) { f.fired = true; B.slam = 1; shake = 1; sfx(60, 0.6, "sawtooth", 0.18, 0.4); burst(V3(DEN6.x, B.gy + 0.5, DEN6.z), 30, 8, [glowM(0xffffff), glowM(0x7af0ff)]); if (d < 10.5) { yetiHit(1.4, B.x, B.z); player.vel.y = 8; } } if (f.atkT > 1.8) endYetiAttack(); }
+        else if (A === "snowballs") { for (const p of f.targets) if (!p.done && f.atkT >= 0.5 + p.delay) { p.done = true; throwSnowball(p.x, p.z, 1.1); B.slam = 0.6; sfx(160, 0.2, "sawtooth", 0.06, 0.6); } if (f.atkT > 3) endYetiAttack(); }
+        else if (A === "spikes") { if (f.atkT >= 0.9 && !f.fired) { f.fired = true; for (const p of f.targets) { const s = yfx.spikes.find(q => q.t < 0); if (s) { s.t = 0; s.x = p.x; s.z = p.z; s.y = groundY(p.x, p.z); s.m.visible = true; s.hit = false; } } sfx(1500, 0.4, "triangle", 0.07, 0.3); } if (f.atkT > 1.8) endYetiAttack(); }
+        else if (A === "avalanche") { for (const p of f.targets) if (!p.done && f.atkT >= p.delay) { p.done = true; throwSnowball(p.x, p.z, 0.9); } if (f.atkT > 3.6) endYetiAttack(); }
+        else if (A === "summon") { if (f.atkT > 0.6 && !f.fired) { f.fired = true; for (let i = 0; i < (f.phase >= 2 ? 3 : 2); i++) { const a = Math.random() * 6.283, [x, z] = inDen(B.x + Math.cos(a) * rand(7, 10), B.z + Math.sin(a) * rand(7, 10)); const t = makeTree(x, z, rand(1.5, 2.1), "snowling"); t.minion = true; t.cool = 0.6; f.minions.push(t); burst(V3(x, groundY(x, z) + 0.5, z), 16, 5, [glowM(0xffffff), glowM(0x7af0ff)]); } sfx(300, 0.4, "triangle", 0.08, 0.5); } if (f.atkT > 1.2) endYetiAttack(); }
+    }
+    B.armUp = lerp(B.armUp, 0, Math.min(1, 2 * dt)); B.slam = Math.max(0, B.slam - dt * 3);
+    for (const a of B.arms) { a.arm.rotation.z = -a.s * (2.2 - B.armUp) + Math.sin(time * 1.1 + a.s) * 0.08; a.pivot.rotation.x = -B.slam * 1.4 + B.armUp * 0.3; }
+    const mode = B.hurt > 0.25 || f.phase >= 2 ? "angry" : "calm"; if (B.mode !== mode) { B.mode = mode; B.face.material = faceMats[mode]; }
+    B.hurt = Math.max(0, B.hurt - dt * 4);
+    f.lag = Math.max(frac, f.lag - dt * 0.35);
+    $("bossFill").style.width = (frac * 100) + "%"; $("bossLag").style.width = (f.lag * 100) + "%";
+    $("bossHp").textContent = Math.max(0, Math.ceil(B.hp)).toLocaleString() + " / " + B.maxHp.toLocaleString();
+}
+function endYetiAttack() { const f = fight6; f.atk = null; f.cd = f.phase === 1 ? rand(2, 3) : rand(1.2, 2); }
+function updateYetiFx(dt) {
+    for (const r of yfx.rings) { if (r.t < 0) continue; r.t += dt; const u = r.t / r.life; r.fill.scale.setScalar(Math.min(1, u)); r.ring.material.opacity = 0.45 + Math.sin(time * 18) * 0.25; if (u >= 1) { r.t = -1; r.g.visible = false; } }
+    for (const b of yfx.balls) {
+        if (!b.on) continue;
+        b.t += dt; const u = Math.min(1, b.t / b.flight);
+        b.m.position.set(lerp(b.sx, b.x, u), lerp(b.sy, b.y + 0.6, u) + Math.sin(u * Math.PI) * 8, lerp(b.sz, b.z, u));
+        if (u >= 1) { b.on = false; b.m.visible = false; burst(V3(b.x, b.y + 0.5, b.z), 14, 6, [glowM(0xffffff), glowM(0xdcf0ff)]); sfx(90, 0.25, "square", 0.08, 0.5); if (fight6.on && Math.hypot(player.pos.x - b.x, player.pos.z - b.z) < 2.6) yetiHit(0.9, b.x, b.z); }
+    }
+    for (const s of yfx.spikes) {
+        if (s.t < 0) continue;
+        s.t += dt; const h = s.t < 0.12 ? s.t / 0.12 * 4 : s.t > 0.8 ? Math.max(0, 4 - (s.t - 0.8) * 10) : 4;
+        s.m.scale.set(0.9, Math.max(0.01, h), 0.9); s.m.position.set(s.x, s.y + h / 2, s.z);
+        if (!s.hit && s.t < 0.3 && fight6.on && Math.hypot(player.pos.x - s.x, player.pos.z - s.z) < 1.9) { s.hit = true; yetiHit(1, s.x, s.z); player.vel.y = 7; }
+        if (s.t > 1.3) { s.t = -1; s.m.visible = false; }
+    }
+}
+function updateYeti(dt, animOnly) {
+    if (!yetiG) return;
+    const f = fight6;
+    if (f.dyingT >= 0) { // the fall
+        f.dyingT += dt; yeti.body.rotation.x = -Math.min(1, f.dyingT * f.dyingT * 0.6) * Math.PI / 2;
+        if (f.dyingT > 2.2) { f.dyingT = -1; yetiRewards(); syncYeti(); }
+        return;
+    }
+    if (f.on) { updateFight6(dt); updateYetiFx(dt); return; }
+    // asleep: he breathes, and wakes if you step into his den
+    yeti.body.scale.y = 1 + Math.sin(time * 1.1) * 0.012;
+    if (!animOnly && state === "playing" && player.hp > 0 && yetiDist() < DEN6.r - 3 && !(save.yetiDay === save.day && save.yetiKills > 0)) startFight6();
+}
+
+// ---- entering, updating, talking ----
+function enterIsle6() {
+    leaveWorld();
+    if (!isle6Built) { buildIsle6(); buildCasino(6); snapWorld(6); } else loadWorld(6);
+    isle = 6; save.isle = 6;
+    showWorld(6);
+    if (casinos[6]) casino = casinos[6];
+    groundFn = groundY6;
+    waterMesh.geometry = isle6.waterGeo; waterMesh.material.needsUpdate = true;
+    smokeEmit.length = 0; isle6.emit.forEach(e => smokeEmit.push(e));
+    RESPAWN.x = 2; RESPAWN.z = 4;
+    syncGhosts();
+    resetIsleTrees(95);
+    resetChests();
+    syncYeti();
+}
+function updateIsle6(dt, animOnly) {
+    if (!isle6Built || isle !== 6) return;
+    snow6.visible = !inCasino();
+    if (snow6.visible) updateSnow6(dt);
+    updateNpcs(dt, npcs6);
+    updateYeti(dt, animOnly);
+    if (isle6.fireLight) isle6.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
+    for (const [b, ph] of [[isle6.boatArr, 0], [isle6.boatNext, 1.3]]) if (b) { b.position.y = -0.15 + Math.sin(time * 1.1 + ph) * 0.07; b.rotation.z = Math.sin(time * 0.9 + ph) * 0.03; }
+    if (ferryman6) { ferryman6.position.y = 0.3 + Math.sin(time * 1.2) * 0.02; const base = Math.atan2(NEXT6.DIR.x, NEXT6.DIR.z) + Math.PI, near = Math.hypot(player.pos.x - FERRYMAN6.x, player.pos.z - FERRYMAN6.z) < 14; ferryman6.rotation.y += angDiff(near ? Math.atan2(player.pos.x - FERRYMAN6.x, player.pos.z - FERRYMAN6.z) : base, ferryman6.rotation.y) * Math.min(1, 3 * dt); }
+}
+function dawn6() { if (save.yetiKills > 0 && save.yetiDay === save.day - 1 && !fight6.on) toast("Up in the den, the Yeti stirs again...", "rare"); syncYeti(); }
+function nearest6() {
+    const px = player.pos.x, pz = player.pos.z, near = (p, r) => Math.hypot(px - p.x, pz - p.z) < r;
+    if (near(SMITH6_AT, 3.4)) return { k: "smith" };
+    if (near(DEPOT6_AT, 3.4)) return { k: "depot" };
+    if (near(WITCH6_AT, 3.4)) return { k: "witch" };
+    if (near(BED6, 3.6)) return { k: "bed" };
+    if (near(FERRYMAN6, 3.4)) return { k: "ferry6" };
+    for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
+    return null;
+}
+function openFerry6() { ferryConfirm = 0; $("ferrySay").textContent = "“Beyond the ice there are lights. A whole city of them. I'm still fixing the boat.”"; openPanel("ferry"); }
+function renderFerry6() {
+    document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
+    const html = `<div class="fprice">Rebirths so far: <b>★${save.rebirths || 0}</b> <span>(+${(save.rebirths || 0) * 50}% cash, +${(save.rebirths || 0) * 10}% damage, +${(save.rebirths || 0) * 50} max HP)</span></div>
+      <div class="flist"><div class="gain"><h4>REBIRTH 6</h4>There are lights past the ice. A whole city of them. The Ferryman is still fixing his boat. Coming in a future update.</div></div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    const b = $("ferryBuy"); b.disabled = true; b.classList.remove("danger"); b.textContent = "REBIRTH 6: COMING SOON";
+}
+// ---- getting there: Port Haven's Rebirth 5 ferry ----
+const REBIRTH5_COST = 10000000, REBIRTH5_GLASS = 8;
+const rebirth5Ready = () => (save.mats.stormglass || 0) >= REBIRTH5_GLASS && save.money >= REBIRTH5_COST;
+function renderFerry5v2() {
+    document.querySelector("#panelFerry h2").textContent = "REBIRTH 5: THE FERRY TO THE ICEBERG";
+    const sg = save.mats.stormglass || 0, cashOk = save.money >= REBIRTH5_COST, ok = rebirth5Ready();
+    const html = `<div class="fprice">Rebirth 5 ticket: <b>${money(REBIRTH5_COST)}</b> + <b>${REBIRTH5_GLASS} Stormglass</b></div>
+      <div class="flist">
+        <div class="${sg >= REBIRTH5_GLASS ? "keep" : "lose"}"><h4>${sg >= REBIRTH5_GLASS ? "✔" : "✘"} STORMGLASS</h4>${sg} / ${REBIRTH5_GLASS} (Storm Oaks on Storm Isle)</div>
+        <div class="${cashOk ? "keep" : "lose"}"><h4>${cashOk ? "✔" : "✘"} CASH</h4>${money(save.money)} of ${money(REBIRTH5_COST)}</div>
+        <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and materials · every axe and gun · all upgrades, potions and your boat · the day count</div>
+        <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ +50 max health · ★ THE ICEBERG: a huge island of snow and ice, polar bears and penguins, two new axes, the Cryo Cannon, the YETI, and the Casino moves there too</div>
+      </div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    const b = $("ferryBuy"); b.disabled = !ok; b.classList.toggle("danger", ok && !!ferryConfirm);
+    b.textContent = sg < REBIRTH5_GLASS ? `BRING ${REBIRTH5_GLASS - sg} MORE STORMGLASS` : !cashOk ? "NEED " + money(REBIRTH5_COST - save.money) + " MORE" : ferryConfirm ? "CLICK AGAIN TO CONFIRM" : "SAIL TO THE ICEBERG";
+}
+function finishRebirth5() {
+    save.rebirths = 5; // the Iceberg is Rebirth 5
+    if (typeof B5 !== "undefined") B5.on = false;
+    resetForRebirth();
+    enterIsle6(); newContract();
+    holdingReset();
+    player.maxHp = maxHpNow(); player.hp = player.maxHp;
+    const a = ARR6.pt(ARR6.LEN - 9, 0);
+    player.pos.set(a.x, 1.75, a.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(ARR6.DIR.x, ARR6.DIR.z); player.pitch = 0;
+    player.invuln = 6;
+    ride = null;
+    writeSave();
+    say("");
+    setTimeout(() => {
+        $("rebirthFx").classList.remove("show"); say("THE ICEBERG"); setTimeout(() => say(""), 3600);
+        toast("You are reborn. ★5  +250% cash, +50% damage, +250 max HP.", "cash");
+        toast("Climb the ramp to Igloo Camp. The Frost Forge, the Snow Witch and the Casino are up there.", "good");
+        toast("Something huge sleeps in the den below Yeti Peak. Fell it for Yeti Hearts.", "rare");
+    }, 2200);
+}
+function drawMap6() {
+    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / 172;
+    if (!mapBg6) {
+        const N = 320, oc = document.createElement("canvas"); oc.width = oc.height = N;
+        const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color();
+        for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+            const x = ((px + 0.5) / N - 0.5) * 344, z = ((py + 0.5) / N - 0.5) * 344, d = Math.hypot(x, z), inside = shoreAt6(x, z) - d, i = (py * N + px) * 4;
+            if (inside < 0) col.setRGB(0.08, 0.18, 0.3); else if (inside < 9) col.setRGB(0.45, 0.72, 0.9);
+            else { const y = terrain6(x, z), sh = clamp((terrain6(x - 2, z - 2) - terrain6(x + 2, z + 2)) * 0.05, -0.4, 0.4); if (Math.hypot(x - LAKE6.x, z - LAKE6.z) < LAKE6.r) col.setRGB(0.6, 0.85, 1); else if (Math.hypot(x - DEN6.x, z - DEN6.z) < DEN6.r) col.setRGB(0.55, 0.75, 0.85); else col.setRGB(0.86, 0.9, 0.95).multiplyScalar(0.85 + clamp(y / 60, 0, 0.2)); col.r += sh; col.g += sh; col.b += sh; }
+            img.data[i] = clamp(col.r * 255, 0, 255); img.data[i + 1] = clamp(col.g * 255, 0, 255); img.data[i + 2] = clamp(col.b * 255, 0, 255); img.data[i + 3] = 255;
+        }
+        og.putImageData(img, 0, 0); mapBg6 = oc;
+    }
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#0a1a2a"; g.beginPath(); g.arc(c, c, c - 6, 0, 7); g.fill(); g.strokeStyle = "rgba(160,220,255,.5)"; g.lineWidth = 3; g.stroke();
+    g.save(); g.beginPath(); g.arc(c, c, c - 8, 0, 7); g.clip(); g.drawImage(mapBg6, c - 172 * sc, c - 172 * sc, 344 * sc, 344 * sc); g.restore();
+    const X = x => c + x * sc, Z = z => c + z * sc;
+    g.font = "bold 11px Consolas"; g.textAlign = "center";
+    for (const lm of LM6) { if (lm.camp) continue; g.lineWidth = 3; g.strokeStyle = "#000"; g.strokeText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4); g.fillStyle = lm.col; g.fillText(lm.name, X(lm.x), Z(lm.z) - lm.r * sc * 0.7 - 4); }
+    for (const [D, txt, colr] of [[ARR6, "ARRIVALS", "#bfe8ff"], [NEXT6, "REBIRTH 6 FERRY", "#ffd890"]]) { const e = D.pt(D.LEN); g.strokeStyle = colr; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D.B.x), Z(D.B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); g.fillStyle = colr; g.font = "bold 12px Consolas"; g.fillText(txt, X(e.x), Z(e.z) + (e.z < 0 ? -8 : 16)); }
+    { const dead = save.yetiDay === save.day && save.yetiKills > 0; g.font = "bold 10px Consolas"; g.strokeStyle = "#000"; g.lineWidth = 3; const tx = dead ? "the Yeti regrows at dawn" : "THE YETI"; g.strokeText(tx, X(DEN6.x), Z(DEN6.z) + 4); g.fillStyle = "#9ff8ff"; g.fillText(tx, X(DEN6.x), Z(DEN6.z) + 4); }
+    if (casino && casino.isle === 6) { g.fillStyle = "#ffd040"; g.font = "bold 11px Consolas"; g.fillText("CASINO", X(casino.x), Z(casino.z) + 4); }
+    for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
+    for (const t of trees) { if (t.gone || t.dying || t.boss) continue; const near = Math.hypot(t.x - player.pos.x, t.z - player.pos.z) < 14; g.fillStyle = near ? "#ff4a3a" : t.mut ? mutCol(t.mut) : t.type.rare ? t.type.col : "rgba(40,60,80,.9)"; g.beginPath(); g.arc(X(t.x), Z(t.z), (t.mut ? 3.5 : t.type.rare ? 2.5 : 1.5) + t.h * 0.2, 0, 7); g.fill(); }
+    g.font = "bold 12px Consolas"; g.fillStyle = "#e8f6ff"; g.strokeStyle = "#000"; g.lineWidth = 3;
+    for (const [t, x, z] of [["CAMP", 0, 9], ["FORGE", SMITH6.x - 7, SMITH6.z - 1], ["TRADING", DEPOT6.x + 9, DEPOT6.z - 1], ["WITCH", WITCH6.x + 6, WITCH6.z + 4]]) { g.strokeText(t, X(x), Z(z)); g.fillText(t, X(x), Z(z)); }
+    g.fillStyle = "#fff"; g.fillText("N", c, 22);
+    g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw); g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke(); g.restore();
+}
+
+// =========================== the casino grows: HI-LO and KENO ===========================
+const HILO_AT = { x: CSX - 12, z: -12 }, KENO_AT = { x: CSX + 12, z: -12 };
+csCircles.push({ x: HILO_AT.x, z: HILO_AT.z, r: 1.5 }, { x: KENO_AT.x, z: KENO_AT.z, r: 1.2 });
+Object.assign(CS_PROMPTS, { chilo: () => "[F] Play Hi-Lo", ckeno: () => "[F] Play Keno" });
+Object.assign(CS_TITLE, { hilo: "HI-LO", keno: "KENO" });
+const rankV = c => RANKS.indexOf(c.r) + 1; // A = 1 ... K = 13
+const HL = { phase: "idle", bet: 0, card: null, mult: 1, streak: 0, hist: [] };
+const hlOdds = (v, hi) => (hi ? 13 - v : v - 1) / 13; // chance the next card is strictly higher / lower
+function hlRender(G) {
+    const play = HL.phase === "play", v = HL.card ? rankV(HL.card) : 7, pH = hlOdds(v, true), pL = hlOdds(v, false);
+    const mH = pH > 0 ? (0.96 / pH) : 0, mL = pL > 0 ? (0.96 / pL) : 0;
+    G.innerHTML = `<div class="hlWrap"><div class="hlCard">${HL.card ? cardHtml(HL.card, false, 0) : cardHtml(null, true, 0)}</div>
+      <div class="hlSide"><p>Guess if the next card is <b>higher</b> or <b>lower</b>. Every right guess multiplies your bet. The same rank is a free redraw. Cash out whenever you like.</p>
+      ${play ? `<p>Streak <b>${HL.streak}</b> · now <b class="gold">${fmtX(HL.mult)}</b> = ${money(Math.round(HL.bet * HL.mult))}</p>` : ""}
+      <div class="crHist">${HL.hist.map(c => `<span>${c.r}${c.s}</span>`).join("")}</div></div></div>
+      <div class="csActions">${play ? `<button class="csbtn big" data-c2="hi" ${mH ? "" : "disabled"}>HIGHER ${mH ? "×" + mH.toFixed(2) : ""} <kbd>W</kbd></button><button class="csbtn big" data-c2="lo" ${mL ? "" : "disabled"}>LOWER ${mL ? "×" + mL.toFixed(2) : ""} <kbd>S</kbd></button><button class="csbtn green" data-c2="hcash" ${HL.streak ? "" : "disabled"}>CASH OUT <kbd>Space</kbd></button>` : `<button class="csbtn big" data-c2="hstart">DEAL <kbd>Space</kbd></button>`}</div>`;
+}
+function hlStart() { if (HL.phase === "play") return; const bet = takeBet(); if (!bet) return; Object.assign(HL, { phase: "play", bet, card: drawCard(), mult: 1, streak: 0, hist: [] }); csMsg("Higher or lower?", ""); sfx(600, 0.06, "triangle", 0.06, 1.2); hlRender($("csGame")); renderBetRow(); }
+function hlGuess(hi) {
+    if (HL.phase !== "play") return;
+    const v = rankV(HL.card), p = hlOdds(v, hi); if (p <= 0) return;
+    let next; do next = drawCard(); while (false);
+    const nv = rankV(next); HL.hist.unshift(HL.card); HL.hist.length = Math.min(HL.hist.length, 8); HL.card = next;
+    if (nv === v) { csMsg("Same rank: a free redraw.", "push"); sfx(500, 0.06, "triangle", 0.05, 1); }
+    else if ((nv > v) === hi) { HL.mult *= 0.96 / p; HL.streak++; csMsg(`Right! ${fmtX(HL.mult)}`, "win"); sfx(700 + HL.streak * 60, 0.1, "triangle", 0.07, 1.3); }
+    else { HL.phase = "done"; payOut(0, HL.bet); csMsg(`Wrong! It was ${next.r}${next.s}. -${money(HL.bet)}`, "lose"); sfx(140, 0.3, "sawtooth", 0.08, 0.5); }
+    hlRender($("csGame")); renderBetRow();
+}
+function hlCash() { if (HL.phase !== "play" || !HL.streak) return; const win = Math.round(HL.bet * HL.mult); HL.phase = "done"; payOut(win, HL.bet); csMsg(`Cashed out at ${fmtX(HL.mult)}! +${money(win)}`, HL.mult >= 10 ? "jack" : "win"); hlRender($("csGame")); renderBetRow(); }
+const KENO_PAY = [0, 0, 0.5, 4, 26, 550];
+const KN = { picks: [], drawn: [], busy: false };
+function knRender(G) {
+    const hits = KN.drawn.filter(n => KN.picks.includes(n));
+    let grid = ""; for (let n = 1; n <= 40; n++) grid += `<button class="kn ${KN.picks.includes(n) ? "pick" : ""} ${KN.drawn.includes(n) ? "drawn" : ""} ${KN.picks.includes(n) && KN.drawn.includes(n) ? "hit" : ""}" data-c2="k:${n}" ${KN.busy ? "disabled" : ""}>${n}</button>`;
+    G.innerHTML = `<div class="knWrap"><div class="knGrid">${grid}</div>
+      <div class="knSide"><p>Pick <b>5 numbers</b>, then draw 10. Payouts by how many of yours come up:</p><div class="knPay">${KENO_PAY.map((m, h) => `<span class="${KN.drawn.length && !KN.busy && hits.length === h ? "on" : ""}">${h} hits <b>${m ? m + "×" : "—"}</b></span>`).join("")}</div>
+      <p>${KN.picks.length}/5 picked</p></div></div>
+      <div class="csActions"><button class="csbtn" data-c2="kq" ${KN.busy ? "disabled" : ""}>QUICK PICK</button><button class="csbtn big" data-c2="kdraw" ${KN.picks.length === 5 && !KN.busy ? "" : "disabled"}>DRAW <kbd>Space</kbd></button></div>`;
+}
+function knDraw() {
+    if (KN.busy || KN.picks.length !== 5) return;
+    const bet = takeBet(); if (!bet) return;
+    KN.busy = true; KN.drawn = [];
+    const pool = []; for (let n = 1; n <= 40; n++) pool.push(n); pool.sort(() => Math.random() - 0.5);
+    const draw = pool.slice(0, 10);
+    draw.forEach((n, i) => setTimeout(() => { KN.drawn.push(n); sfx(KN.picks.includes(n) ? 1200 : 700, 0.08, "triangle", 0.06, 1.1); if (panel === "casino" && CS.game === "keno") knRender($("csGame")); if (i === 9) {
+        KN.busy = false; const h = draw.filter(x => KN.picks.includes(x)).length, m = KENO_PAY[h], win = Math.round(bet * m);
+        payOut(win, bet); if (panel === "casino" && CS.game === "keno") { csMsg(h ? `${h} hit${h === 1 ? "" : "s"}! ${m ? "+" + money(win) : "no win"}` : "No hits.", m >= 26 ? "jack" : m >= 1 ? "win" : m ? "push" : "lose"); knRender($("csGame")); renderBetRow(); }
+    } }, 180 * (i + 1)));
+}
+Object.assign(CSG, {
+    hilo: { render: hlRender, act(a) { if (a === "hstart") hlStart(); else if (a === "hi") hlGuess(true); else if (a === "lo") hlGuess(false); else if (a === "hcash") hlCash(); }, key(c) { if (c === "Space" || c === "Enter") { HL.phase === "play" ? hlCash() : hlStart(); return true; } if (c === "KeyW") { hlGuess(true); return true; } if (c === "KeyS") { hlGuess(false); return true; } } },
+    keno: { render: knRender, act(a) { if (a.startsWith("k:")) { if (KN.busy) return; const n = +a.slice(2), i = KN.picks.indexOf(n); if (i >= 0) KN.picks.splice(i, 1); else if (KN.picks.length < 5) KN.picks.push(n); KN.drawn = []; knRender($("csGame")); } else if (a === "kq") { const p = []; while (p.length < 5) { const n = 1 + Math.floor(Math.random() * 40); if (!p.includes(n)) p.push(n); } KN.picks = p; KN.drawn = []; knRender($("csGame")); } else if (a === "kdraw") knDraw(); }, key(c) { if (c === "Space" || c === "Enter") { knDraw(); return true; } } }
+});
+function nearestHall2() { const px = player.pos.x, pz = player.pos.z; if (Math.hypot(px - HILO_AT.x, pz - HILO_AT.z) < 3.2) return { k: "chilo" }; if (Math.hypot(px - KENO_AT.x, pz - KENO_AT.z) < 3.0) return { k: "ckeno" }; return null; }
+function buildHall2() { // a Hi-Lo table and a Keno lounge in the front of the main hall
+    const gold = new THREE.MeshLambertMaterial({ color: 0xd8a840, emissive: 0x3a2a08, flatShading: true });
+    const t = new THREE.Group(); t.position.set(HILO_AT.x, 0, HILO_AT.z); scene.add(t);
+    part(t, CYL8, lamb(0x2a140c), 0, 0.45, 0, 0.5, 0.9, 0.5);
+    const felt = csCanvas(256, 256, (g, w) => { g.fillStyle = "#0e5a3a"; g.fillRect(0, 0, w, w); g.fillStyle = "#e8d8a0"; g.font = "900 34px Consolas"; g.textAlign = "center"; g.fillText("HI-LO", w / 2, w / 2 - 10); g.font = "700 18px Consolas"; g.fillText("HIGHER OR LOWER?", w / 2, w / 2 + 22); });
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.12, 24), [lamb(0x2a140c), new THREE.MeshLambertMaterial({ map: felt }), lamb(0x2a140c)]); top.position.y = 0.96; t.add(top);
+    part(t, new THREE.TorusGeometry(1.4, 0.06, 6, 24), gold, 0, 1.02, 0, 1, 1, 1, Math.PI / 2);
+    const dealer = makeHumanoid({ face: "clerk", skin: 0xc89070, shirt: 0xf2f2f2, vest: 0x1a3a5a, pants: 0x141414, hair: 0x101010 });
+    dealer.g.position.set(HILO_AT.x, 0, HILO_AT.z - 2.1); scene.add(dealer.g); casinoNpcs.push(dealer);
+    const k = new THREE.Group(); k.position.set(KENO_AT.x, 0, KENO_AT.z); scene.add(k);
+    part(k, BOX, lamb(0x1a1a2a), 0, 0.6, 0, 1.2, 1.2, 0.8); part(k, BOX, gold, 0, 1.22, 0, 1.3, 0.06, 0.9);
+    const board = csCanvas(512, 256, (g, w, h) => { g.fillStyle = "#0a0a24"; g.fillRect(0, 0, w, h); g.fillStyle = "#ffd040"; g.font = "900 40px Consolas"; g.textAlign = "center"; g.fillText("KENO", w / 2, 46); for (let n = 1; n <= 40; n++) { const x = 40 + ((n - 1) % 10) * 44, y = 80 + Math.floor((n - 1) / 10) * 40; g.fillStyle = [3, 11, 17, 26, 33].includes(n) ? "#ff5ad8" : "#2a2a5a"; g.fillRect(x, y, 38, 32); g.fillStyle = "#fff"; g.font = "700 18px Consolas"; g.fillText(String(n), x + 19, y + 23); } });
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), new THREE.MeshBasicMaterial({ map: board })); scr.position.set(CS_X1 - 0.13, 3.4, KENO_AT.z); scr.rotation.y = -Math.PI / 2; scene.add(scr);
+    wingSign("HI-LO", "#6dffa0", CS_X0 + 0.12, 4.6, HILO_AT.z, Math.PI / 2, 3, 1);
+}
+
+// =====================================================================
 //  1.6.1: axe abilities. Every axe has its own special move on [Z]
 // =====================================================================
 const ABIL = [
@@ -12050,7 +12760,9 @@ const ABIL = [
     { name: "Black Hole", cd: 17, mult: 1.3, col: 0xa070ff, desc: "Opens a vortex that drags trees in and grinds them for 3 seconds." },
     { name: "Thorn Burst", cd: 15, mult: 6, col: 0xff5a8a, desc: "Roots erupt under every tree around you (6x) and hold them still." },
     { name: "Meteor", cd: 16, mult: 10, col: 0xff9a4a, desc: "Calls a meteor down where you're looking (10x in a big blast)." },
-    { name: "Cataclysm", cd: 18, mult: 9, col: 0xffd040, desc: "Lava fissures split out in every direction (9x) and burn everything." }
+    { name: "Cataclysm", cd: 18, mult: 9, col: 0xffd040, desc: "Lava fissures split out in every direction (9x) and burn everything." },
+    { name: "Blizzard", cd: 18, mult: 1.3, col: 0xbff4ff, desc: "A howling blizzard swirls round you for 4 seconds, hitting and freezing every tree near you." },
+    { name: "Yeti Stomp", cd: 20, mult: 12, col: 0x7af0ff, desc: "Leap and stomp: a shockwave of ice smashes everything around you (12x) and freezes it solid." }
 ];
 const abCd = {}; // cooldown left, per axe
 const abFx = []; // live effect objects
@@ -12067,7 +12779,7 @@ const abIn = {
 // hit one tree with the ability: damage, then freeze / root / burn on top
 function abHit(t, mult, o = {}) {
     if (t.gone || t.dying || t.burn) return;
-    const dmg = Math.max(1, Math.round(axeDmg() * mult * (t.boss ? 1 + 0.25 * enchLv("bane") : 1)));
+    const dmg = Math.max(1, Math.round(axeDmg() * mult * (t.boss ? 0.5 * (1 + 0.25 * enchLv("bane")) : 1))); // abilities hit bosses half as hard
     hitTree(t, dmg, false);
     if (t.dying || t.gone) return;
     if (o.stun && !t.boss) { t.stun = Math.max(t.stun || 0, o.stun); t.stunCol = o.stunCol || 0x9fe8ff; t.atk = "idle"; }
@@ -12240,6 +12952,28 @@ function useAbility() {
             for (const t of all) delete t._cata;
             abRing(px, pz, 0xffd040, 16, 0.8); abBoom(0.7); sfx(35, 1.2, "sawtooth", 0.22, 0.4); sfx(55, 1, "square", 0.16, 0.5); break;
         }
+        case 16: { // Blizzard: a storm that follows you, hitting and freezing everything close
+            const g = new THREE.Group(), flakes = []; for (let k = 0; k < 60; k++) { const m = abSprite(abTex.glow, k % 3 ? 0xffffff : A.col, 0.9); m.scale.setScalar(rand(0.3, 0.7)); g.add(m); flakes.push({ m, a: Math.random() * 6.28, r: rand(2, 11), y: rand(0.3, 5), sp: rand(2, 4) }); }
+            let tick = 0;
+            abAdd(g, 4, (f, dt) => {
+                g.position.set(player.pos.x, groundY(player.pos.x, player.pos.z), player.pos.z);
+                for (const q of flakes) { q.a += q.sp * dt; q.m.position.set(Math.cos(q.a) * q.r, q.y + Math.sin(q.a * 2) * 0.4, Math.sin(q.a) * q.r); q.m.material.opacity = 0.9 * (1 - (f.t / f.life) ** 3); }
+                if ((tick -= dt) <= 0) { tick = 0.5; for (const t of abAlive()) if (abIn.circle(t, player.pos.x, player.pos.z, 11)) abHit(t, A.mult, { stun: 1.5, stunCol: 0xbff4ff }); }
+                if (Math.random() < dt * 3) sfx(300 + Math.random() * 200, 0.4, "sine", 0.02, 0.6);
+            });
+            n = 1; sfx(200, 1.6, "sawtooth", 0.05, 0.4); sfx(900, 1.2, "sine", 0.04, 0.5); break;
+        }
+        case 17: { // Yeti Stomp
+            player.vel.y = 9; abBoom(0.4);
+            setTimeout(() => {
+                const x = player.pos.x, z = player.pos.z;
+                for (const t of abAlive()) if (abIn.circle(t, x, z, 16)) abHit(t, A.mult, { stun: 3, stunCol: 0x7af0ff });
+                abRing(x, z, 0xffffff, 12, 0.5); abRing(x, z, A.col, 18, 0.8);
+                for (let k = 0; k < 22; k++) { const a = (k / 22) * 6.283, r2 = 4 + (k % 3) * 4; abSpike(x + Math.cos(a) * r2, z + Math.sin(a) * r2, k % 2 ? 0xbff4ff : 0xffffff, 2 + Math.random() * 2, 1.4, r2 * 0.02, 0.6); }
+                shake = 1.2; flash = 0.4; hitstop = 0.12; sfx(40, 1, "sawtooth", 0.24, 0.4); sfx(70, 0.8, "square", 0.18, 0.4);
+            }, 550);
+            n = 1; break;
+        }
     }
     flash = Math.max(flash, 0.25);
 }
@@ -12264,7 +12998,7 @@ function updateAbilities(dt) {
 }
 
 // a save that's already on another island starts there (this must run after everything above is defined)
-if (save.isle === 5) enterIsle5(); else if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
+if (save.isle === 6) enterIsle6(); else if (save.isle === 5) enterIsle5(); else if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
 placeEnchTable();
 if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1, Mooncap Isle = Rebirth 2, Ashfall Isle = Rebirth 3
 
@@ -12272,12 +13006,12 @@ if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1,
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
-    ...PROMPTS5,
+    ...PROMPTS5, ferry6: () => "[F] Talk to the Ferryman",
     shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => "[F] Enter the Casino", ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
-    witch: () => (isle === 5 ? "[F] Visit the Sea Witch" : isle === 4 ? "[F] Visit the Alchemist" : "[F] Visit the Apothecary"), ferry3: () => "[F] Talk to the Ferryman", ferry4: () => "[F] Talk to the Ferryman", star: () => "[F] Take the fallen star",
+    witch: () => (isle === 6 ? "[F] Visit the Snow Witch" : isle === 5 ? "[F] Visit the Sea Witch" : isle === 4 ? "[F] Visit the Alchemist" : "[F] Visit the Apothecary"), ferry3: () => "[F] Talk to the Ferryman", ferry4: () => "[F] Talk to the Ferryman", star: () => "[F] Take the fallen star",
     well: () => (save.wellDay === save.day ? "The Moonwell is still. It refills at dawn" : "[F] Drink from the Moonwell"),
     scope: () => (!isNight() ? "The Observatory: come back at night" : save.scopeDay === save.day ? "You already watched the sky tonight" : "[F] Look through the telescope"),
     fish: n => (n.spot.blocked ? "Face the water to fish" : "[F] Cast your line"),
@@ -12300,7 +13034,7 @@ function hud(dt) {
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
     if (isle >= 2) { const mh = isleMats().filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
     else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = inCasino() ? "THE CASINO · SAFE" : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : race5.on ? "RACING" : "AT SEA") : swim5() ? "SWIMMING" : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    el.zone.textContent = inCasino() ? "THE CASINO · SAFE" : isle === 6 ? (inSafe() ? "IGLOO CAMP" : fight6.on || yetiDist() < DEN6.r ? "THE YETI'S DEN" : Math.hypot(player.pos.x - LAKE6.x, player.pos.z - LAKE6.z) < LAKE6.r ? "FROZEN LAKE" : "THE ICEBERG") : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : race5.on ? "RACING" : "AT SEA") : swim5() ? "SWIMMING" : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
     { // active potions and blessings, with time left
         const bh = Object.keys(BUFFS).filter(buffOn).map(k => `<span style="color:${BUFFS[k].col};border-color:${BUFFS[k].col}">${BUFFS[k].icon} ${BUFFS[k].name} ${mmss(buffLeft(k))}</span>`).join("") + (save.phoenix > 0 ? `<span style="color:#ffb060;border-color:#ffb060">🔥 PHOENIX ×${save.phoenix}</span>` : "");
         const be = $("buffs"); if (be.dataset.h !== bh) { be.innerHTML = bh; be.dataset.h = bh; }
@@ -12376,7 +13110,7 @@ function frameBody(now) {
         camera.position.set(Math.cos(orbit) * 15, 4.5, Math.sin(orbit) * 15 - 4);
         camera.lookAt(0, 2.2, -3);
         camera.fov = 70; camera.updateProjectionMatrix();
-        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateWeather(real); updateEcosystem(real);
+        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateIsle6(real, true); updateWeather(real); updateEcosystem(real);
         applySky();
     }
     camera.updateMatrixWorld();
@@ -12417,7 +13151,7 @@ if (DEBUG) window.__ts4 = {
     setState(s) { state = s; renderMenu(); },
     interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, enterIsle4, startFight4, fight4, startEruption, getKing: () => king, VOLC, syncKing, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
     // the dev panel (dev.js) drives the game through these
-    lightPool, vLights, openShop, enterIsle5, B5, ARCH, setArch5, H5, ROCKS5, RACES5, race5, startRace5, endRace5, sea5, salv5, spawnSalvage, newTreasureMap, dugTreasure, crewTick, collectCrate, isle5, PAINTS, repaintBoat, hailBoat, moorBoat, archTerrain, archAt, archIn, groundY5, slope5, TRAILS5, PADS5, SUMMITS5, plantFlag, readBottle, fishSpot5, wildOk5, populate5, refuel, fillCost, boatItems, paintItems, crateN, freeGhosts, ghostsHere5, RACE_START, CAPTAIN5, hullCount, wetH5, DOCKS5, boatTo, FERRYMAN4, getDig: () => digT, nearest5, studio5: { turtle: makeTurtle, parrot: makeParrot, flamingo: makeFlamingo, penguin: makePenguin, seal: makeSeal, monkey: makeMonkey, pig: makePig, pony: makePony, msheep: makeMoorSheep, afox: arcticFox, hare: snowHare, lizard: skullLizard, dolphin: makeDolphin, whale: makeWhale5, boat: makeSpeedboat }, boatEnter, boatExit, loseAtSea, rebirth4Ready, finishRebirth4, getArch: () => arch5, landingSpot, useAbility, ABIL, abCd, CSG, DB, CR, MN, VP, SC, PL, enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
+    enterIsle6, yeti: () => yeti, fight6, startFight6, finishRebirth5, rebirth5Ready, DEN6, LAKE6, lightPool, vLights, openShop, enterIsle5, B5, ARCH, setArch5, H5, ROCKS5, RACES5, race5, startRace5, endRace5, sea5, salv5, spawnSalvage, newTreasureMap, dugTreasure, crewTick, collectCrate, isle5, PAINTS, repaintBoat, hailBoat, moorBoat, archTerrain, archAt, archIn, groundY5, slope5, TRAILS5, PADS5, SUMMITS5, plantFlag, readBottle, fishSpot5, wildOk5, populate5, refuel, fillCost, boatItems, paintItems, crateN, freeGhosts, ghostsHere5, RACE_START, CAPTAIN5, hullCount, wetH5, DOCKS5, boatTo, FERRYMAN4, getDig: () => digT, nearest5, studio5: { turtle: makeTurtle, parrot: makeParrot, flamingo: makeFlamingo, penguin: makePenguin, seal: makeSeal, monkey: makeMonkey, pig: makePig, pony: makePony, msheep: makeMoorSheep, afox: arcticFox, hare: snowHare, lizard: skullLizard, dolphin: makeDolphin, whale: makeWhale5, boat: makeSpeedboat }, boatEnter, boatExit, loseAtSea, rebirth4Ready, finishRebirth4, getArch: () => arch5, landingSpot, useAbility, ABIL, abCd, CSG, DB, CR, MN, VP, SC, PL, enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
     FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z }, FERRYMAN3: { x: FERRYMAN3.x, z: FERRYMAN3.z },
     setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
     freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
