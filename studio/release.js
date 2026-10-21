@@ -53,6 +53,9 @@ async function contentChanges(root, since) {
     const i0 = (await contentAt(root, since, "islands.js")) || [], i1 = (await contentAt(root, "", "islands.js")) || [];
     i1.forEach((d, i) => { const was = i0[i]; if (!was) out.islands.push({ change: "new", name: d.name, rebirth: 6 + i, sub: d.sub || "" }); else if (JSON.stringify(was) !== JSON.stringify(d)) out.islands.push({ change: "changed", name: d.name, rebirth: 6 + i }); });
     for (let i = i1.length; i < i0.length; i++) out.islands.push({ change: "removed", name: i0[i].name, rebirth: 6 + i });
+    // props from the Prop Maker: only the new ones are news (they show up wherever you placed them)
+    const p0 = new Set(((await contentAt(root, since, "props.js")) || []).map(p => p.key)), used = new Set([...after.values()].map(o => o.prop));
+    out.props = ((await contentAt(root, "", "props.js")) || []).filter(p => !p0.has(p.key)).map(p => ({ change: "new", name: p.name, placed: used.has(p.key) }));
     return out;
 }
 
@@ -78,7 +81,7 @@ async function status(root) {
 
 // node --check every file the installer ships, using Electron's own Node so nothing else needs installing
 async function syntaxCheck(root) {
-    const files = ["game.js", "main.js", "preload.js", "updater.js", "intro.js", "content/trees.js", "content/world.js", "content/islands.js"].filter(f => fs.existsSync(path.join(root, f)));
+    const files = ["game.js", "main.js", "preload.js", "updater.js", "intro.js", "content/trees.js", "content/world.js", "content/islands.js", "content/props.js"].filter(f => fs.existsSync(path.join(root, f)));
     const bad = [];
     for (const f of files) {
         const r = await run(process.execPath, ["--check", f], root, 60000, { ...ENV, ELECTRON_RUN_AS_NODE: "1" });

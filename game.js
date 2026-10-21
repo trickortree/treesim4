@@ -4,6 +4,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import CONTENT_TREES from "./content/trees.js";
 import CONTENT_WORLD from "./content/world.js";
 import CONTENT_ISLANDS from "./content/islands.js";
+import CONTENT_PROPS from "./content/props.js";
 
 // =====================================================================
 //  TS4 test 3: day/night, rare trees, shop, landmarks, chests, contracts
@@ -13093,15 +13094,27 @@ function makeCI(d, n) {
     C.G.visible = false; scene.add(C.G);
     const R = C.R = clamp(+d.radius || 130, 70, 220), wob = clamp(d.wobble === undefined ? 0.1 : +d.wobble, 0, 0.35), sd = +d.seed || 1.3;
     const ph = [sd * 1.7, sd * 2.3 + 1, sd * 3.1 + 2, sd * 0.7 + 3];
-    C.shoreR = th => R * (1 + wob * (0.55 * Math.sin(2 * th + ph[0]) + 0.3 * Math.sin(3 * th + ph[1]) + 0.18 * Math.sin(5 * th + ph[2]) + 0.07 * Math.sin(11 * th + ph[3])));
+    // features: any number of mountains, hills, spires, craters, plateaus, ridges, valleys, lakes, islets and bays (the old single mountain and lake still load)
+    const FDEF = { mountain: { r: 40, h: 35 }, hill: { r: 30, h: 10 }, spire: { r: 12, h: 45 }, crater: { r: 26, h: 16 }, plateau: { r: 28, h: 12 }, ridge: { r: 14, h: 22, len: 80 }, valley: { r: 10, len: 70 }, lake: { r: 14 }, islet: { r: 16, h: 6, dist: 1.4 }, bay: { width: 0.35, depth: 0.25 } };
+    const feats = (Array.isArray(d.features) ? d.features : []).slice(0, 30).map(q => ({ ...q }));
+    if (d.mountain && d.mountain.on) feats.push({ ...d.mountain, type: "mountain" });
+    if (d.lake && d.lake.on) feats.push({ ...d.lake, type: "lake" });
+    C.F = feats.filter(q => q && FDEF[q.type]).map(q => {
+        const D = FDEF[q.type], th = (+q.dir || 0) * Math.PI / 180, dist = clamp(q.dist === undefined ? (D.dist || 0.5) : +q.dist, 0, q.type === "islet" ? 2.2 : 0.95);
+        return { type: q.type, name: String(q.name || ""), th, x: Math.cos(th) * R * dist, z: Math.sin(th) * R * dist, r: clamp(+q.r || D.r || 20, 4, 120), h: clamp(q.h === undefined ? D.h || 10 : +q.h, 0, 120), len: clamp(+q.len || D.len || 60, 10, 400),
+            rot: (q.rot === undefined ? (+q.dir || 0) + 90 : +q.rot) * Math.PI / 180, width: clamp(+q.width || D.width || 0.35, 0.08, 1.2), depth: clamp(+q.depth || D.depth || 0.25, 0.05, 0.6), lava: !!q.lava };
+    });
+    const bays = C.F.filter(q => q.type === "bay"), islets = C.F.filter(q => q.type === "islet"), land = C.F.filter(q => !["bay", "islet", "lake"].includes(q.type)), lakes = C.lakes = C.F.filter(q => q.type === "lake");
+    for (const q of C.F) if (q.type === "ridge" || q.type === "valley") { const hl = q.len / 2, dx = Math.cos(q.rot) * hl, dz = Math.sin(q.rot) * hl; q.ax = q.x - dx; q.az = q.z - dz; q.bx = q.x + dx; q.bz = q.z + dz; }
+    C.shoreR = th => { let r = R * (1 + wob * (0.55 * Math.sin(2 * th + ph[0]) + 0.3 * Math.sin(3 * th + ph[1]) + 0.18 * Math.sin(5 * th + ph[2]) + 0.07 * Math.sin(11 * th + ph[3]))); for (const b of bays) { const a = angDiff(th, b.th); r -= b.depth * R * Math.exp(-(a * a) / (b.width * b.width)); } return r; };
     C.shoreAt = (x, z) => C.shoreR(Math.atan2(z, x));
-    C.extent = R * (1 + wob * 1.2) + 14;
+    C.extent = Math.max(R * (1 + wob * 1.2) + 14, ...islets.map(q => Math.hypot(q.x, q.z) + q.r + 12));
+    C.seaDist = (x, z) => { let k = Math.hypot(x, z) - C.shoreAt(x, z); for (const q of islets) k = Math.min(k, Math.hypot(x - q.x, z - q.z) - q.r); return k; }; // how far out to sea (islets count as land)
     const P = C.P = clamp(d.plateau === undefined ? 2 : +d.plateau, 0.6, 14);
     const hills = clamp(d.hills === undefined ? 8 : +d.hills, 0, 40), hs = clamp(+d.hillSize || 1, 0.3, 3), cliffs = clamp(+d.cliffs || 0, 0, 1);
     C.beach = clamp(d.beach === undefined ? 6 : +d.beach, 2, 24);
     const at = (deg, f) => ({ x: Math.cos(deg * Math.PI / 180) * R * f, z: Math.sin(deg * Math.PI / 180) * R * f });
-    const M = C.M = d.mountain && d.mountain.on ? { ...at(+d.mountain.dir || 0, clamp(+d.mountain.dist || 0.55, 0.25, 0.8)), r: clamp(+d.mountain.r || 40, 15, 90), h: clamp(+d.mountain.h || 35, 5, 90) } : null;
-    const L = C.L = d.lake && d.lake.on ? { ...at(d.lake.dir === undefined ? 120 : +d.lake.dir, clamp(+d.lake.dist || 0.5, 0.25, 0.75)), r: clamp(+d.lake.r || 16, 6, 40) } : null;
+    C.M = land.find(q => q.type === "mountain") || null; C.L = lakes[0] || null;
     const mkDock = (deg, len, kind) => { const th = deg * Math.PI / 180, DIR = V3(Math.cos(th), 0, Math.sin(th)), PERP = V3(-DIR.z, 0, DIR.x), Rr = C.shoreR(th) - 3; return { kind, th, LEN: len, DIR, PERP, B: V3(DIR.x * Rr, 0, DIR.z * Rr), pt(a, s = 0, y = 0) { return V3(this.B.x + this.DIR.x * a + this.PERP.x * s, y, this.B.z + this.DIR.z * a + this.PERP.z * s); } }; };
     C.ARR = mkDock(d.arrDir === undefined ? 125 : +d.arrDir, 22, "arr"); C.NEXT = mkDock(d.nextDir === undefined ? -35 : +d.nextDir, 24, "next"); C.DOCKS = [C.ARR, C.NEXT];
     { const p = C.NEXT.pt(C.NEXT.LEN - 3.5, -0.9); C.FERRY = { x: p.x, z: p.z }; }
@@ -13109,18 +13122,31 @@ function makeCI(d, n) {
     C.SMITH_AT = standPt(C.SMITH); C.DEPOT_AT = standPt(C.DEPOT); C.WITCH_AT = standPt(C.WITCH);
     C.name = String(d.name || "New Island").slice(0, 40);
     C.LM = [{ name: String(d.campName || "CAMP").toUpperCase(), x: 0, z: 0, r: 24, col: "#ffd890", camp: true }];
-    if (M) C.LM.push({ name: String(d.mountain.name || "THE PEAK").toUpperCase(), x: M.x, z: M.z, r: Math.min(18, M.r * 0.4), col: "#e8f0ff" });
-    if (L) C.LM.push({ name: String(d.lake.name || "THE LAKE").toUpperCase(), x: L.x, z: L.z, r: L.r + 2, col: "#9fe8ff" });
+    const FNAME = { mountain: "THE PEAK", spire: "THE SPIRE", crater: "THE CRATER", plateau: "THE MESA", lake: "THE LAKE", islet: "THE ISLET", ridge: "", hill: "", valley: "" };
+    for (const q of C.F) if (q.name || FNAME[q.type]) C.LM.push({ name: String(q.name || FNAME[q.type]).toUpperCase().slice(0, 30), x: q.x, z: q.z, r: q.type === "lake" ? q.r + 2 : Math.min(18, q.r * 0.5), col: q.type === "lake" ? "#9fe8ff" : q.type === "crater" && q.lava ? "#ff9a4a" : "#e8f0ff", f: q });
     const ramp = (x, z, h) => { if (P <= 1) return h; for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along < -36 || along > 6 || Math.abs(side) > 7) continue; h = lerp(lerp(0.35, P, clamp(-along / 32, 0, 1)), h, sstep(3.6, 7, Math.abs(side))); } return h; };
     C.terrain = (x, z) => {
         const dd = Math.hypot(x, z), inside = C.shoreAt(x, z) - dd;
-        if (inside < 2.5) return Math.max(-3.4, -(2.5 - inside) * 0.7);
+        if (inside < 2.5) { // the sea, and any islets standing in it
+            let w = Math.max(-3.4, -(2.5 - inside) * 0.7);
+            for (const q of islets) { const ins = q.r - Math.hypot(x - q.x, z - q.z); if (ins > -8) w = Math.max(w, ins < 0 ? -0.3 + ins * 0.45 : Math.min(q.h, -0.3 + ins * 0.7) + fbm2(x * 0.1, z * 0.1, 2) * 0.5 * sstep(0, 4, ins)); }
+            return w;
+        }
         let h = P * sstep(2.5, 2.5 + lerp(C.beach, 2.5, cliffs), inside);                              // the beach, or a sea cliff
         h += Math.max(0, fbm2(x * 0.02 / hs + sd * 3, z * 0.02 / hs - sd * 2, 4) - 0.4) * hills * 2 * sstep(26, 52, dd) * sstep(6, 26, inside); // rolling hills
         h += fbm2(x * 0.08, z * 0.08, 2) * 0.6 * sstep(4, 14, inside);
-        if (M) { const dm = Math.hypot(x - M.x, z - M.z); if (dm < M.r) h = Math.max(h, P + M.h * Math.pow(1 - dm / M.r, 1.6) * (0.9 + fbm2(x * 0.05, z * 0.05, 2) * 0.2)); }
+        for (const q of land) {
+            const dm = Math.hypot(x - q.x, z - q.z);
+            if (q.type === "mountain") { if (dm < q.r) h = Math.max(h, P + q.h * Math.pow(1 - dm / q.r, 1.6) * (0.9 + fbm2(x * 0.05, z * 0.05, 2) * 0.2)); }
+            else if (q.type === "spire") { if (dm < q.r) h = Math.max(h, P + q.h * Math.pow(1 - dm / q.r, 3)); }
+            else if (q.type === "hill") h += q.h * Math.exp(-(dm * dm) / (q.r * q.r) * 2.2);
+            else if (q.type === "plateau") h = lerp(h, Math.max(h, P + q.h + fbm2(x * 0.06, z * 0.06, 2) * 0.8), sstep(q.r + 4, q.r - 1.5, dm));
+            else if (q.type === "crater") { if (dm < q.r) h = lerp(P + q.h * 0.2, P + q.h, Math.pow(dm / q.r, 3)); else h = Math.max(h, P + q.h * Math.exp(-Math.pow((dm - q.r) / (q.r * 0.35), 2))); }
+            else if (q.type === "ridge") { const sd2 = segDist(x, z, q.ax, q.az, q.bx, q.bz)[0]; if (sd2 < q.r) h = Math.max(h, P + q.h * Math.pow(1 - sd2 / q.r, 1.4) * (0.85 + fbm2(x * 0.06, z * 0.06, 2) * 0.3)); }
+            else if (q.type === "valley") { const sd2 = segDist(x, z, q.ax, q.az, q.bx, q.bz)[0]; h = lerp(h, Math.min(h, P * 0.5 + 0.2), sstep(q.r + 6, q.r - 2, sd2)); }
+        }
         h = lerp(P, h, sstep(18, 34, dd));                                                            // a flat camp
-        if (L) { const dl = Math.hypot(x - L.x, z - L.z); h = lerp(h, P - 1.6, sstep(L.r + 7, L.r - 1, dl)); }
+        for (const q of lakes) { const dl = Math.hypot(x - q.x, z - q.z); h = lerp(h, P - 1.6, sstep(q.r + 7, q.r - 1, dl)); }
         return ramp(x, z, h);
     };
     C.groundY = (x, z) => { for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 3 && along < D.LEN + 3 && Math.abs(side) < 3) return 0; } return Math.max(-0.4, C.terrain(x, z)); };
@@ -13128,7 +13154,7 @@ function makeCI(d, n) {
         for (const D of C.DOCKS) { const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP); if (along > 3.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; } }
         const lim = C.shoreAt(p.x, p.z) - 3, dd = Math.hypot(p.x, p.z); if (dd > lim) { p.x *= lim / dd; p.z *= lim / dd; }
     };
-    C.treeOk = (x, z) => C.DOCKS.every(D => Math.hypot(x - D.B.x, z - D.B.z) > 16) && (!L || Math.hypot(x - L.x, z - L.z) > L.r + 4) && (!M || Math.hypot(x - M.x, z - M.z) > 8);
+    C.treeOk = (x, z) => C.DOCKS.every(D => Math.hypot(x - D.B.x, z - D.B.z) > 16) && C.F.every(q => { const dm = Math.hypot(x - q.x, z - q.z); return q.type === "lake" ? dm > q.r + 4 : q.type === "crater" ? dm > q.r * 0.9 : q.type === "mountain" || q.type === "spire" ? dm > 8 : true; });
     const col = d.colors || {};
     C.cols = { grass: ciHex(col.grass, 0x4a8a3a), grass2: ciHex(col.grass2, 0x3a7a30), sand: ciHex(col.sand, 0xe0d0a0), rock: ciHex(col.rock, 0x7a7a84), snow: ciHex(col.snow, 0xf4f8ff), camp: ciHex(col.camp, 0x8a7458), shallow: ciHex(col.shallow, 0x5ac8d8), deep: ciHex(col.deep, 0x0e2a4a), bush: ciHex(col.bush, 0x2f6a3a) };
     C.snowline = d.snowline === undefined || d.snowline === "" ? 9999 : +d.snowline;
@@ -13184,15 +13210,12 @@ function buildCI(C) {
         scene.add(terrainMesh[n] = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
         const wg = new THREE.PlaneGeometry(900, 900, 150, 150); wg.rotateX(-Math.PI / 2);
         const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), sh = new THREE.Color(cols.shallow), dp = new THREE.Color(cols.deep), mid = sh.clone().lerp(dp, 0.5);
-        for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), k = clamp((Math.hypot(x, z) - C.shoreAt(x, z)) / 40, 0, 1); cc.copy(sh).lerp(mid, clamp(k * 2, 0, 1)).lerp(dp, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
+        for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), k = clamp(C.seaDist(x, z) / 40, 0, 1); cc.copy(sh).lerp(mid, clamp(k * 2, 0, 1)).lerp(dp, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
         wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3)); C.waterGeo = wg;
     }
-    if (C.L) {
-        const w = new THREE.Mesh(new THREE.CircleGeometry(C.L.r + 0.6, 40), new THREE.MeshLambertMaterial({ color: cols.shallow, emissive: 0x05121a, transparent: true, opacity: 0.85 }));
-        w.rotation.x = -Math.PI / 2; w.position.set(C.L.x, P - 0.5, C.L.z); scene.add(w);
-        const l = label(C.LM.find(q => q.x === C.L.x).name, "#9fe8ff", 3.2, 0.8); l.position.set(C.L.x, P + 4, C.L.z);
-    }
-    if (C.M) { const l = label(C.LM.find(q => q.x === C.M.x).name, "#e8f0ff", 3.4, 0.8); l.position.set(C.M.x, C.terrain(C.M.x, C.M.z) + 8, C.M.z); l.maxD = 400; l.blurK = 0.3; }
+    for (const q of C.lakes) { const w = new THREE.Mesh(new THREE.CircleGeometry(q.r + 0.6, 40), new THREE.MeshLambertMaterial({ color: cols.shallow, emissive: 0x05121a, transparent: true, opacity: 0.85 })); w.rotation.x = -Math.PI / 2; w.position.set(q.x, P - 0.5, q.z); scene.add(w); }
+    for (const q of C.F) if (q.type === "crater" && q.lava) { const y = P + q.h * 0.2 + 0.15, w = new THREE.Mesh(new THREE.CircleGeometry(q.r * 0.55, 32), glowM(0xff6a1a)); w.rotation.x = -Math.PI / 2; w.position.set(q.x, y, q.z); scene.add(w); const pl = new THREE.PointLight(0xff7a2a, 20, q.r * 2.5, 1.6); pl.position.set(q.x, y + 3, q.z); scene.add(pl); } // a crater full of lava
+    for (const lm of C.LM) if (lm.f) { const q = lm.f, l = label(lm.name, lm.col, 3.3, 0.8); l.position.set(q.x, q.type === "lake" ? P + 4 : q.type === "islet" ? q.h + 5 : C.terrain(q.x, q.z) + 8, q.z); if (q.type !== "lake") { l.maxD = 400; l.blurK = 0.3; } }
     // ----- the camp: a fire, a bed, the forge, the trading post and the witch -----
     {
         const stones = batch(lamb(0x6a6a74)); for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, P + 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); } stones.build();
@@ -13341,8 +13364,8 @@ function drawMapC(C) {
         const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color(), grass = new THREE.Color(C.cols.grass), rock = new THREE.Color(C.cols.rock), snow = new THREE.Color(C.cols.snow), sand = new THREE.Color(C.cols.sand);
         for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
             const x = ((px + 0.5) / N - 0.5) * E * 2, z = ((py + 0.5) / N - 0.5) * E * 2, inside = C.shoreAt(x, z) - Math.hypot(x, z), i = (py * N + px) * 4;
-            if (inside < 0) col.setRGB(0.08, 0.18, 0.3);
-            else if (C.L && Math.hypot(x - C.L.x, z - C.L.z) < C.L.r) col.setRGB(0.45, 0.72, 0.9);
+            if (inside < 0 && C.terrain(x, z) < 0) col.setRGB(0.08, 0.18, 0.3);
+            else if (C.lakes.some(q => Math.hypot(x - q.x, z - q.z) < q.r)) col.setRGB(0.45, 0.72, 0.9);
             else { const y = C.terrain(x, z), shd = clamp((C.terrain(x - 2, z - 2) - C.terrain(x + 2, z + 2)) * 0.05, -0.4, 0.4); col.copy(y > C.snowline ? snow : inside < C.beach + 2 ? sand : y > C.P + 14 ? rock : grass).multiplyScalar(1 + shd); }
             img.data[i] = clamp(col.r * 255, 0, 255); img.data[i + 1] = clamp(col.g * 255, 0, 255); img.data[i + 2] = clamp(col.b * 255, 0, 255); img.data[i + 3] = 255;
         }
@@ -13473,7 +13496,7 @@ const PSPH = new THREE.IcosahedronGeometry(1, 1), PTENT = new THREE.ConeGeometry
 const PTORUS = new THREE.TorusGeometry(1, 0.28, 8, 24), PSPH2 = new THREE.SphereGeometry(1, 16, 12), PHALF = new THREE.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), PCYL = new THREE.CylinderGeometry(1, 1, 1, 16);
 const PWEDGE_G = (() => { const g = new THREE.BufferGeometry(), v = [-0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, 0.5, -0.5, 1, -0.5, 0.5, 1, -0.5], i = [0, 2, 1, 0, 3, 2, 0, 1, 5, 0, 5, 4, 3, 4, 5, 3, 5, 2, 0, 4, 3, 1, 2, 5]; g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3)); g.setIndex(i); const n = g.toNonIndexed(); n.computeVertexNormals(); return n; })();
 function pm(g, geo, mat, x, y, z, sx, sy = sx, sz = sx, rx = 0, ry = 0, rz = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz); g.add(m); return m; }
-const PROP_CATS = [["nature", "Nature"], ["camp", "Camp & village"], ["build", "Building"], ["spooky", "Spooky"], ["lights", "Lights"], ["fun", "Fun"], ["shapes", "Shapes"]];
+const PROP_CATS = [["mine", "My props"], ["nature", "Nature"], ["camp", "Camp & village"], ["build", "Building"], ["spooky", "Spooky"], ["lights", "Lights"], ["fun", "Fun"], ["shapes", "Shapes"]];
 // the prop kit. r = how wide it is to bump into (0 = walk-through), box = walls you bump into [[x, z, halfWidth, halfDepth]],
 // tint = its main colour (you can change it), light = a real light it gives off [colour, power, range, height]
 const PROPS = {
@@ -13586,6 +13609,31 @@ const PROPS = {
     ramp:       { cat: "shapes", name: "Ramp", r: 0, tint: 0xc8c8d0, make(g, c) { pm(g, PWEDGE_G, pmat(c), 0, 0, 0, 2, 1, 3); } },
     panel:      { cat: "shapes", name: "Panel", r: 0, box: [[0, 0, 1, 0.05]], tint: 0xc8c8d0, make(g, c) { pm(g, BOX, pmat(c), 0, 1, 0, 2, 2, 0.1); } }
 };
+// ---- props made in the Studio's Prop Maker (content/props.js): simple parts, so no code is needed. Their keys start with u_ ----
+const PART_GEO = {
+    box: BOX, sphere: new THREE.SphereGeometry(0.5, 16, 12), cyl: new THREE.CylinderGeometry(0.5, 0.5, 1, 16), cone: new THREE.ConeGeometry(0.5, 1, 16), pyramid: new THREE.ConeGeometry(0.7071, 1, 4).rotateY(Math.PI / 4),
+    torus: new THREE.TorusGeometry(0.4, 0.1, 8, 24), dome: new THREE.SphereGeometry(0.5, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), wedge: PWEDGE_G.clone().translate(0, -0.5, 0), rock: new THREE.IcosahedronGeometry(0.5, 0),
+    gem: new THREE.OctahedronGeometry(0.5, 0), hex: new THREE.CylinderGeometry(0.5, 0.5, 1, 6), tube: new THREE.CylinderGeometry(0.5, 0.5, 1, 16, 1, true), panel: new THREE.PlaneGeometry(1, 1)
+};
+const PART_SHAPES = Object.keys(PART_GEO);
+function partMat(p, c) {
+    const col = p.tint && c !== undefined ? c : hexN(p.color || "#9a9aa4");
+    if (p.glow) return pglow(col);
+    const op = clamp(p.opacity === undefined ? 1 : +p.opacity, 0.05, 1), two = p.shape === "panel" || p.shape === "tube";
+    if (op >= 1 && !two) return pmat(col);
+    const k = "p" + col + "|" + op + "|" + two;
+    return propMats[k] || (propMats[k] = new THREE.MeshLambertMaterial({ color: col, flatShading: true, transparent: op < 1, opacity: op, depthWrite: op >= 1, side: two ? THREE.DoubleSide : THREE.FrontSide }));
+}
+function defineCustomProp(d) {
+    if (!d || !/^u_[a-z0-9_]+$/.test(String(d.key))) return null;
+    const parts = (Array.isArray(d.parts) ? d.parts : []).filter(p => p && PART_GEO[p.shape]).slice(0, 80), tp = parts.find(p => p.tint), D = Math.PI / 180;
+    const L = d.light && d.light.on ? [hexN(d.light.color || "#ffc070"), clamp(+d.light.power || 8, 0, 60), clamp(+d.light.range || 12, 2, 60), +d.light.y || 1.5] : undefined;
+    PROPS[d.key] = { cat: "mine", name: String(d.name || "My prop").slice(0, 32), r: clamp(+d.r || 0, 0, 6), custom: true, tint: tp ? hexN(tp.color || "#9a9aa4") : undefined, light: L,
+        make(g, c) { for (const p of parts) pm(g, PART_GEO[p.shape], partMat(p, c), +p.x || 0, +p.y || 0, +p.z || 0, clamp(+p.sx || 1, 0.01, 40), clamp(+p.sy || 1, 0.01, 40), clamp(+p.sz || 1, 0.01, 40), (+p.rx || 0) * D, (+p.ry || 0) * D, (+p.rz || 0) * D); } };
+    return PROPS[d.key];
+}
+function dropCustomProp(k) { if (/^u_/.test(String(k))) delete PROPS[k]; }
+for (const d of Array.isArray(CONTENT_PROPS) ? CONTENT_PROPS : []) defineCustomProp(d);
 // the people you can place: a face, colours, and something to say
 const NPC_LOOKS = { villager: { face: "clerk", skin: 0xf0c8a0, shirt: 0x3a6a9a, pants: 0x2a2a3a, hair: 0x6a4a2a }, smith: { face: "smith", skin: 0xe8b890, shirt: 0x5a3a2a, pants: 0x2a2a3a, apron: 0x3a2a1a, beard: 0x6a4a2a, hat: "cap", hatCol: 0x2a2a30, wide: 1.3, belly: true },
     witch: { face: "witch", skin: 0xc8e0b0, shirt: 0x3a2a5a, pants: 0x1a1a2a, hair: 0x2a1a3a, hat: "witch", hatCol: 0x2a1a3a }, sailor: { face: "clerk", skin: 0xe8c0a0, shirt: 0xf2f2f2, vest: 0x1a3a6a, pants: 0x1a2a4a, hat: "cap", hatCol: 0x1a3a6a, beard: 0xd8d0c8 },
@@ -13843,7 +13891,7 @@ if (DEBUG) import("./dev.js").catch(e => console.warn("dev panel failed to load:
 if (STUDIO) {
     Object.assign(window.__ts4, {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
-        CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
+        CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, defineCustomProp, dropCustomProp, PART_SHAPES, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,
         setStudioHook(h) { studioHook = h; }, get wx() { return wx; }
     });

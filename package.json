@@ -7,6 +7,7 @@
   "scripts": {
     "start": "electron .",
     "studio": "electron . --studio",
+    "studio:shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File studio/make-shortcut.ps1",
     "build": "electron-builder --win"
   },
   "devDependencies": {

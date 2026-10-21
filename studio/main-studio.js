@@ -5,8 +5,9 @@ const os = require("os");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 
-const CONTENT = { trees: "trees.js", world: "world.js", islands: "islands.js" };
+const CONTENT = { trees: "trees.js", world: "world.js", islands: "islands.js", props: "props.js" };
 const HEADERS = {
+    props: "// Props made in Tree Sim 4 Studio's Prop Maker (npm run studio). The Studio writes this file: make props there.\n// Each prop: { key (starts with u_), name, r, light, parts: [{ shape, x, y, z, rx, ry, rz, sx, sy, sz, color, glow, tint, opacity }] }\n",
     trees: "// Custom trees made in Tree Sim 4 Studio (npm run studio). The Studio writes this file: edit trees there.\n// Each tree's key starts with c_. Colours are \"#rrggbb\". See the vault's \"Tree Designer\" note for every field.\n",
     islands: "// Islands made in Tree Sim 4 Studio (npm run studio). The Studio writes this file: make islands there.\n// They come after the Iceberg in order: the first is island 7 (Rebirth 6), the next island 8 (Rebirth 7), and so on.\n",
     world: "// Signs, props, people and things to do placed in Tree Sim 4 Studio (npm run studio). The Studio writes this file: move things there.\n// Each object: { id, isle, kind: \"sign\" | \"prop\" | \"npc\" | \"treespot\", x, y, z, rx, ry, rz, s, sx, sy, sz, solid, act, ... }\n"
@@ -68,7 +69,18 @@ function setup(ipcMain, root) {
     const dir = path.join(root, "content");
     const rel = require("./release.js");
     let releasing = false;
-    ipcMain.handle("studio:info", () => ({ claude: findClaude(), content: dir }));
+    const studioVersion = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "studio.json"), "utf8")).version || ""; } catch (e) { return ""; } };
+    ipcMain.handle("studio:info", () => ({ claude: findClaude(), content: dir, version: studioVersion() }));
+    // your own island themes: kept next to the Studio, never shipped
+    const themesFile = path.join(__dirname, "my-themes.json");
+    ipcMain.handle("studio:themes", async (e, themes) => {
+        try {
+            if (themes && typeof themes === "object") await fs.promises.writeFile(themesFile, JSON.stringify(themes, null, 2) + "\n", "utf8");
+            let saved = {};
+            try { saved = JSON.parse(await fs.promises.readFile(themesFile, "utf8")); } catch (err) { /* none yet */ }
+            return { ok: true, themes: saved };
+        } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+    });
     // the Release panel
     ipcMain.handle("studio:relStatus", () => rel.status(root));
     ipcMain.handle("studio:relChecks", (e, version, notes) => rel.checks(root, String(version || ""), String(notes || "")));

@@ -7,6 +7,7 @@ app.setAppUserModelId("com.trickortree.treesim4");
 
 // Tree Sim 4 Studio: `npm run studio` opens the game as an editor. Only from source: the studio folder isn't in the installer
 const STUDIO = process.argv.includes("--studio") && !app.isPackaged;
+const studioVersion = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "studio", "studio.json"), "utf8")).version || ""; } catch (e) { return ""; } };
 
 let mainWindow = null;
 let rendererReady = false;
@@ -22,7 +23,7 @@ function createWindow() {
         minWidth: 960,
         minHeight: 600,
         backgroundColor: "#120a1e",
-        title: STUDIO ? "Tree Sim 4 Studio" : "Hypergamous Tree Chopping Simulator 4",
+        title: STUDIO ? "Tree Sim 4 Studio " + studioVersion() : "Hypergamous Tree Chopping Simulator 4",
         icon: path.join(__dirname, "build", "icon.ico"),
         autoHideMenuBar: true,
         show: false,

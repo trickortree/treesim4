@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("ts4Studio", {
     info: () => ipcRenderer.invoke("studio:info"),
     save: (name, data) => ipcRenderer.invoke("studio:save", name, data),
     askClaude: req => ipcRenderer.invoke("studio:askClaude", req),
+    themes: t => ipcRenderer.invoke("studio:themes", t), // no argument: load them
     // the Release panel
     relStatus: () => ipcRenderer.invoke("studio:relStatus"),
     relChecks: (version, notes) => ipcRenderer.invoke("studio:relChecks", version, notes),
