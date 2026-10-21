@@ -5,6 +5,9 @@ const { autoUpdater } = require("electron-updater");
 
 app.setAppUserModelId("com.trickortree.treesim4");
 
+// Tree Sim 4 Studio: `npm run studio` opens the game as an editor. Only from source: the studio folder isn't in the installer
+const STUDIO = process.argv.includes("--studio") && !app.isPackaged;
+
 let mainWindow = null;
 let rendererReady = false;
 let queuedUpdate = null;
@@ -19,12 +22,12 @@ function createWindow() {
         minWidth: 960,
         minHeight: 600,
         backgroundColor: "#120a1e",
-        title: "Hypergamous Tree Chopping Simulator 4",
+        title: STUDIO ? "Tree Sim 4 Studio" : "Hypergamous Tree Chopping Simulator 4",
         icon: path.join(__dirname, "build", "icon.ico"),
         autoHideMenuBar: true,
         show: false,
         webPreferences: {
-            preload: path.join(__dirname, "preload.js"),
+            preload: path.join(__dirname, STUDIO ? "studio/preload.js" : "preload.js"),
             backgroundThrottling: false,
             autoplayPolicy: "no-user-gesture-required"
         }
@@ -35,16 +38,18 @@ function createWindow() {
     // the version is shown on the title screen; the debug hooks only exist when running from source
     const query = { v: app.getVersion() };
     if (!app.isPackaged) query.debug = "1";
+    if (STUDIO) query.studio = "1";
     mainWindow.loadFile(path.join(__dirname, "index.html"), { query });
 
     mainWindow.webContents.on("before-input-event", (e, input) => {
         if (input.type === "keyDown" && input.key === "F11") mainWindow.setFullScreen(!mainWindow.isFullScreen());
+        if (STUDIO && input.type === "keyDown" && input.key === "F12") mainWindow.webContents.toggleDevTools();
     });
     mainWindow.webContents.on("did-finish-load", () => {
         rendererReady = true;
         if (queuedUpdate) { sendToGame("update-available", queuedUpdate); queuedUpdate = null; }
     });
-    mainWindow.once("ready-to-show", () => mainWindow.show());
+    mainWindow.once("ready-to-show", () => { if (STUDIO) mainWindow.maximize(); mainWindow.show(); });
     mainWindow.on("closed", () => { mainWindow = null; rendererReady = false; });
 }
 
@@ -120,6 +125,7 @@ function setupAutoUpdater() {
 }
 
 app.whenReady().then(async () => {
+    if (STUDIO) require("./studio/main-studio.js").setup(ipcMain, __dirname);
     const previous = await loadPendingUpdate();
     createWindow();
     // after the game restarted into the new version, show What's New once

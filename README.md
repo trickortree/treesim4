@@ -11,6 +11,14 @@ npm install
 npm start
 ```
 
+## Tree Sim 4 Studio
+
+```bash
+npm run studio
+```
+
+Opens the game as an editor: fly around any island, place and move signs and props, design trees (or ask Claude to), and play-test with F5. It saves to `content/` (shipped with the game). The `studio/` folder itself never goes into the installer.
+
 ## Release (maintainers)
 
 1. Bump `version` in `package.json` and update `build.releaseInfo.releaseNotes` (that text is the in-game update popup).

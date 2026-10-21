@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+// made in Tree Sim 4 Studio (npm run studio): custom trees, and the signs and props placed on the islands
+import CONTENT_TREES from "./content/trees.js";
+import CONTENT_WORLD from "./content/world.js";
 
 // =====================================================================
 //  TS4 test 3: day/night, rare trees, shop, landmarks, chests, contracts
@@ -281,6 +284,8 @@ const N_AXES = 18;
 // ---------- save ----------
 const SAVE_KEY = "ts4_save_v1";
 const QS = new URLSearchParams(location.search), VERSION = QS.get("v") || "dev", DEBUG = QS.has("debug");
+const STUDIO = DEBUG && QS.has("studio"); // Tree Sim 4 Studio: the editor runs inside the game (npm run studio, never in the installer)
+if (STUDIO) try { sessionStorage.setItem("ts4_skipIntro", "1"); } catch (e) { /* no intro skip */ }
 const save = {
     logs: 0, logBonus: 0, money: 0, owned: [1, 0, 0, 0, 0, 0, 0, 0], equipped: 0, ghosts: 0, bandages: 1, priceLvl: 0,
     hpLvl: 0, bootLvl: 0, oilLvl: 0, felled: 0, rareFelled: 0, deaths: 0, sold: 0, seconds: 0, day: 1, clock: 8,
@@ -306,7 +311,7 @@ if (!save.buffs || typeof save.buffs !== "object") save.buffs = {};
 if (!save.ench || typeof save.ench !== "object") save.ench = {};
 // enchantments live on each axe: save.ench[axeIndex] = { sharp, fortune, vamp, swift, bane }
 const enchLv = (k, i = save.equipped) => (save.ench[i] && save.ench[i][k]) || 0;
-let savesFrozen = false; // the dev panel sets this right before it swaps the save and reloads
+let savesFrozen = STUDIO; // the dev panel sets this right before it swaps the save and reloads; the Studio never writes your save
 function writeSave() { if (savesFrozen) return; save.clock = hourNow(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
 // difficulty follows your best axe, so a strong axe never one-shots everything
 const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; }); return b; };
@@ -663,6 +668,7 @@ addTgt = isle1;
 const occluders = []; // solid meshes that hide labels and nameplates behind them
 const colliders = []; // axis-aligned boxes [minx, maxx, minz, maxz]
 const circles = [];   // {x, z, r}
+const placedSolids = []; // {x, z, r, isle, o}: signs and props placed in the Studio that you can't walk through
 function addBox(minx, maxx, minz, maxz, y0, y1, mat, collide = true) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(maxx - minx, y1 - y0, maxz - minz), mat);
     m.position.set((minx + maxx) / 2, (y0 + y1) / 2, (minz + maxz) / 2);
@@ -1637,13 +1643,28 @@ const TYPES = {
     // the Elder Heart's children: they never spawn on their own, and they don't care if you're looking
     thornling:   { name: "Thornling",       leaf: [0x6a1a3a, 0x8a2a4a],           trunk: 0x2a0a18, hp: 0.6, logs: 0.6, dmg: 0.8,  speed: 2.4, bonus: 0,  wd: 0,    wn: 0,    col: "#ff5a8a", glow: 0x3a0018, isl: [], rush: true, mat: "spore" }
 };
+// ---- trees made in Tree Sim 4 Studio (content/trees.js): colours are "#rrggbb" there, numbers here. Their keys all start with c_ ----
+const hexN = c => (typeof c === "number" ? c : parseInt(String(c || "#000000").replace("#", ""), 16) || 0);
+const isCustomKey = k => typeof k === "string" && /^c_[a-z0-9_]+$/.test(k);
+function customType(c) {
+    const T = { name: c.name || "Custom Tree", leaf: (Array.isArray(c.leaf) && c.leaf.length ? c.leaf : ["#3a7a3a"]).map(hexN), trunk: hexN(c.trunk || "#4a3024"),
+        hp: +c.hp || 1, logs: +c.logs || 1, dmg: +c.dmg || 0, speed: +c.speed || 1, bonus: +c.bonus || 0, wd: +c.wd || 0, wn: +c.wn || 0,
+        col: c.col || "#a0d060", isl: Array.isArray(c.isl) && c.isl.length ? c.isl.map(Number) : [1], minTier: +c.minTier || 0, custom: true };
+    if (c.glow) T.glow = hexN(c.glow);
+    if (c.arch) T.arch = c.arch;
+    if (c.mat) T.mat = c.mat;
+    for (const f of ["rare", "night", "flee", "titan", "tall"]) if (c[f]) T[f] = true;
+    return T;
+}
+for (const c of Array.isArray(CONTENT_TREES) ? CONTENT_TREES : []) if (c && isCustomKey(c.key)) TYPES[c.key] = customType(c);
 const typeMats = {};
-for (const [k, T] of Object.entries(TYPES)) {
+function makeTypeMats(T) {
     const base = { flatShading: true };
     if (T.glow !== undefined) base.emissive = T.glow;
     if (T.ghost) { base.transparent = true; base.opacity = 0.72; base.depthWrite = false; }
-    typeMats[k] = { trunk: new THREE.MeshLambertMaterial({ color: T.trunk, ...base }), leaves: T.leaf.map(c => windy(new THREE.MeshLambertMaterial({ color: c, ...base }))) };
+    return { trunk: new THREE.MeshLambertMaterial({ color: T.trunk, ...base }), leaves: T.leaf.map(c => windy(new THREE.MeshLambertMaterial({ color: c, ...base }))) };
 }
+for (const [k, T] of Object.entries(TYPES)) typeMats[k] = makeTypeMats(T);
 // ---------- tree mutations: rare glowing variants with their own look, sparkles and a big drop multiplier ----------
 const MUTS = {
     golden:    { name: "GOLDEN",    col: "#ffd040", mult: 3, hp: 1.4, w: 30, leaf: 0xffd040, em: 0x6a4a00, trunk: 0xb08a30, temb: 0x3a2a00, fx: 0xfff0a0, mode: "sparkle" },
@@ -1707,6 +1728,24 @@ const TREE_STYLE = {
     xmaspine: { s: "xmas", dots: 0xffe9a0, orn: [0xff3a3a, 0xffd040, 0x3a8aff], star: 0xffe060 }, xmasfir: { s: "xmas", dots: 0xffffff, snow: true, orn: [0xff3a3a, 0xf4f8ff, 0xffd040], star: 0xffe060 },
     xmasmoon: { s: "xmas", dots: 0xbfe0ff, orn: [0xd8e8ff, 0xb07aff, 0x7affef], star: 0xffffff }, xmasash: { s: "xmas", dots: 0xffd040, orn: [0xff6a1a, 0xffd040, 0xff2a2a], star: 0xffa020 }
 };
+// a Studio tree's look: its shape, plus glowing dots, snow or rocks
+const TREE_SHAPES = ["conifer", "round", "tall", "birch", "spiky", "dead", "crystal", "shroom", "xmas"];
+function customStyle(c) {
+    const S = { s: TREE_SHAPES.includes(c.shape) ? c.shape : "round" };
+    if (c.dots) S.dots = hexN(c.dots);
+    if (c.snow) S.snow = true;
+    if (c.rocks) S.rocks = true;
+    if (S.s === "xmas") { S.orn = [0xff3a3a, 0xffd040, 0x3a8aff]; S.star = 0xffe060; if (!S.dots) S.dots = 0xffe9a0; }
+    return S;
+}
+for (const c of Array.isArray(CONTENT_TREES) ? CONTENT_TREES : []) if (c && isCustomKey(c.key)) TREE_STYLE[c.key] = customStyle(c);
+// the Studio edits a tree live: its type, look and materials are made again
+function defineCustomTree(c) {
+    if (!c || !isCustomKey(c.key)) return null;
+    TYPES[c.key] = customType(c); TREE_STYLE[c.key] = customStyle(c); typeMats[c.key] = makeTypeMats(TYPES[c.key]);
+    return TYPES[c.key];
+}
+function dropCustomTree(k) { if (isCustomKey(k)) { delete TYPES[k]; delete TREE_STYLE[k]; delete typeMats[k]; } }
 const ornMats = {};
 const ornMat = c => ornMats[c] || (ornMats[c] = new THREE.MeshBasicMaterial({ color: c }));
 const snowMat = new THREE.MeshLambertMaterial({ color: 0xf2f6ff, flatShading: true }), rockMat = new THREE.MeshLambertMaterial({ color: 0x7a7a84, flatShading: true });
@@ -3035,6 +3074,11 @@ function pushOutBoxes(p, rad) {
         }
     }
     for (const c of circles) {
+        const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), min = c.r + rad;
+        if (d < min && d > 0.0001) { p.x = c.x + dx / d * min; p.z = c.z + dz / d * min; }
+    }
+    for (const c of placedSolids) { // solid signs and props placed in the Studio
+        if (c.isle !== isle) continue;
         const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), min = c.r + rad;
         if (d < min && d > 0.0001) { p.x = c.x + dx / d * min; p.z = c.z + dz / d * min; }
     }
@@ -13096,6 +13140,98 @@ function hud(dt) {
 }
 const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0)) * (1 + 0.12 * enchLv("sharp", i)) * dmgBuff()); };
 
+// =====================================================================
+//  Tree Sim 4 Studio content: the signs and props you place in the editor (content/world.js).
+//  Each one sits in its island's group, so it shows and hides with the island. Heights are stored, not worked out.
+// =====================================================================
+const placed = []; // { o, g, r, tex } for every sign and prop in the world
+const propMats = {};
+const pmat = c => propMats[c] || (propMats[c] = new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
+const pglow = c => propMats["g" + c] || (propMats["g" + c] = new THREE.MeshBasicMaterial({ color: c }));
+const PSPH = new THREE.IcosahedronGeometry(1, 1), PTENT = new THREE.ConeGeometry(1, 1, 4), SIGN_FACE = new THREE.PlaneGeometry(2.2, 1.1);
+function pm(g, geo, mat, x, y, z, sx, sy = sx, sz = sx, rx = 0, ry = 0, rz = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz); g.add(m); return m; }
+// the prop kit: r = how wide it is to walk into (0 = you walk through it), tint = its main colour can be changed
+const PROPS = {
+    rock:      { name: "Rock", r: 0.6, make(g) { pm(g, ICO, pmat(0x7a7a84), 0, 0.32, 0, 0.7, 0.5, 0.6, 0.3, 0.5, 0.2); } },
+    boulder:   { name: "Boulder", r: 1.5, make(g) { const m = pmat(0x6a6a74); pm(g, ICO, m, 0, 0.85, 0, 1.4, 1.1, 1.2, 0.2, 0.4, 0.1); pm(g, ICO, m, 0.95, 0.45, 0.45, 0.75, 0.6, 0.7, 0.5); pm(g, ICO, m, -0.85, 0.38, -0.5, 0.65, 0.5, 0.6, 0.1, 1.2); } },
+    bush:      { name: "Bush", r: 0, tint: 0x2f6a3a, make(g, c) { const m = pmat(c); pm(g, PSPH, m, 0, 0.5, 0, 0.7, 0.6, 0.7); pm(g, PSPH, m, 0.5, 0.38, 0.2, 0.5); pm(g, PSPH, m, -0.42, 0.34, -0.2, 0.48); } },
+    crate:     { name: "Crate", r: 0.65, make(g) { pm(g, BOX, pmat(0x9a6a3a), 0, 0.5, 0, 1); const d = pmat(0x5a3a20); for (const y of [0.06, 0.94]) pm(g, BOX, d, 0, y, 0, 1.04, 0.12, 1.04); pm(g, BOX, d, 0, 0.5, 0.51, 0.12, 1, 0.04, 0, 0, 0.78); } },
+    barrel:    { name: "Barrel", r: 0.5, make(g) { pm(g, CYL8, pmat(0x8a5a30), 0, 0.55, 0, 0.45, 1.1, 0.45); const d = pmat(0x3a3a40); for (const y of [0.2, 0.9]) pm(g, CYL8, d, 0, y, 0, 0.47, 0.08, 0.47); } },
+    lantern:   { name: "Lantern post", r: 0.2, tint: 0xffd890, make(g, c) { const w = pmat(0x3a2a20); pm(g, BOX, w, 0, 1.1, 0, 0.12, 2.2, 0.12); pm(g, BOX, w, 0.25, 2.12, 0, 0.55, 0.08, 0.08); pm(g, BOX, pglow(c), 0.48, 1.86, 0, 0.28, 0.34, 0.28); pm(g, CONE6, w, 0.48, 2.1, 0, 0.24, 0.16, 0.24); } },
+    torch:     { name: "Torch", r: 0, make(g) { pm(g, CYL6, pmat(0x5a3a20), 0, 0.7, 0, 0.05, 1.4, 0.05); pm(g, CONE6, pglow(0xff8a2a), 0, 1.58, 0, 0.14, 0.42, 0.14); pm(g, CONE6, pglow(0xffe070), 0, 1.52, 0, 0.08, 0.26, 0.08); } },
+    fence:     { name: "Fence", r: 0, make(g) { const w = pmat(0x7a5232); for (const x of [-1.2, 0, 1.2]) pm(g, BOX, w, x, 0.55, 0, 0.14, 1.1, 0.14); for (const y of [0.45, 0.85]) pm(g, BOX, w, 0, y, 0, 2.5, 0.1, 0.06); } },
+    bench:     { name: "Bench", r: 0.5, make(g) { const w = pmat(0x8a5a34); pm(g, BOX, w, 0, 0.45, 0, 1.6, 0.1, 0.45); pm(g, BOX, w, 0, 0.76, -0.2, 1.6, 0.4, 0.08); for (const x of [-0.7, 0.7]) pm(g, BOX, w, x, 0.22, 0, 0.1, 0.45, 0.4); } },
+    campfire:  { name: "Campfire", r: 0.7, make(g) { const s = pmat(0x6a6a70), w = pmat(0x5a3a20); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; pm(g, ICO, s, Math.cos(a) * 0.62, 0.1, Math.sin(a) * 0.62, 0.17, 0.13, 0.17, a); } for (let i = 0; i < 3; i++) pm(g, CYL6, w, 0, 0.14, 0, 0.08, 0.95, 0.08, 0, (i / 3) * Math.PI, Math.PI / 2 - 0.25); pm(g, CONE6, pglow(0xff7a2a), 0, 0.48, 0, 0.36, 0.8, 0.36); pm(g, CONE6, pglow(0xffd040), 0, 0.4, 0, 0.2, 0.56, 0.2); } },
+    logpile:   { name: "Log pile", r: 1.0, make(g) { const w = pmat(0x7a5232); [[-0.46, 0.22], [0, 0.22], [0.46, 0.22], [-0.23, 0.6], [0.23, 0.6], [0, 0.98]].forEach(([x, y]) => pm(g, CYL8, w, 0, y, x, 0.22, 1.8, 0.22, 0, 0, Math.PI / 2)); } },
+    stump:     { name: "Stump", r: 0.5, make(g) { pm(g, CYL8, pmat(0x5a3a24), 0, 0.25, 0, 0.5, 0.5, 0.5); pm(g, CYL8, pmat(0xc8a070), 0, 0.51, 0, 0.44, 0.02, 0.44); } },
+    mushroom:  { name: "Giant mushroom", r: 0.35, tint: 0xd8303a, make(g, c) { pm(g, CYL8, pmat(0xf0e8d8), 0, 0.6, 0, 0.18, 1.2, 0.18); pm(g, PSPH, pmat(c), 0, 1.25, 0, 0.8, 0.38, 0.8); const d = pmat(0xffffff); for (let i = 0; i < 6; i++) { const a = i * 1.1; pm(g, PSPH, d, Math.cos(a) * 0.5, 1.42, Math.sin(a) * 0.5, 0.09); } } },
+    tent:      { name: "Tent", r: 1.3, tint: 0xc89a5a, make(g, c) { pm(g, PTENT, pmat(c), 0, 0.8, 0, 1.5, 1.6, 1.5, 0, Math.PI / 4); pm(g, BOX, pmat(0x2a1a14), 0, 0.42, 1.06, 0.6, 0.84, 0.04); } },
+    flag:      { name: "Flag", r: 0, tint: 0xff5a3a, make(g, c) { pm(g, CYL6, pmat(0xd8d8e0), 0, 1.5, 0, 0.04, 3, 0.04); pm(g, BOX, pmat(c), 0.47, 2.65, 0, 0.9, 0.55, 0.03); } },
+    chest:     { name: "Chest", r: 0.55, make(g) { const w = pmat(0x8a5a2a), au = pmat(0xd8a840); pm(g, BOX, w, 0, 0.25, 0, 0.9, 0.5, 0.6); pm(g, BOX, w, 0, 0.6, 0, 0.92, 0.22, 0.62); pm(g, BOX, au, 0, 0.32, 0, 0.94, 0.08, 0.64); pm(g, BOX, au, 0, 0.46, 0.32, 0.14, 0.16, 0.04); } },
+    gravestone:{ name: "Gravestone", r: 0.35, make(g) { const s = pmat(0x8a8a96); pm(g, BOX, s, 0, 0.5, 0, 0.7, 1.0, 0.18); pm(g, CYL8, s, 0, 1.0, 0, 0.35, 0.18, 0.35, Math.PI / 2); pm(g, BOX, pmat(0x4a3a2a), 0, 0.06, 0.75, 0.8, 0.12, 1.3); } },
+    pumpkin:   { name: "Pumpkin", r: 0.4, make(g) { pm(g, PSPH, pmat(0xff7a1a), 0, 0.36, 0, 0.45, 0.36, 0.45); pm(g, CYL6, pmat(0x4a6a2a), 0, 0.76, 0, 0.05, 0.2, 0.05); const e = pglow(0xffd040); for (const x of [-0.15, 0.15]) pm(g, BOX, e, x, 0.44, 0.43, 0.1, 0.08, 0.02); pm(g, BOX, e, 0, 0.3, 0.44, 0.24, 0.05, 0.02); } },
+    stone:     { name: "Standing stone", r: 0.6, make(g) { pm(g, BOX, pmat(0x6a6a78), 0, 1.5, 0, 0.9, 3, 0.6, 0.04, 0.3, 0.06); } },
+    crystal:   { name: "Crystal cluster", r: 0.45, tint: 0x7affef, make(g, c) { const m = pglow(c); pm(g, CONE6, m, 0, 0.7, 0, 0.25, 1.4, 0.25); pm(g, CONE6, m, 0.3, 0.42, 0.1, 0.16, 0.85, 0.16, 0, 0, -0.5); pm(g, CONE6, m, -0.25, 0.36, -0.15, 0.14, 0.72, 0.14, 0.3, 0, 0.55); } }
+};
+// a sign's face: a wooden board with carved letters, or the game's dark board with glowing ones
+function signTexture(o) {
+    const cv = document.createElement("canvas"); cv.width = 512; cv.height = 256;
+    const g = cv.getContext("2d"), glow = o.style === "glow", col = o.color || (glow ? "#ffd040" : "#ffe8c0");
+    if (glow) { g.fillStyle = "#120a1e"; g.fillRect(0, 0, 512, 256); g.strokeStyle = col; g.lineWidth = 10; g.strokeRect(8, 8, 496, 240); }
+    else { g.fillStyle = "#7a5232"; g.fillRect(0, 0, 512, 256); g.fillStyle = "rgba(0,0,0,0.13)"; for (let i = 0; i < 5; i++) g.fillRect(0, 24 + i * 50, 512, 4); g.strokeStyle = "#4a2e1a"; g.lineWidth = 14; g.strokeRect(7, 7, 498, 242); }
+    const lines = String(o.text || "SIGN").split("\n").slice(0, 4), font = s => `900 ${s}px "Segoe UI Black", "Segoe UI", sans-serif`;
+    let fs = Math.min(96, Math.floor(210 / lines.length));
+    g.font = font(fs);
+    const wide = Math.max(1, ...lines.map(l => g.measureText(l).width));
+    if (wide > 450) { fs = Math.max(16, Math.floor(fs * 450 / wide)); g.font = font(fs); } // long lines shrink to fit the board
+    g.textAlign = "center"; g.textBaseline = "middle"; g.fillStyle = col;
+    if (glow) { g.shadowColor = col; g.shadowBlur = 16; }
+    lines.forEach((l, i) => g.fillText(l, 256, 130 + (i - (lines.length - 1) / 2) * fs * 1.08));
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    return t;
+}
+function buildSign(g, o) {
+    const tex = signTexture(o), post = o.post !== false, y = post ? 1.75 : 0.6, glow = o.style === "glow";
+    const face = glow ? new THREE.MeshBasicMaterial({ map: tex }) : new THREE.MeshLambertMaterial({ map: tex });
+    pm(g, BOX, pmat(glow ? 0x1a1020 : 0x5a3a20), 0, y, 0, 2.3, 1.18, 0.1);
+    pm(g, SIGN_FACE, face, 0, y, 0.052, 1); pm(g, SIGN_FACE, face, 0, y, -0.052, 1, 1, 1, 0, Math.PI); // reads the right way from both sides
+    if (post) pm(g, BOX, pmat(0x4a3020), 0, (y - 0.3) / 2, 0, 0.16, y - 0.3, 0.16);
+    return { r: post ? 0.3 : 0.5, tex };
+}
+function placedBuild(o) {
+    const G = isleGroup(+o.isle);
+    if (!G) return null;
+    const g = new THREE.Group();
+    let r = 0, tex = null;
+    if (o.kind === "sign") ({ r, tex } = buildSign(g, o));
+    else { const P = PROPS[o.prop] || PROPS.rock; P.make(g, o.col ? hexN(o.col) : P.tint); r = P.r; }
+    g.userData.placed = o;
+    G.add(g);
+    const rec = { o, g, r, tex };
+    placed.push(rec);
+    placedPose(rec);
+    return rec;
+}
+const placedFind = o => placed.find(p => p.o === o);
+function placedPose(rec) { // where it stands, how it's turned, its size, and its collision circle if it's solid
+    const { o, g } = rec, s = +o.s || 1;
+    g.position.set(+o.x || 0, +o.y || 0, +o.z || 0); g.rotation.set(+o.rx || 0, +o.ry || 0, +o.rz || 0); g.scale.setScalar(s);
+    const i = placedSolids.findIndex(c => c.o === o); if (i >= 0) placedSolids.splice(i, 1);
+    if (o.solid && rec.r > 0) placedSolids.push({ x: g.position.x, z: g.position.z, r: rec.r * s, isle: +o.isle, o });
+}
+function placedRemove(o) {
+    const i = placed.findIndex(p => p.o === o);
+    if (i < 0) return;
+    const rec = placed[i];
+    if (rec.g.parent) rec.g.parent.remove(rec.g);
+    if (rec.tex) { rec.tex.dispose(); rec.g.traverse(m => { if (m.isMesh && m.material.map === rec.tex) m.material.dispose(); }); }
+    placed.splice(i, 1);
+    const j = placedSolids.findIndex(c => c.o === o); if (j >= 0) placedSolids.splice(j, 1);
+}
+function placedRebuild(o) { placedRemove(o); return placedBuild(o); }
+for (const o of CONTENT_WORLD && Array.isArray(CONTENT_WORLD.objects) ? CONTENT_WORLD.objects : []) placedBuild(o);
+let studioHook = null; // set by studio/studio.js: it flies the camera while you edit
+
 // ---------- loop ----------
 let last = performance.now();
 // one bad frame shouldn't freeze the whole game: report it and keep going
@@ -13128,6 +13264,12 @@ function frameBody(now) {
         camera.fov = 70; camera.updateProjectionMatrix();
         updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateIsle6(real, true); updateWeather(real); updateEcosystem(real);
         applySky();
+    } else if (state === "studio") { // Tree Sim 4 Studio: the world keeps living while the editor flies the camera
+        time += real;
+        if (studioHook) studioHook.frame(real);
+        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateWeather(real); updateEcosystem(real);
+        applySky();
+        if (studioHook && studioHook.afterSky) studioHook.afterSky(); // the editor can thin the fog out to see a whole island
     }
     camera.updateMatrixWorld();
     updateLabels();
@@ -13174,3 +13316,13 @@ if (DEBUG) window.__ts4 = {
 };
 // the dev panel only exists when running from source (it isn't packed into the installer)
 if (DEBUG) import("./dev.js").catch(e => console.warn("dev panel failed to load:", e));
+// Tree Sim 4 Studio (studio/studio.js) drives the game through these. It only loads with npm run studio
+if (STUDIO) {
+    Object.assign(window.__ts4, {
+        scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
+        CONTENT_TREES, CONTENT_WORLD, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
+        PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,
+        setStudioHook(h) { studioHook = h; }, get wx() { return wx; }
+    });
+    import("./studio/studio.js").catch(e => { console.error(e); toast("Tree Sim 4 Studio failed to load: " + e.message, "bad"); });
+}
