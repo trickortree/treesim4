@@ -1265,10 +1265,10 @@ function ferrymanTex() {
     const bl2 = label("A NEW LIFE AWAITS", "#ffffff", 4.6, 1.0); bl2.position.set(FI.x, 112, FI.z); bl2.maxD = 520; bl2.blurK = 0.25;
     farGlow = canopyM;
 }
-function clampToIsland(p) {
+function clampToIsland(p, dt) {
     if (p.x > 4500) { clampCasino(p); return; }
     if (isle === 6) { clampIsle6(p); return; }
-    if (isle === 5) { clampIsle5(p); return; }
+    if (isle === 5) { clampIsle5(p, dt); return; }
     if (isle === 4) { clampIsle4(p); return; }
     if (isle === 3) { clampIsle3(p); return; }
     if (isle === 2) { clampIsle2(p); return; }
@@ -3219,7 +3219,7 @@ function update(dt) {
     if (keys.Space && player.onGround && !panel) { player.vel.y = 7; player.onGround = false; }
     player.vel.y -= 22 * dt;
     player.pos.addScaledVector(player.vel, dt);
-    clampToIsland(player.pos);
+    clampToIsland(player.pos, dt);
     pushOutBoxes(player.pos, 0.45);
     }
     if (ride) updateRide(dt);
@@ -9942,7 +9942,7 @@ PADS5.haven.push({ x: 0, z: 0, r: 30, f: 12, h: 0.3 }, { x: H5.casino.x, z: H5.c
 PADS5.coral.push({ x: H5.islet.x, z: H5.islet.z, r: 2.5, f: 4, h: 1.0 });
 PADS5.skull.push({ x: H5.cove.x, z: H5.cove.z, r: 9, f: 10, h: 0.45 });
 PADS5.storm.push({ x: H5.light.x, z: H5.light.z, r: 6, f: 4, h: null }, { x: H5.circle.x, z: H5.circle.z, r: 8, f: 5, h: null });
-PADS5.frost.push({ x: H5.lake.x, z: H5.lake.z, r: 12, f: 6, h: 0.3 });
+PADS5.frost.push({ x: H5.lake.x, z: H5.lake.z, r: 12, f: 16, h: 0.3, top: true }); // a wide bowl you can walk in and out of (the summit trail dips across it)
 // trails: from camp out to the docks, and up every mountain
 TRAILS5.haven.push({ w: 2.6, pts: [[-24, -10, 0.3], [-36, -14, null], [-44, -24, null], [-52, -30, null], [-62, -28, null], [H5.lookout.x, H5.lookout.z, null]] }); // up Lookout Ridge
 {   // Frostcap: a switchback trail that winds right up to the summit
@@ -9969,7 +9969,7 @@ function landH5(I, x, z, lx, lz, d, th) {
         h = Math.max(h, 34 * Math.pow(Math.max(0, 1 - dr / 50), 1.35) * (0.62 + 0.55 * rg));                  // Lookout Ridge
         h += 11 * Math.exp(-((x - H5.jungle.x) ** 2 + (z - H5.jungle.z) ** 2) / 520) * (0.6 + 0.7 * fbm2(x * 0.06, z * 0.06, 2)); // the jungle hills
         const dp = Math.hypot(x - H5.pool.x, z - H5.pool.z); h = lerp(h, -2.6, sstep(H5.pool.r + 5, H5.pool.r - 1, dp)); // the pool under the falls
-        { const [sd, t] = segDist(x, z, H5.pool.x, H5.pool.z, -91, 12); h = lerp(h, lerp(-2.0, -2.6, t), sstep(4.2, 1.6, sd)); } // and the stream from it to the sea
+        { const [sd, t] = segDist(x, z, H5.pool.x, H5.pool.z, -91, 12), bed = lerp(-2.0, -2.6, t); h = lerp(h, bed, sstep(4.2, 1.6, sd)); if (t > 0.12) h = Math.min(h, bed + Math.max(0, sd - 1.6) * lerp(9, 0.8, sstep(0.12, 0.3, t))); } // and the stream from it to the sea, down a valley you can always climb out of
         return h + fbm2(x * 0.11, z * 0.11, 2) * 0.7;
     }
     if (I.k === "coral") {
@@ -9983,8 +9983,8 @@ function landH5(I, x, z, lx, lz, d, th) {
         return h;
     }
     if (I.k === "skull") {
-        const rg = ridged(x * 0.032 - 2, z * 0.032 + 8, 4), base = (fbm2(x * 0.024, z * 0.024, 4) * 0.55 + rg * 0.75) * 26 - 9;
-        let h = terrace(Math.max(0, base), 4.2, 0.13) * sstep(6, 22, archR(I, th) - d);                       // rock shelves with sheer risers
+        const rg = ridged(x * 0.032 - 2, z * 0.032 + 8, 3), base = (fbm2(x * 0.024, z * 0.024, 4) * 0.55 + rg * 0.75) * 26 - 9;
+        let h = terrace(Math.max(0, base), 4.2, 0.22) * sstep(6, 22, archR(I, th) - d);                       // rock shelves with steep risers
         const dc = Math.hypot(x - H5.crag.x, z - H5.crag.z); h = Math.max(h, 31 * Math.pow(Math.max(0, 1 - dc / 26), 1.15)); // the crag
         const dcv = Math.hypot(x - H5.cove.x, z - H5.cove.z); h *= sstep(10, 26, dcv);                     // the cove's beach
         return h + fbm2(x * 0.14, z * 0.14, 2) * 0.6;
@@ -9996,7 +9996,8 @@ function landH5(I, x, z, lx, lz, d, th) {
         return h;
     }
     // storm: moors round a plateau with cliffs all round it
-    const dm = Math.hypot(x - H5.mesa.x, z - H5.mesa.z), ma = Math.atan2(z - H5.mesa.z, x - H5.mesa.x), m = sstep(2.5, -1.5, dm - mesaR(ma));
+    const dm = Math.hypot(x - H5.mesa.x, z - H5.mesa.z), ma = Math.atan2(z - H5.mesa.z, x - H5.mesa.x);
+    const rw = Math.max(Math.exp(-(angDiff(ma, 1.4) ** 2) / 0.05), Math.exp(-(angDiff(ma, -2.35) ** 2) / 0.05)), m = sstep(lerp(2.5, 12, rw), lerp(-1.5, -9, rw), dm - mesaR(ma)); // cliffs all round, but two grassy slopes up besides the gully
     const moor = 1.6 + fbm2(x * 0.045 + 4, z * 0.045, 3) * 4, top = 16 + fbm2(x * 0.07, z * 0.07, 2) * 1.6;
     return lerp(moor, top, m);
 }
@@ -10036,8 +10037,9 @@ function archRaw(I, x, z) {
     const beach = inside < 0 ? -0.5 + inside * 0.2 : lerp(-0.5, 0.45, sstep(0, 6, inside));
     let h = beach + L * lerp(sstep(5, 18, inside), sstep(0.6, 3.4, inside), c);
     if (c > 0.05 && inside < 1) h = lerp(h, -3 + inside, c * sstep(1, -1, inside));      // sheer drops below the cliffs
-    for (const P of PADS5[I.k]) { const pd = Math.hypot(x - P.x, z - P.z); if (pd < P.r + P.f) h = lerp(h, P.h, sstep(P.r + P.f, P.r, pd)); }
+    for (const P of PADS5[I.k]) { const pd = Math.hypot(x - P.x, z - P.z); if (!P.top && pd < P.r + P.f) h = lerp(h, P.h, sstep(P.r + P.f, P.r, pd)); }
     const tr = trailAt5(I, x, z); if (tr.d < tr.w + 5) h = lerp(h, tr.h, sstep(tr.w + 5, tr.w + 1.4, tr.d)); // flat across a bit more than the grid, so the walking line is exact
+    for (const P of PADS5[I.k]) { const pd = Math.hypot(x - P.x, z - P.z); if (P.top && pd < P.r + P.f) h = lerp(h, P.h, sstep(P.r + P.f, P.r, pd)); } // pads that sit over a trail
     return h;
 }
 // the land is baked into a grid once: the ground you walk on is exactly the ground you see
@@ -10074,8 +10076,21 @@ function groundY5(x, z) {
     return Math.max(SWIM_Y, archTerrain(archAt(x, z), x, z));
 }
 const slope5 = (x, z) => { const e = 0.6; return Math.hypot(groundY5(x + e, z) - groundY5(x - e, z), groundY5(x, z + e) - groundY5(x, z - e)) / (2 * e); };
+// walking: the ground is judged over a stride, not over one triangle, so bumps, creases and little ledges never stop you
+const CLIMB_MAX = 1.8; // steeper than this (about 60°) is a cliff
+const grade5 = (x, z, ux, uz, e = 1.1) => (groundY5(x + ux * e, z + uz * e) - groundY5(x - ux * e, z - uz * e)) / (2 * e); // how steeply the land climbs in that direction
+const fall5 = (x, z, e = 1.1) => { const gx = groundY5(x + e, z) - groundY5(x - e, z), gz = groundY5(x, z + e) - groundY5(x, z - e); return { gx: gx / (2 * e), gz: gz / (2 * e), s: Math.hypot(gx, gz) / (2 * e) }; }; // the way uphill, and how steep
+function cliff5(x0, z0, x1, z1, feet) { // would stepping from one spot to the next walk you up a cliff?
+    if (feet >= groundY5(x1, z1) - 0.03) return false; // it's not higher, or you're jumping over it
+    const dx = x1 - x0, dz = z1 - z0, run = Math.hypot(dx, dz);
+    return run > 1e-5 && grade5(x1, z1, dx / run, dz / run) > CLIMB_MAX;
+}
 const swim5 = () => isle === 5 && !boating() && !onDock5(player.pos.x, player.pos.z) && archTerrain(archAt(player.pos.x, player.pos.z), player.pos.x, player.pos.z) < -0.7;
-const moveK5 = () => (swim5() ? 0.5 : 1);
+const moveK5 = () => { // deep water is a swim, steep ground is a trudge
+    if (swim5()) return 0.5;
+    const v = Math.hypot(player.vel.x, player.vel.z); if (v < 0.5 || !player.onGround) return 1;
+    return 1 - 0.4 * sstep(0.45, CLIMB_MAX, grade5(player.pos.x, player.pos.z, player.vel.x / v, player.vel.z / v));
+};
 // the camp at Port Haven
 const BED5 = { x: -9, z: 6 }, SMITH5 = { x: -11, z: -7 }, DEPOT5 = { x: 11, z: -7 }, WITCH5 = { x: 10, z: 8 };
 const SMITH5_AT = standPt(SMITH5), DEPOT5_AT = standPt(DEPOT5), WITCH5_AT = standPt(WITCH5);
@@ -10087,30 +10102,31 @@ const LM5 = [
     { name: "THE FALLS", x: H5.pool.x, z: H5.pool.z, r: H5.pool.r + 1, col: "#7ae8ff" }
 ];
 const clampLast5 = { x: 0, z: 0, ok: false };
-const SLOPE_MAX = 1.35; // anything steeper is a cliff: you can't walk up it, and you slide off it
-function clampIsle5(p) {
+function edge5(p) { // the shore: you stop at the water's edge, and at the top of a sea cliff
+    const I = archAt(p.x, p.z), dx = p.x - I.x, dz = p.z - I.z, d = Math.hypot(dx, dz), th = Math.atan2(dz, dx), lim = archR(I, th) - 3 - 1.8 * cliffK(I, th);
+    if (d > lim) { p.x = I.x + dx / d * lim; p.z = I.z + dz / d * lim; }
+}
+function clampIsle5(p, dt = 1 / 60) {
     if (DEBUG && window.__freeCam) { clampLast5.ok = false; return; } // dev: a free camera for screenshots
     if (B5.on) { clampLast5.ok = false; return; } // the boat moves itself
     for (const D of DOCKS5) {
         const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP);
         if (along > 4.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; clampLast5.x = p.x; clampLast5.z = p.z; clampLast5.ok = true; return; }
     }
-    const I = archAt(p.x, p.z), dx = p.x - I.x, dz = p.z - I.z, d = Math.hypot(dx, dz), lim = archR(I, Math.atan2(dz, dx)) - 3;
-    if (d > lim) { p.x = I.x + dx / d * lim; p.z = I.z + dz / d * lim; }
-    // cliffs: too steep to walk up (a jump gets you up a small ledge)
+    edge5(p);
     const L = clampLast5;
-    if (L.ok && !ride) {
-        const run = Math.hypot(p.x - L.x, p.z - L.z), g0 = groundY5(L.x, L.z), g1 = groundY5(p.x, p.z), feet = p.y - 1.7;
-        if (run > 1e-5 && run < 3 && g1 - g0 > 0.02 && (g1 - g0) / run > SLOPE_MAX && feet < g1 - 0.12) {
-            const gx = groundY5(p.x, L.z), gz = groundY5(L.x, p.z), rx = Math.abs(p.x - L.x), rz = Math.abs(p.z - L.z);
-            if (rx > 1e-5 && (gx - g0) / rx <= SLOPE_MAX) p.z = L.z;
-            else if (rz > 1e-5 && (gz - g0) / rz <= SLOPE_MAX) p.x = L.x;
-            else { p.x = L.x; p.z = L.z; }
+    if (L.ok && !ride && Math.hypot(p.x - L.x, p.z - L.z) < 3) {
+        const feet = p.y - 1.7;
+        // a cliff turns you aside: the part of your step that climbs it is taken out, so you slide along it instead of sticking
+        if (cliff5(L.x, L.z, p.x, p.z, feet)) {
+            const F = fall5(p.x, p.z), nx = F.gx / (F.s || 1), nz = F.gz / (F.s || 1), mx = p.x - L.x, mz = p.z - L.z, up = mx * nx + mz * nz;
+            const sx = L.x + mx - nx * up, sz = L.z + mz - nz * up;
+            if (up > 0 && !cliff5(L.x, L.z, sx, sz, feet)) { p.x = sx; p.z = sz; } else { p.x = L.x; p.z = L.z; }
         }
-        // standing on a cliff face: slide down it
+        // standing on a cliff face (you jumped or fell onto it): you slide down it
         if (player.onGround && feet < groundY5(p.x, p.z) + 0.25) {
-            const e = 0.5, gxp = groundY5(p.x + e, p.z), gxm = groundY5(p.x - e, p.z), gzp = groundY5(p.x, p.z + e), gzm = groundY5(p.x, p.z - e), sx = (gxp - gxm) / (2 * e), sz = (gzp - gzm) / (2 * e), s = Math.hypot(sx, sz);
-            if (s > SLOPE_MAX + 0.25) { const k = Math.min(0.12, (s - SLOPE_MAX) * 0.05); p.x -= sx / s * k; p.z -= sz / s * k; }
+            const F = fall5(p.x, p.z);
+            if (F.s > CLIMB_MAX + 0.4) { const k = Math.min(5, (F.s - CLIMB_MAX - 0.4) * 4) * dt; p.x -= F.gx / F.s * k; p.z -= F.gz / F.s * k; edge5(p); }
         }
     }
     L.x = p.x; L.z = p.z; L.ok = true;
@@ -11030,7 +11046,7 @@ function decorIsle5(I, R) {
         spots5(I, 5, R, land(10, 0.4, 0.25, 6), (x, z, y) => snowman(x, y, z, b("snow", lamb(0xf8fcff)), b("coal", lamb(0x1a1a1e)), b("carrot", lamb(0xff7a1a))));
         spots5(I, 60, R, land(8, 0.9, 0.25, 4), (x, z, y) => tufts(x, y, z, b("tgrass", lamb(0x7a9a6a)), 4, 0.5));
         // flags marking the summit trail
-        TRAILS5.frost[0].pts.forEach(([x, z], i) => { if (i % 3) return; const y = groundY5(x + 2.6, z); b("fpole", lamb(0x3a3a40)).add(CYL6, x + 2.6, y + 0.8, z, 0, 0, 0, 0.04, 1.6, 0.04); b("fflag", lamb(0xff5a3a)).add(BOX, x + 2.85, y + 1.45, z, 0, 0, 0, 0.5, 0.3, 0.02); });
+        TRAILS5.frost[0].pts.forEach(([x, z], i) => { if (i % 3 || Math.hypot(x - H5.lake.x, z - H5.lake.z) < 15) return; const y = groundY5(x + 2.6, z); b("fpole", lamb(0x3a3a40)).add(CYL6, x + 2.6, y + 0.8, z, 0, 0, 0, 0.04, 1.6, 0.04); b("fflag", lamb(0xff5a3a)).add(BOX, x + 2.85, y + 1.45, z, 0, 0, 0, 0.5, 0.3, 0.02); });
     } else {
         spots5(I, 80, R, land(6, 0.9), (x, z, y) => bush(x, y, z, b("heather", lamb(0x8a4aa8)), 0.6));
         spots5(I, 30, R, land(6, 0.9), (x, z, y) => { bush(x, y, z, b("gorse", lamb(0x4a6a2a)), 0.8); for (let k = 0; k < 5; k++) b("gflower", lamb(0xffd040)).add(ICO, x + (R() - 0.5) * 1.2, y + 0.6 + R() * 0.4, z + (R() - 0.5) * 1.2, 0, 0, 0, 0.07); });
@@ -13151,7 +13167,7 @@ if (DEBUG) window.__ts4 = {
     setState(s) { state = s; renderMenu(); },
     interact, writeSave, doRebirth, enterIsle1, enterIsle2, enterIsle3, enterIsle4, startFight4, fight4, startEruption, getKing: () => king, VOLC, syncKing, startFight, fight: fight3, HOLLOW, dropStar, getBoss: () => boss,
     // the dev panel (dev.js) drives the game through these
-    enterIsle6, yeti: () => yeti, fight6, startFight6, finishRebirth5, rebirth5Ready, DEN6, LAKE6, lightPool, vLights, openShop, enterIsle5, B5, ARCH, setArch5, H5, ROCKS5, RACES5, race5, startRace5, endRace5, sea5, salv5, spawnSalvage, newTreasureMap, dugTreasure, crewTick, collectCrate, isle5, PAINTS, repaintBoat, hailBoat, moorBoat, archTerrain, archAt, archIn, groundY5, slope5, TRAILS5, PADS5, SUMMITS5, plantFlag, readBottle, fishSpot5, wildOk5, populate5, refuel, fillCost, boatItems, paintItems, crateN, freeGhosts, ghostsHere5, RACE_START, CAPTAIN5, hullCount, wetH5, DOCKS5, boatTo, FERRYMAN4, getDig: () => digT, nearest5, studio5: { turtle: makeTurtle, parrot: makeParrot, flamingo: makeFlamingo, penguin: makePenguin, seal: makeSeal, monkey: makeMonkey, pig: makePig, pony: makePony, msheep: makeMoorSheep, afox: arcticFox, hare: snowHare, lizard: skullLizard, dolphin: makeDolphin, whale: makeWhale5, boat: makeSpeedboat }, boatEnter, boatExit, loseAtSea, rebirth4Ready, finishRebirth4, getArch: () => arch5, landingSpot, useAbility, ABIL, abCd, CSG, DB, CR, MN, VP, SC, PL, enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
+    enterIsle6, yeti: () => yeti, fight6, startFight6, finishRebirth5, rebirth5Ready, DEN6, LAKE6, lightPool, vLights, openShop, enterIsle5, B5, ARCH, setArch5, H5, ROCKS5, RACES5, race5, startRace5, endRace5, sea5, salv5, spawnSalvage, newTreasureMap, dugTreasure, crewTick, collectCrate, isle5, PAINTS, repaintBoat, hailBoat, moorBoat, archTerrain, archAt, archIn, groundY5, slope5, cliff5, grade5, fall5, CLIMB_MAX, TRAILS5, PADS5, SUMMITS5, plantFlag, readBottle, fishSpot5, wildOk5, populate5, refuel, fillCost, boatItems, paintItems, crateN, freeGhosts, ghostsHere5, RACE_START, CAPTAIN5, hullCount, wetH5, DOCKS5, boatTo, FERRYMAN4, getDig: () => digT, nearest5, studio5: { turtle: makeTurtle, parrot: makeParrot, flamingo: makeFlamingo, penguin: makePenguin, seal: makeSeal, monkey: makeMonkey, pig: makePig, pony: makePony, msheep: makeMoorSheep, afox: arcticFox, hare: snowHare, lizard: skullLizard, dolphin: makeDolphin, whale: makeWhale5, boat: makeSpeedboat }, boatEnter, boatExit, loseAtSea, rebirth4Ready, finishRebirth4, getArch: () => arch5, landingSpot, useAbility, ABIL, abCd, CSG, DB, CR, MN, VP, SC, PL, enterCasino, CS, inCasino, getCasino: () => casino, nearest,  spinSlots, bjDeal, spinRoulette, spinWheel, openCasino, get panel() { return panel; }, togglePanel, studio: { scene, animRig, flap2, makers: { deer: makeDeer, rabbit: makeRabbit, squirrel: makeSquirrel, goat: makeGoat, marmot: makeMarmot, eagle: makeEagle, fox: makeFox, shroom: makeShroomling, snail: makeSnail, moth: makeMoth, salamander: makeSalamander, beetle: makeBeetle, crow: makeCrow, bat: makeBat, butterfly: makeButterfly, crab: makeCrab, gull: makeGull, frog: makeFrog, bird: makeBird } }, MUTS, applyMut, mutFelled, get casino() { return casino; }, openEnch, enchTotal, enchTable, ENCH_AT, placeEnchTable, wildBy, buildWild, ENCH, openGift, axeSellValue, MATS, MATS_BY_ISLE, AXES, BUFFS, giveBuff, buffLeft, gainAxe, gunAm, magSize, resCap, applyAxeLook, hitTree, syncBoss, randStarSpot, curLM, toast, maxHpNow,
     FERRYMAN: { x: FERRYMAN.x, z: FERRYMAN.z }, FERRYMAN2: { x: FERRYMAN2.x, z: FERRYMAN2.z }, FERRYMAN3: { x: FERRYMAN3.x, z: FERRYMAN3.z },
     setGod(v) { godMode = !!v; }, getGod: () => godMode, setSpeed(v) { devSpeed = v; }, getSpeed: () => devSpeed,
     freezeSaves() { savesFrozen = true; }, relicObjs, collectRelic, CAVE_MOUTH, veins, MINE_MOUTH, rebirthCost, setWeather, isBlood, fishing, fishSpot, startFishing, fishAction, rollFish, syncGhosts, critters, wx, ghostObjs, hit: tryHit, equip: equipAxe, openPanel, closePanel, spawn: (k, x, z, h = 6) => makeTree(x, z, h, k)
