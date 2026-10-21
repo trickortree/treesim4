@@ -5,10 +5,11 @@ const os = require("os");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 
-const CONTENT = { trees: "trees.js", world: "world.js" };
+const CONTENT = { trees: "trees.js", world: "world.js", islands: "islands.js" };
 const HEADERS = {
     trees: "// Custom trees made in Tree Sim 4 Studio (npm run studio). The Studio writes this file: edit trees there.\n// Each tree's key starts with c_. Colours are \"#rrggbb\". See the vault's \"Tree Designer\" note for every field.\n",
-    world: "// Signs and props placed in Tree Sim 4 Studio (npm run studio). The Studio writes this file: move things there.\n// Each object: { id, isle (1-5), kind: \"sign\" | \"prop\", x, y, z, rx, ry, rz, s, solid, ... }\n"
+    islands: "// Islands made in Tree Sim 4 Studio (npm run studio). The Studio writes this file: make islands there.\n// They come after the Iceberg in order: the first is island 7 (Rebirth 6), the next island 8 (Rebirth 7), and so on.\n",
+    world: "// Signs, props, people and things to do placed in Tree Sim 4 Studio (npm run studio). The Studio writes this file: move things there.\n// Each object: { id, isle, kind: \"sign\" | \"prop\" | \"npc\" | \"treespot\", x, y, z, rx, ry, rz, s, sx, sy, sz, solid, act, ... }\n"
 };
 const MODELS = ["haiku", "sonnet", "opus"];
 
@@ -65,7 +66,21 @@ function askClaude({ prompt, system, model }) {
 
 function setup(ipcMain, root) {
     const dir = path.join(root, "content");
+    const rel = require("./release.js");
+    let releasing = false;
     ipcMain.handle("studio:info", () => ({ claude: findClaude(), content: dir }));
+    // the Release panel
+    ipcMain.handle("studio:relStatus", () => rel.status(root));
+    ipcMain.handle("studio:relChecks", (e, version, notes) => rel.checks(root, String(version || ""), String(notes || "")));
+    ipcMain.handle("studio:release", async (e, req) => {
+        if (releasing) return { ok: false, error: "A release is already running." };
+        releasing = true;
+        try { return await rel.release(root, req || {}, s => { if (!e.sender.isDestroyed()) e.sender.send("studio:relStep", s); }); }
+        catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+        finally { releasing = false; }
+    });
+    ipcMain.handle("studio:ciStatus", (e, version) => rel.ciStatus(root, String(version || "")));
+    ipcMain.handle("studio:openUrl", (e, url) => { if (/^https:\/\/github\.com\//.test(String(url))) require("electron").shell.openExternal(String(url)); });
     ipcMain.handle("studio:save", async (e, name, data) => {
         if (!CONTENT[name]) return { ok: false, error: "unknown content file: " + name };
         try {

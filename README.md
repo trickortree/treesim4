@@ -21,6 +21,8 @@ Opens the game as an editor: fly around any island, place and move signs and pro
 
 ## Release (maintainers)
 
+The easy way: **🚀 Release** in the Studio runs the checks, previews the update popup, does the steps below and then watches GitHub until the release is live. By hand:
+
 1. Bump `version` in `package.json` and update `build.releaseInfo.releaseNotes` (that text is the in-game update popup).
 2. Commit, push `main`, then `git tag vX.Y.Z` and `git push origin vX.Y.Z`.
 3. The GitHub Action builds the installer and publishes the release; players are offered the update in-game.

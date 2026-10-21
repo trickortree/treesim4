@@ -4,5 +4,12 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("ts4Studio", {
     info: () => ipcRenderer.invoke("studio:info"),
     save: (name, data) => ipcRenderer.invoke("studio:save", name, data),
-    askClaude: req => ipcRenderer.invoke("studio:askClaude", req)
+    askClaude: req => ipcRenderer.invoke("studio:askClaude", req),
+    // the Release panel
+    relStatus: () => ipcRenderer.invoke("studio:relStatus"),
+    relChecks: (version, notes) => ipcRenderer.invoke("studio:relChecks", version, notes),
+    release: req => ipcRenderer.invoke("studio:release", req),
+    onReleaseStep: cb => ipcRenderer.on("studio:relStep", (_e, s) => cb(s)),
+    ciStatus: version => ipcRenderer.invoke("studio:ciStatus", version),
+    openUrl: url => ipcRenderer.invoke("studio:openUrl", url)
 });

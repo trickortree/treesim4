@@ -3,6 +3,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 // made in Tree Sim 4 Studio (npm run studio): custom trees, and the signs and props placed on the islands
 import CONTENT_TREES from "./content/trees.js";
 import CONTENT_WORLD from "./content/world.js";
+import CONTENT_ISLANDS from "./content/islands.js";
 
 // =====================================================================
 //  TS4 test 3: day/night, rare trees, shop, landmarks, chests, contracts
@@ -231,10 +232,14 @@ let curBuild = 1; // which island labels are being built for
 let addTgt = null; // while set, scene.add puts new objects in this group
 { const _add = scene.add.bind(scene); scene.add = function (...o) { if (addTgt) { for (const x of o) addTgt.add(x); return this; } return _add(...o); }; }
 let isle = 1; // 1 = Pine Island, 2 = the Highland Isle, 3 = Mooncap Isle
+// islands made in Tree Sim 4 Studio come after the Iceberg: island 7 is Rebirth 6, island 8 Rebirth 7... (built in the STUDIO ISLANDS section)
+const CI_BASE = 7, ciList = [];
+const customIsle = n => ciList[n - CI_BASE] || null;
+const CI = () => (isle >= CI_BASE ? customIsle(isle) : null);
 let groundFn = null;
 const groundY = (x, z) => (x > 4500 ? 0 : groundFn ? groundFn(x, z) : 0); // x > 4500 is the casino's hall
-const curShoreAt = (x, z) => (isle === 6 ? shoreAt6(x, z) : isle === 5 ? shoreAt5(x, z) : isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
-const curShoreR = a => (isle === 6 ? shoreR6(a) : isle === 5 ? shoreR5(a) : isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
+const curShoreAt = (x, z) => (CI() ? CI().shoreAt(x, z) : isle === 6 ? shoreAt6(x, z) : isle === 5 ? shoreAt5(x, z) : isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
+const curShoreR = a => (CI() ? CI().shoreR(a) : isle === 6 ? shoreR6(a) : isle === 5 ? shoreR5(a) : isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
 
 // viewmodel (axe) gets its own scene + depth pass so it never clips into trees
 const viewScene = new THREE.Scene();
@@ -318,7 +323,7 @@ const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; 
 const gunPow = () => { let p = 0; (save.gunOwned || []).forEach((o, i) => { if (o) p = Math.max(p, GUNS[i].pow); }); return p; };
 const gunTier = () => (save.gunOwned || []).filter(Boolean).length * 2;
 const bestDmg = () => Math.max(AXES[bestIdx()].dmg, gunPow());
-const isleHp = () => [1, 1, 1.7, 2.2, 2.8, 3.6, 4.5][isle], isleRw = () => [1, 1, 1.6, 2.1, 2.8, 3.6, 4.5][isle], isleDm = () => [1, 1, 1.5, 1.9, 2.4, 3.0, 3.6][isle];
+const isleHp = () => [1, 1, 1.7, 2.2, 2.8, 3.6, 4.5][isle] ?? 4.5 * Math.pow(1.3, isle - 6), isleRw = () => [1, 1, 1.6, 2.1, 2.8, 3.6, 4.5][isle] ?? 4.5 * Math.pow(1.3, isle - 6), isleDm = () => [1, 1, 1.5, 1.9, 2.4, 3.0, 3.6][isle] ?? 3.6 * Math.pow(1.2, isle - 6);
 // timed buffs from the Apothecary and the Moonwell (they tick on play time, so pausing doesn't waste them)
 const buffOn = k => (save.buffs[k] || 0) > save.seconds;
 const dmgBuff = () => (buffOn("fury") ? 1.4 : 1) * (buffOn("blessed") ? 1.25 : 1);
@@ -669,6 +674,7 @@ const occluders = []; // solid meshes that hide labels and nameplates behind the
 const colliders = []; // axis-aligned boxes [minx, maxx, minz, maxz]
 const circles = [];   // {x, z, r}
 const placedSolids = []; // {x, z, r, isle, o}: signs and props placed in the Studio that you can't walk through
+const placed = []; // { o, g, r, tex } for every sign and prop placed in the Studio
 function addBox(minx, maxx, minz, maxz, y0, y1, mat, collide = true) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(maxx - minx, y1 - y0, maxz - minz), mat);
     m.position.set((minx + maxx) / 2, (y0 + y1) / 2, (minz + maxz) / 2);
@@ -1273,6 +1279,7 @@ function ferrymanTex() {
 }
 function clampToIsland(p, dt) {
     if (p.x > 4500) { clampCasino(p); return; }
+    if (CI()) { CI().clamp(p); return; }
     if (isle === 6) { clampIsle6(p); return; }
     if (isle === 5) { clampIsle5(p, dt); return; }
     if (isle === 4) { clampIsle4(p); return; }
@@ -1966,7 +1973,7 @@ function pickType(px = 0, pz = 0) {
     for (const T of Object.values(TYPES)) if (ok(T)) total += tw(T);
     let r = Math.random() * total;
     for (const [k, T] of Object.entries(TYPES)) { if (!ok(T)) continue; r -= tw(T); if (r <= 0) return k; }
-    return isle === 6 ? "icepine" : isle === 5 ? ({ haven: "palm", coral: "coralwood", skull: "tarpine", frost: "frostpine", storm: "stormoak" })[arch5] : isle === 4 ? "ashwood" : isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
+    return CI() ? CI().fallbackTree : isle === 6 ? "icepine" : isle === 5 ? ({ haven: "palm", coral: "coralwood", skull: "tarpine", frost: "frostpine", storm: "stormoak" })[arch5] : isle === 4 ? "ashwood" : isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
 }
 let lastRareToast = -99;
 function spawnTree(announce = true) {
@@ -1982,6 +1989,7 @@ function spawnTree(announce = true) {
         if (isle === 3 && !treeOk3(x, z)) continue;
         if (isle === 4 && !treeOk4(x, z)) continue;
         if (isle === 6 && !treeOk6(x, z)) continue;
+        if (CI() && !CI().treeOk(x, z)) continue;
         for (const o of trees) if (!o.gone && Math.hypot(x - o.x, z - o.z) < 6) { bad = true; break; }
         if (bad) continue;
         const key = pickType(x, z), T = TYPES[key], mk = T.rush ? null : rollMut();
@@ -2114,7 +2122,7 @@ function dropLogs(x, z, n, back, key = "pine") {
     const T = TYPES[key];
     const meshes = Math.min(n, 14), base = Math.floor(n / meshes), extra = n % meshes; // big drops are stacks of logs, not hundreds of meshes
     for (let i = 0; i < meshes; i++) {
-        const mk = isle >= 2 ? (T.mat || (isle === 6 ? "icicle" : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood")) : null;
+        const mk = isle >= 2 ? (T.mat || (isle >= 6 ? isleMats()[0] : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood")) : null;
         const m = mk ? new THREE.Mesh(matGeo, matMeshMat[mk]) : new THREE.Mesh(logGeo, logMats[key] || logMat);
         const d = Math.random() * 2.5;
         m.position.set(x + back.x * d, groundY(x + back.x * d, z + back.z * d) + 0.4, z + back.z * d);
@@ -2155,7 +2163,7 @@ function newContract() {
     if (isNight() && roll < 0.5) save.contract = { type: "rare", goal: 1, prog: 0, reward: Math.round(170 * m), text: "Fell a rare tree" };
     else if (roll < 0.6) { const g = 4 + Math.floor(Math.random() * 5); save.contract = { type: "fell", goal: g, prog: 0, reward: Math.round(g * 14 * m), text: `Fell ${g} trees` }; }
     else { const g = 12 + Math.floor(Math.random() * 14); save.contract = { type: "sell", goal: g, prog: 0, reward: Math.round(g * 6 * m), text: isle >= 2 ? `Sell ${g} materials at the Trading Post` : `Sell ${g} logs at the mill` }; }
-    if (isle >= 3) save.contract.reward *= isle === 6 ? 2500 : isle === 5 ? 1000 : isle === 4 ? 400 : 40; // later islands pay bigger money
+    if (isle >= 3) save.contract.reward *= isle >= 6 ? 2500 * Math.pow(2, isle - 6) : isle === 5 ? 1000 : isle === 4 ? 400 : 40; // later islands pay bigger money
 }
 function contractProgress(kind, n = 1) {
     const c = save.contract;
@@ -2360,7 +2368,7 @@ function openChest(c) {
     const m = (1 + 0.15 * (save.day - 1)) * (isBlood() ? 2 : 1), r = Math.random();
     let msg;
     if (isle >= 3) { // Mooncap and Ashfall chests: real money and a handful of materials
-        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle === 6 ? 60 : isle === 5 ? 25 : isle === 4 ? 10 : 1)), ks = isle === 6 ? (c.special ? ["frostbloom", "aurora", "permafrost"] : ["icicle", "frostwood", "glacite"]) : isle === 5 ? (c.special ? ["pearl", "iceshard", "stormglass"] : ["driftwood", "salt", "coral", "tar"]) : isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
+        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle >= 6 ? 60 * Math.pow(2, isle - 6) : isle === 5 ? 25 : isle === 4 ? 10 : 1)), ks = CI() ? (c.special ? isleMats().slice(3, 6) : isleMats().slice(0, 3)) : isle === 6 ? (c.special ? ["frostbloom", "aurora", "permafrost"] : ["icicle", "frostwood", "glacite"]) : isle === 5 ? (c.special ? ["pearl", "iceshard", "stormglass"] : ["driftwood", "salt", "coral", "tar"]) : isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
         save.money += cash; save.mats[k] = (save.mats[k] || 0) + n; if (c.special) save.bandages++;
         msg = `${c.special ? (isle === 6 ? "Frozen chest" : isle === 5 ? "Pirate chest" : isle === 4 ? "Scorched chest" : "Moonlit chest") : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
     } else if (c.special) { const cash = Math.round(rand(120, 260) * m); save.money += cash; save.bandages++; msg = `Cursed chest: +${money(cash)} and a bandage`; }
@@ -2450,7 +2458,7 @@ function shopItems() {
     if (shopTab === "race") return raceItems();
     if (shopTab === "pirate") return pirateItems();
     if (shopTab === "hermit") return hermitItems();
-    if (shopTab === "brew") return isle === 6 ? brewItems6() : isle === 5 ? brewItems5() : brewItems();
+    if (shopTab === "brew") { const e = CI() ? CI().econ : isle; return e === 6 ? brewItems6() : e === 5 ? brewItems5() : brewItems(); }
     if (shopTab === "ench") return enchItems();
     if (shopTab === "sellaxe") return sellAxeItems();
     if (shopTab === "sell") return sellItems();
@@ -2497,7 +2505,7 @@ function buy(i) {
 const recipeHtml = r => '<span class="recipe">' + Object.entries(r).map(([k, n]) => { const have = save.mats[k] || 0; return `<span class="rp ${have >= n ? "ok" : "no"}"><img src="${iconURL("m:" + k)}">${Math.min(have, n)}/${n} ${MATS[k].name}</span>`; }).join("") + "</span>";
 function renderShop() {
     $("shopCash").textContent = money(save.money);
-    $("shopName").textContent = shopMode === "forge" && isle === 6 ? "THE FROST FORGE" : shopMode === "brew" && isle === 6 ? "THE SNOW WITCH" : shopMode === "forge" && isle === 5 ? "THE SEA FORGE" : shopMode === "brew" && isle === 5 ? "THE SEA WITCH" : shopMode === "forge" && isle === 4 ? "THE CRUCIBLE" : shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : shopMode === "brew" && isle === 4 ? "THE ALCHEMIST" : SHOP_NAMES[shopMode];
+    $("shopName").textContent = CI() && (shopMode === "forge" || shopMode === "brew") ? (shopMode === "forge" ? "THE FORGE" : "THE WITCH") : shopMode === "forge" && isle === 6 ? "THE FROST FORGE" : shopMode === "brew" && isle === 6 ? "THE SNOW WITCH" : shopMode === "forge" && isle === 5 ? "THE SEA FORGE" : shopMode === "brew" && isle === 5 ? "THE SEA WITCH" : shopMode === "forge" && isle === 4 ? "THE CRUCIBLE" : shopMode === "forge" && isle === 3 ? "THE MOONFORGE" : shopMode === "brew" && isle === 4 ? "THE ALCHEMIST" : SHOP_NAMES[shopMode];
     const tabs = SHOP_TABS[shopMode];
     if (!tabs.some(t => t[0] === shopTab)) shopTab = tabs[0][0];
     const th = tabs.length > 1 ? tabs.map(t => `<button class="tab ${t[0] === shopTab ? "on" : ""}" data-tab="${t[0]}">${t[1]}</button>`).join("") : "";
@@ -2757,7 +2765,7 @@ function updateNameplates() {
         if (!(nowMs - (t._occT || 0) < 120)) { t._occT = nowMs; t._occ = isOccluded(V3(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 1.5, t.z), t.solid); }
         if (t._occ || behindAxe(px, py)) { e.style.display = "none"; continue; }
         const T = t.type, dmg = treeDmg(t);
-        const tm = T.mat || (isle === 6 ? "icicle" : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
+        const tm = T.mat || (isle >= 6 ? isleMats()[0] : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
         const mutHtml = t.mut ? '<i class="mut' + (t.mut === "rainbow" ? ' rbtxt' : '') + '" style="color:' + MUTS[t.mut].col + '">✦ ' + MUTS[t.mut].name + ' ×' + MUTS[t.mut].mult + ' ✦</i>' : '';
         const html = mutHtml + '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle >= 2 ? ' · <em style="color:' + MATS[tm].col + '">' + treeLogs(t) + ' ' + MATS[tm].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
         if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = t.mut ? MUTS[t.mut].col : T.col; e.className = "np" + (t.mut ? " mutd" + (t.mut === "rainbow" ? " rbw" : "") : ""); e.style.setProperty("--mc", t.mut ? MUTS[t.mut].col : T.col); }
@@ -2774,6 +2782,7 @@ function updateNameplates() {
 // ---------- map ----------
 function drawMap() {
     if ($("mapLog")) $("mapLog").style.display = "none";
+    if (CI()) { drawMapC(CI()); return; }
     if (isle === 6) { drawMap6(); return; }
     if (isle === 5) { drawMap5(); return; }
     if (isle === 4) { drawMap4(); return; }
@@ -2990,8 +2999,10 @@ addEventListener("mousemove", e => {
 function nearest() {
     if (inCasino()) return nearestCasino();
     if (isle === 5 && B5.on) return nearest5();
+    { const pn = nearestPlaced(); if (pn) return pn; } // things placed in the Studio: people, notes, chests, shrines, portals
     if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
     if (casino && casino.isle === isle && Math.hypot(player.pos.x - casino.door.x, player.pos.z - casino.door.z) < 3.4) return { k: "casino" };
+    if (CI()) return CI().nearest();
     if (isle === 6) return nearest6();
     if (isle === 5) return nearest5();
     if (isle === 4) return nearest4();
@@ -3015,14 +3026,15 @@ function interact() {
     const n = nearest();
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
-    if (n.k === "ferry6") { openFerry6(); return; }
+    if (n.k === "ferry6" || n.k === "ferryC") { if (n.k === "ferryC" || customIsle(7)) openFerryC(); else openFerry6(); return; }
     if (ISLE5_ACT[n.k]) { ISLE5_ACT[n.k](n); return; }
+    if (n.k === "placed") { placedInteract(n.o); return; }
     if (n.k === "ench") { openEnch(pick(ENCH_SAY)); return; }
     if (n.k === "casino") { enterCasino(); return; }
     if (CS_PROMPTS[n.k]) { casinoInteract(n); return; }
     if (n.k === "smith") {
-        openShop("forge", pick(isle === 6 ? SMITH6_SAY : isle === 5 ? SMITH5_SAY : isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
-    } else if (n.k === "depot") openShop("trade", isle === 6 ? pick(DEPOT6_SAY) : isle === 5 ? pick(DEPOT5_SAY) : isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
+        openShop("forge", pick(isle >= 6 ? SMITH6_SAY : isle === 5 ? SMITH5_SAY : isle === 4 ? SMITH4_SAY : isle === 3 ? SMITH3_SAY : SMITH_SAY));
+    } else if (n.k === "depot") openShop("trade", isle >= 6 ? pick(DEPOT6_SAY) : isle === 5 ? pick(DEPOT5_SAY) : isle === 4 ? pick(DEPOT4_SAY) : isle === 3 ? pick(DEPOT3_SAY) : pick(["Wood, stone, ore, powder... I buy it all.", "Fresh from the trees? Let's see it.", "Gold's up today. Don't tell anyone."]));
     else if (n.k === "witch") openShop("brew", pick(WITCH_SAY));
     else if (n.k === "ferry3") { if (!save.ferry3Talk) { save.ferry3Talk = 1; startTalk("THE FERRYMAN", FERRY3_LINES, () => openFerry3()); } else openFerry3(); }
     else if (n.k === "ferry4") openFerry4();
@@ -3079,6 +3091,15 @@ function pushOutBoxes(p, rad) {
     }
     for (const c of placedSolids) { // solid signs and props placed in the Studio
         if (c.isle !== isle) continue;
+        if (c.box) { // a wall: turned with the prop, so check it in the wall's own frame
+            const dx = p.x - c.x, dz = p.z - c.z, lx = dx * c.cs - dz * c.sn, lz = dx * c.sn + dz * c.cs;
+            const qx = clamp(lx, -c.hx, c.hx), qz = clamp(lz, -c.hz, c.hz), ex = lx - qx, ez = lz - qz, d = Math.hypot(ex, ez);
+            let nx = lx, nz = lz;
+            if (d > 0.0001) { if (d >= rad) continue; nx = qx + ex / d * rad; nz = qz + ez / d * rad; }
+            else { const l = lx + c.hx, r = c.hx - lx, u = lz + c.hz, dn = c.hz - lz, m = Math.min(l, r, u, dn); if (m === l) nx = -c.hx - rad; else if (m === r) nx = c.hx + rad; else if (m === u) nz = -c.hz - rad; else nz = c.hz + rad; }
+            p.x = c.x + nx * c.cs + nz * c.sn; p.z = c.z - nx * c.sn + nz * c.cs;
+            continue;
+        }
         const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz), min = c.r + rad;
         if (d < min && d > 0.0001) { p.x = c.x + dx / d * min; p.z = c.z + dz / d * min; }
     }
@@ -3289,7 +3310,7 @@ function update(dt) {
     camera.getWorldDirection(fwd);
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
-    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt); updateIsle5(dt); updateIsle6(dt);
+    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt); updateIsle5(dt); updateIsle6(dt); updateCustomIsles(dt); placedTick(dt);
     updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateEnchTable(dt); updateWild(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
@@ -4160,6 +4181,7 @@ function openFerry() {
     openPanel("ferry");
 }
 function renderFerry() {
+    if (isle > 6 || (isle === 6 && customIsle(7))) { renderFerryC(); return; } // the way on to the Studio's islands
     if (isle === 6) { renderFerry6(); return; }
     if (isle === 5) { renderFerry5v2(); return; }
     if (isle === 4) { renderFerry4v2(); return; }
@@ -4179,8 +4201,7 @@ function renderFerry() {
     b.classList.toggle("danger", !!ferryConfirm);
 }
 $("ferryBuy").addEventListener("click", () => {
-    if (isle === 6) return;
-    if (isle === 5 ? !rebirth5Ready() : isle === 4 ? !rebirth4Ready() : isle === 3 ? !rebirth3Ready() : isle === 2 ? !rebirth2Ready() : save.money < rebirthCost()) return;
+    if (!rebirthReadyFrom(isle)) return;
     if (!ferryConfirm) { ferryConfirm = 1; renderFerry(); setTimeout(() => { ferryConfirm = 0; if (panel === "ferry") renderFerry(); }, 5000); return; }
     if (isle >= 2) startRebirthRide(isle); else doRebirth();
 });
@@ -4651,7 +4672,7 @@ const LM2 = [
     { name: "OLD MINE", x: -81, z: -28.5, r: 9, col: "#c0a080" },
     { name: "HUNTER'S LODGE", x: 58, z: -14, r: 9, col: "#ff9a6a" }
 ];
-function curLM() { return isle === 4 ? LM4 : isle === 3 ? LM3 : isle === 2 ? LM2 : LANDMARKS; }
+function curLM() { return CI() ? CI().LM : isle === 4 ? LM4 : isle === 3 ? LM3 : isle === 2 ? LM2 : LANDMARKS; }
 let isle2Built = false, altar2 = null, ferry2 = null, ferryman2 = null, ferryBoat2 = null, smithMesh = null, clerkMesh = null, mapBg2 = null;
 const isle2G = new THREE.Group(); // everything on the Highland Isle (and its cave and mine), so another island can hide it
 scene.add(isle2G);
@@ -5172,7 +5193,7 @@ function gunItems() {
     return out;
 }
 function gearItems2() {
-    const k3 = isle === 6 ? 600 : isle === 5 ? 200 : isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
+    const k3 = isle >= 6 ? 600 * Math.pow(2, isle - 6) : isle === 5 ? 200 : isle === 4 ? 60 : isle === 3 ? 6 : 1; // later islands pay more, so they charge more
     return [
         { name: "Ghost Lumberjack", desc: `A spectral helper that chops trees and brings back their materials. Hits for ${ghostHit()} (80% of your axe). Owned: ${save.ghosts}`, cost: ghostCost() * 15, buy() { save.ghosts++; syncGhosts(); } },
         { name: "Bandage", icon: "bandage", desc: `Heals 40 HP (H). Owned: ${save.bandages}`, cost: BANDAGE_COST * 2, buy() { save.bandages++; } },
@@ -5275,7 +5296,7 @@ const DECK = V3(0.55, 2.55, 3.0), deckV = new THREE.Vector3(); // where you stan
 const deckEye = (boat = ferryBoat) => { boat.updateMatrixWorld(); return deckV.copy(DECK).applyMatrix4(boat.matrixWorld); };
 function say(t) { const e = $("rideCap"); e.textContent = t; e.classList.toggle("show", !!t); }
 // which ferry you're riding: Pine Island's (to the Highland Isle) or the Highland Isle's (to Mooncap Isle)
-const rideCfg = n => (n === 5
+const rideCfg = n => (n >= 6 ? ciRideCfg(n) : n === 5
     ? { boat: isle5.boatNext, man: ferryman5, pt: (a, sd) => NEXT5.pt(a, sd), DIR: NEXT5.DIR, A: NEXT5.LEN - 7, S: 4.4, lines: ["The air turns sharp and cold. Ice knocks against the hull...", "A white mountain rises out of the sea."], finish: finishRebirth5 }
     : n === 4
     ? { boat: isle4.boat4, man: ferryman4, pt: dock4Pt, DIR: D4DIR, A: D4LEN - 7, S: 4.4, lines: ["The smoke thins. The sea turns turquoise...", "Islands. Dozens of them, glittering in the sun."], finish: finishRebirth4 }
@@ -5285,15 +5306,15 @@ const rideCfg = n => (n === 5
     ? { boat: ferryBoat2, man: ferryman2, pt: dock2Pt, DIR: D2DIR, A: D2LEN - 7, S: 4.4, lines: ["The violet light grows closer...", "Two moons rise over the water."], finish: finishRebirth2 }
     : { boat: ferryBoat, man: ferryman, pt: dockPt, DIR: FDIR, A: BOAT_A, S: BOAT_S, lines: ["The golden light grows closer...", "A new life awaits."], finish: finishRebirth });
 function startRebirthRide(from = 1) {
-    if (ride || (from === 5 ? !rebirth5Ready() : from === 4 ? !rebirth4Ready() : from === 3 ? !rebirth3Ready() : from === 2 ? !rebirth2Ready() : save.money < rebirthCost())) return;
+    if (ride || !rebirthReadyFrom(from)) return;
     closePanel();
     ride = { phase: "walk", t: 0, from: player.pos.clone(), fx: false, done: false, cfg: rideCfg(from) };
     mouseDown = false; endFishing();
     player.invuln = 99999; player.vel.set(0, 0, 0);
     const fl = labelList.find(l => l.el.textContent === "FERRYMAN" && l.isle === isle); if (fl) fl.visible = false;
-    $("rbSmall").textContent = from === 5 ? "REBIRTH 5 · THE ICEBERG" : from === 4 ? "REBIRTH 4 · THE ARCHIPELAGO" : from === 3 ? "REBIRTH 3 · ASHFALL ISLE" : from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
-    $("rebirthFx").classList.toggle("violet", from === 2); $("rebirthFx").classList.toggle("ember", from === 3); $("rebirthFx").classList.toggle("ocean", from === 4 || from === 5);
-    say(from === 5 ? "All aboard. Wrap up warm." : from === 4 ? "All aboard. Hold on to something." : from === 3 ? "All aboard. Mind the Heartwood, it's still warm." : from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
+    $("rbSmall").textContent = from >= 6 ? `REBIRTH ${from} · ${(customIsle(from + 1) || { name: "?" }).name.toUpperCase()}` : from === 5 ? "REBIRTH 5 · THE ICEBERG" : from === 4 ? "REBIRTH 4 · THE ARCHIPELAGO" : from === 3 ? "REBIRTH 3 · ASHFALL ISLE" : from === 2 ? "REBIRTH 2 · MOONCAP ISLE" : "REBIRTH 1 · THE HIGHLAND ISLE";
+    $("rebirthFx").classList.toggle("violet", from === 2); $("rebirthFx").classList.toggle("ember", from === 3); $("rebirthFx").classList.toggle("ocean", from >= 4);
+    say(from >= 6 ? "All aboard." : from === 5 ? "All aboard. Wrap up warm." : from === 4 ? "All aboard. Hold on to something." : from === 3 ? "All aboard. Mind the Heartwood, it's still warm." : from === 2 ? "All aboard. Hold the relic tight." : "All aboard.");
     sfx(200, 0.9, "sine", 0.1, 2);
     writeSave();
 }
@@ -5726,7 +5747,8 @@ function leaveWorld() {
 }
 function showWorld(n) {
     isle1.visible = n === 1; isle2G.visible = n === 2; isle3G.visible = n === 3; isle4G.visible = n === 4; isle5G.visible = n === 5; isle6G.visible = n === 6; snow6.visible = n === 6; for (const a of isle6.aurora) a.visible = false;
-    for (const G of [isle1, isle2G, isle3G, isle4G, isle5G]) G.matrixWorldAutoUpdate = G.visible; // a hidden island's thousands of objects don't need their matrices updated
+    for (const G of [isle1, isle2G, isle3G, isle4G, isle5G]) G.matrixWorldAutoUpdate = G.visible;
+    for (const C of ciList) { C.G.visible = n === C.n; C.G.matrixWorldAutoUpdate = C.G.visible; } // Studio islands // a hidden island's thousands of objects don't need their matrices updated
     moon2.visible = false; for (const a of aurora) a.visible = false; spores3.visible = n === 3; ash4.visible = n === 4;
     wisps.material.color.setHex(n === 4 ? 0xffa060 : n === 3 ? 0xffb0f0 : 0x9dffd0);
     ghostMat.color.setHex(n === 4 ? 0xffb080 : n === 3 ? 0xd0b0ff : 0x9fe8ff); // the ghosts take on each island's glow
@@ -7691,7 +7713,7 @@ function updateEruption(dt) {
 //  1.4.0: wildlife, a little ecosystem, and decorations on every island
 // =====================================================================
 const wildDone = {}, wildBy = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
-const isleGroup = n => [null, isle1, isle2G, isle3G, isle4G, isle5G, isle6G][n];
+const isleGroup = n => [null, isle1, isle2G, isle3G, isle4G, isle5G, isle6G][n] || (customIsle(n) ? customIsle(n).G : undefined);
 // where wildlife may stand or walk: on land, out of camp, clear of landmarks, lakes, lava and the docks
 function wildOk(x, z, walk) {
     if (isle === 5) return wildOk5(x, z, walk);
@@ -7702,6 +7724,7 @@ function wildOk(x, z, walk) {
     if (isle === 3 && !treeOk3(x, z)) return false;
     if (isle === 4 && !treeOk4(x, z)) return false;
     if (isle === 6 && !treeOk6(x, z)) return false;
+    if (CI() && !CI().treeOk(x, z)) return false;
     return true;
 }
 function wildSpot() {
@@ -12396,7 +12419,7 @@ function buildIsle6() {
         for (let i = 0; i <= D.LEN; i += 3) for (const sd of [-1.9, 1.9]) { const p = D.pt(i, sd); posts.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) bulbs.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
         for (let i = 0; i < D.LEN; i++) for (const sd of [-1.9, 1.9]) { const p = D.pt(i + 0.5, sd, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
         planks.build(); posts.build(); rails.build(); bulbs.build();
-        const [a1, a2, c1] = D.kind === "arr" ? ["WELCOME TO", "THE ICEBERG", "#bfe8ff"] : ["REBIRTH 6", "COMING SOON", "#ffd890"];
+        const [a1, a2, c1] = D.kind === "arr" ? ["WELCOME TO", "THE ICEBERG", "#bfe8ff"] : ["REBIRTH 6", CONTENT_ISLANDS[0] ? String(CONTENT_ISLANDS[0].name || "COMING SOON").toUpperCase() : "COMING SOON", "#ffd890"];
         const s1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(a1, a2, c1) })); s1.position.copy(D.pt(5.5, 0, 3.3)); s1.rotation.y = D.kind === "arr" ? yaw : yaw + Math.PI; scene.add(s1);
         const s2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(D.kind === "arr" ? "ARRIVALS" : "IGLOO CAMP", D.kind === "arr" ? "FROM PORT HAVEN" : "THIS WAY ↑", c1) })); s2.position.copy(D.pt(5.5, 0, 3.3)); s2.rotation.y = D.kind === "arr" ? yaw + Math.PI : yaw; scene.add(s2);
         for (const sd of [-2.0, 2.0]) { const p = D.pt(5.5, sd); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
@@ -13057,8 +13080,307 @@ function updateAbilities(dt) {
     }
 }
 
+// =====================================================================
+//  STUDIO ISLANDS: islands made in Tree Sim 4 Studio (content/islands.js). Each one is the next rebirth:
+//  the first is island 7 (Rebirth 6, sailing from the Iceberg), the next is island 8, and so on.
+//  A Studio island is built from numbers: its shape, hills, a mountain, a lake, colours, its trees and its ticket.
+// =====================================================================
+const giveHammer = h => { const hm = new THREE.Group(); hm.position.set(0, -0.64, 0.05); h.armR.add(hm); part(hm, BOX, lamb(0x6a4a2a), 0, 0, 0.22, 0.05, 0.05, 0.5); h.hammer = part(hm, BOX, lamb(0x2a2a30), 0, 0, 0.48, 0.24, 0.13, 0.13); return h; }; // smiths hammer away (updateNpcs swings it)
+const ciHex = (c, d) => (/^#[0-9a-f]{6}$/i.test(String(c)) ? hexN(c) : d);
+const ciEsc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function makeCI(d, n) {
+    const C = { d, n, built: false, G: new THREE.Group(), npcs: [], emit: [], waterGeo: null, boatArr: null, boatNext: null, man: null, fireLight: null, mapBg: null };
+    C.G.visible = false; scene.add(C.G);
+    const R = C.R = clamp(+d.radius || 130, 70, 220), wob = clamp(d.wobble === undefined ? 0.1 : +d.wobble, 0, 0.35), sd = +d.seed || 1.3;
+    const ph = [sd * 1.7, sd * 2.3 + 1, sd * 3.1 + 2, sd * 0.7 + 3];
+    C.shoreR = th => R * (1 + wob * (0.55 * Math.sin(2 * th + ph[0]) + 0.3 * Math.sin(3 * th + ph[1]) + 0.18 * Math.sin(5 * th + ph[2]) + 0.07 * Math.sin(11 * th + ph[3])));
+    C.shoreAt = (x, z) => C.shoreR(Math.atan2(z, x));
+    C.extent = R * (1 + wob * 1.2) + 14;
+    const P = C.P = clamp(d.plateau === undefined ? 2 : +d.plateau, 0.6, 14);
+    const hills = clamp(d.hills === undefined ? 8 : +d.hills, 0, 40), hs = clamp(+d.hillSize || 1, 0.3, 3), cliffs = clamp(+d.cliffs || 0, 0, 1);
+    C.beach = clamp(d.beach === undefined ? 6 : +d.beach, 2, 24);
+    const at = (deg, f) => ({ x: Math.cos(deg * Math.PI / 180) * R * f, z: Math.sin(deg * Math.PI / 180) * R * f });
+    const M = C.M = d.mountain && d.mountain.on ? { ...at(+d.mountain.dir || 0, clamp(+d.mountain.dist || 0.55, 0.25, 0.8)), r: clamp(+d.mountain.r || 40, 15, 90), h: clamp(+d.mountain.h || 35, 5, 90) } : null;
+    const L = C.L = d.lake && d.lake.on ? { ...at(d.lake.dir === undefined ? 120 : +d.lake.dir, clamp(+d.lake.dist || 0.5, 0.25, 0.75)), r: clamp(+d.lake.r || 16, 6, 40) } : null;
+    const mkDock = (deg, len, kind) => { const th = deg * Math.PI / 180, DIR = V3(Math.cos(th), 0, Math.sin(th)), PERP = V3(-DIR.z, 0, DIR.x), Rr = C.shoreR(th) - 3; return { kind, th, LEN: len, DIR, PERP, B: V3(DIR.x * Rr, 0, DIR.z * Rr), pt(a, s = 0, y = 0) { return V3(this.B.x + this.DIR.x * a + this.PERP.x * s, y, this.B.z + this.DIR.z * a + this.PERP.z * s); } }; };
+    C.ARR = mkDock(d.arrDir === undefined ? 125 : +d.arrDir, 22, "arr"); C.NEXT = mkDock(d.nextDir === undefined ? -35 : +d.nextDir, 24, "next"); C.DOCKS = [C.ARR, C.NEXT];
+    { const p = C.NEXT.pt(C.NEXT.LEN - 3.5, -0.9); C.FERRY = { x: p.x, z: p.z }; }
+    C.BED = { x: -9, z: 6 }; C.SMITH = { x: -11, z: -7 }; C.DEPOT = { x: 11, z: -7 }; C.WITCH = { x: 10, z: 8 };
+    C.SMITH_AT = standPt(C.SMITH); C.DEPOT_AT = standPt(C.DEPOT); C.WITCH_AT = standPt(C.WITCH);
+    C.name = String(d.name || "New Island").slice(0, 40);
+    C.LM = [{ name: String(d.campName || "CAMP").toUpperCase(), x: 0, z: 0, r: 24, col: "#ffd890", camp: true }];
+    if (M) C.LM.push({ name: String(d.mountain.name || "THE PEAK").toUpperCase(), x: M.x, z: M.z, r: Math.min(18, M.r * 0.4), col: "#e8f0ff" });
+    if (L) C.LM.push({ name: String(d.lake.name || "THE LAKE").toUpperCase(), x: L.x, z: L.z, r: L.r + 2, col: "#9fe8ff" });
+    const ramp = (x, z, h) => { if (P <= 1) return h; for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along < -36 || along > 6 || Math.abs(side) > 7) continue; h = lerp(lerp(0.35, P, clamp(-along / 32, 0, 1)), h, sstep(3.6, 7, Math.abs(side))); } return h; };
+    C.terrain = (x, z) => {
+        const dd = Math.hypot(x, z), inside = C.shoreAt(x, z) - dd;
+        if (inside < 2.5) return Math.max(-3.4, -(2.5 - inside) * 0.7);
+        let h = P * sstep(2.5, 2.5 + lerp(C.beach, 2.5, cliffs), inside);                              // the beach, or a sea cliff
+        h += Math.max(0, fbm2(x * 0.02 / hs + sd * 3, z * 0.02 / hs - sd * 2, 4) - 0.4) * hills * 2 * sstep(26, 52, dd) * sstep(6, 26, inside); // rolling hills
+        h += fbm2(x * 0.08, z * 0.08, 2) * 0.6 * sstep(4, 14, inside);
+        if (M) { const dm = Math.hypot(x - M.x, z - M.z); if (dm < M.r) h = Math.max(h, P + M.h * Math.pow(1 - dm / M.r, 1.6) * (0.9 + fbm2(x * 0.05, z * 0.05, 2) * 0.2)); }
+        h = lerp(P, h, sstep(18, 34, dd));                                                            // a flat camp
+        if (L) { const dl = Math.hypot(x - L.x, z - L.z); h = lerp(h, P - 1.6, sstep(L.r + 7, L.r - 1, dl)); }
+        return ramp(x, z, h);
+    };
+    C.groundY = (x, z) => { for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 3 && along < D.LEN + 3 && Math.abs(side) < 3) return 0; } return Math.max(-0.4, C.terrain(x, z)); };
+    C.clamp = p => {
+        for (const D of C.DOCKS) { const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP); if (along > 3.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; } }
+        const lim = C.shoreAt(p.x, p.z) - 3, dd = Math.hypot(p.x, p.z); if (dd > lim) { p.x *= lim / dd; p.z *= lim / dd; }
+    };
+    C.treeOk = (x, z) => C.DOCKS.every(D => Math.hypot(x - D.B.x, z - D.B.z) > 16) && (!L || Math.hypot(x - L.x, z - L.z) > L.r + 4) && (!M || Math.hypot(x - M.x, z - M.z) > 8);
+    const col = d.colors || {};
+    C.cols = { grass: ciHex(col.grass, 0x4a8a3a), grass2: ciHex(col.grass2, 0x3a7a30), sand: ciHex(col.sand, 0xe0d0a0), rock: ciHex(col.rock, 0x7a7a84), snow: ciHex(col.snow, 0xf4f8ff), camp: ciHex(col.camp, 0x8a7458), shallow: ciHex(col.shallow, 0x5ac8d8), deep: ciHex(col.deep, 0x0e2a4a), bush: ciHex(col.bush, 0x2f6a3a) };
+    C.snowline = d.snowline === undefined || d.snowline === "" ? 9999 : +d.snowline;
+    // the economy (materials, recipes, brews) comes from one of the game's islands; the numbers grow every island
+    C.econ = [2, 3, 4, 5, 6].includes(+d.economy) ? +d.economy : 6;
+    MATS_BY_ISLE[n] = MATS_BY_ISLE[C.econ]; if (RECIPES[C.econ]) RECIPES[n] = RECIPES[C.econ];
+    ENCH_AT[n] = { x: 0, z: -10.5 }; wildBy[n] = []; wildDone[n] = true;
+    C.trees = (Array.isArray(d.trees) ? d.trees : []).filter(k => TYPES[k] && !TYPES[k].custom && !TYPES[k].rush);
+    for (const k of C.trees) { const T = TYPES[k]; T.isl = [...(T.isl || [1]).filter(i => i !== n), n]; } // borrowed trees grow here too
+    C.fallbackTree = C.trees[0] || Object.keys(TYPES).find(k => TYPES[k].custom && (TYPES[k].isl || []).includes(n)) || "pine";
+    C.lines = [String(d.rideLine1 || "The sea goes quiet. Something new waits ahead..."), String(d.rideLine2 || `${C.name} rises out of the sea.`)];
+    const rb = d.rebirth || {};
+    C.cost = Math.max(0, Math.round(rb.cost === undefined ? 25000000 * Math.pow(2, n - CI_BASE) : +rb.cost));
+    C.items = {}; for (const [k, v] of Object.entries(rb.items || {})) if (MATS[k] && +v > 0) C.items[k] = Math.round(+v);
+    C.ready = () => save.money >= C.cost && Object.entries(C.items).every(([k, v]) => (save.mats[k] || 0) >= v);
+    C.nearest = () => {
+        const px = player.pos.x, pz = player.pos.z, near = (p, r) => Math.hypot(px - p.x, pz - p.z) < r;
+        if (near(C.SMITH_AT, 3.4)) return { k: "smith" };
+        if (near(C.DEPOT_AT, 3.4)) return { k: "depot" };
+        if (near(C.WITCH_AT, 3.4)) return { k: "witch" };
+        if (near(C.BED, 3.6)) return { k: "bed" };
+        if (near(C.FERRY, 3.4)) return { k: "ferryC" };
+        for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
+        return null;
+    };
+    return C;
+}
+function buildCI(C) {
+    const n = C.n, d = C.d, cols = C.cols, P = C.P, prevB = curBuild, prevAdd = addTgt;
+    C.built = true; curBuild = n; addTgt = C.G;
+    colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
+    // ----- the land: baked once, coloured by height and slope -----
+    {
+        const size = Math.ceil(C.extent * 2), segs = clamp(Math.round(size / 1.6), 120, 240);
+        const g = new THREE.PlaneGeometry(size, size, segs, segs); g.rotateX(-Math.PI / 2);
+        const pos = g.attributes.position;
+        for (let i = 0; i < pos.count; i++) pos.setY(i, C.terrain(pos.getX(i), pos.getZ(i)));
+        g.computeVertexNormals();
+        const nor = g.attributes.normal, out = [], c = new THREE.Color(), cs = {};
+        for (const k in cols) cs[k] = new THREE.Color(cols[k]);
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), z = pos.getZ(i), y = pos.getY(i), ny = nor.getY(i), dd = Math.hypot(x, z), inside = C.shoreAt(x, z) - dd;
+            if (y < -0.3) c.copy(cs.sand).multiplyScalar(0.55);
+            else if (ny < 0.72) c.copy(cs.rock);
+            else if (y > C.snowline) c.copy(cs.snow);
+            else if (inside < C.beach + 3 && y < P * 0.6 + 0.6) c.copy(cs.sand);
+            else if (dd < SAFE_R + 1) c.copy(cs.camp);
+            else c.copy(cs.grass).lerp(cs.grass2, clamp(fbm2(x * 0.05, z * 0.05, 2), 0, 1));
+            c.offsetHSL(0, 0, (Math.random() - 0.5) * 0.05);
+            out.push(c.r, c.g, c.b);
+        }
+        g.setAttribute("color", new THREE.Float32BufferAttribute(out, 3));
+        scene.add(terrainMesh[n] = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+        const wg = new THREE.PlaneGeometry(900, 900, 150, 150); wg.rotateX(-Math.PI / 2);
+        const wp = wg.attributes.position, wc = [], cc = new THREE.Color(), sh = new THREE.Color(cols.shallow), dp = new THREE.Color(cols.deep), mid = sh.clone().lerp(dp, 0.5);
+        for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), k = clamp((Math.hypot(x, z) - C.shoreAt(x, z)) / 40, 0, 1); cc.copy(sh).lerp(mid, clamp(k * 2, 0, 1)).lerp(dp, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
+        wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3)); C.waterGeo = wg;
+    }
+    if (C.L) {
+        const w = new THREE.Mesh(new THREE.CircleGeometry(C.L.r + 0.6, 40), new THREE.MeshLambertMaterial({ color: cols.shallow, emissive: 0x05121a, transparent: true, opacity: 0.85 }));
+        w.rotation.x = -Math.PI / 2; w.position.set(C.L.x, P - 0.5, C.L.z); scene.add(w);
+        const l = label(C.LM.find(q => q.x === C.L.x).name, "#9fe8ff", 3.2, 0.8); l.position.set(C.L.x, P + 4, C.L.z);
+    }
+    if (C.M) { const l = label(C.LM.find(q => q.x === C.M.x).name, "#e8f0ff", 3.4, 0.8); l.position.set(C.M.x, C.terrain(C.M.x, C.M.z) + 8, C.M.z); l.maxD = 400; l.blurK = 0.3; }
+    // ----- the camp: a fire, a bed, the forge, the trading post and the witch -----
+    {
+        const stones = batch(lamb(0x6a6a74)); for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, P + 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); } stones.build();
+        const lg = batch(woodDark); for (let i = 0; i < 4; i++) lg.add(CYL6, 0, P + 0.25, -3, Math.PI / 2, i * 0.8, 0, 0.12, 1.3, 0.12); lg.build();
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.7, 6), glowM(0xff8a2a)); flame.position.set(0, P + 1.05, -3);
+        const core = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.0, 5), glowM(0xffe070)); core.position.set(0, P + 0.72, -3);
+        scene.add(flame, core); fires.push({ flame, core, ph: srand() * 6 });
+        const fl = new THREE.PointLight(0xff9a40, 18, 18, 1.6); fl.position.set(0, P + 2, -3); scene.add(fl); C.fireLight = fl;
+        circles.push({ x: 0, z: -3, r: 1.3 }); C.emit.push({ x: 0, y: P + 2, z: -3, rate: 1.0, acc: 0.3 });
+        const cl = label(C.LM[0].name, "#ffd890", 3.4, 0.8); cl.position.set(0, P + 4.6, -3); cl.maxD = 90;
+        const tent = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.6, 4), lamb(ciHex(d.colors && d.colors.tent, 0xc89a5a))); tent.position.set(C.BED.x - 1.5, P + 1.3, C.BED.z + 1.6); tent.rotation.y = Math.PI / 4; scene.add(tent);
+        const bed = new THREE.Group(); bed.position.set(C.BED.x, P, C.BED.z); scene.add(bed); part(bed, BOX, wood, 0, 0.3, 0, 1.4, 0.3, 2.3); part(bed, BOX, lamb(0x8a2a3a), 0, 0.52, -0.3, 1.3, 0.14, 1.5);
+        circles.push({ x: C.BED.x - 1.5, z: C.BED.z + 1.6, r: 1.8 });
+        const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(C.BED.x, P + 3.2, C.BED.z);
+        const gS = stall3(C.SMITH, "THE FORGE", "CRAFT AXES · GUNS", "#ffb060", 0x4a3020);
+        const smith = makeHumanoid({ face: "smith", skin: 0xe8b890, shirt: 0x5a3a2a, pants: 0x2a2a3a, apron: 0x3a2a1a, beard: 0x6a4a2a, hat: "cap", hatCol: 0x2a2a30, wide: 1.3, belly: true });
+        smith.g.position.set(0, 0, -0.6); gS.add(smith.g); smith.yaw = gS.rotation.y; C.npcs.push(giveHammer(smith));
+        const l1 = label("THE FORGE", "#ffb060", 3.2, 0.8); l1.position.set(C.SMITH.x, P + 6.2, C.SMITH.z);
+        const gD = stall3(C.DEPOT, "TRADING POST", "SELL MATERIALS", "#ffd040", 0x4a3020);
+        const clerk = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0x2a6a3a, vest: 0xf2f2f2, pants: 0x2a2a3a, hair: 0x8a5a2a, hat: "cap", hatCol: 0xf2f2f2 });
+        clerk.g.position.set(0, 0, -0.6); gD.add(clerk.g); clerk.yaw = gD.rotation.y; C.npcs.push(clerk);
+        const l2 = label("TRADING POST", "#ffd040", 3.6, 0.8); l2.position.set(C.DEPOT.x, P + 6.2, C.DEPOT.z);
+        const gW = stall3(C.WITCH, "THE WITCH", "BREWS · TONICS", "#c8a0ff", 0x3a2a5a);
+        const witch = makeHumanoid({ face: "witch", skin: 0xc8e0b0, shirt: 0x3a2a5a, pants: 0x1a1a2a, hair: 0x2a1a3a, hat: "witch", hatCol: 0x2a1a3a });
+        witch.g.position.set(0, 0, -0.6); gW.add(witch.g); witch.yaw = gW.rotation.y; C.npcs.push(witch);
+        const l3 = label("THE WITCH", "#c8a0ff", 3.2, 0.8); l3.position.set(C.WITCH.x, P + 6.2, C.WITCH.z);
+        for (const g of [gS, gD, gW]) g.position.y = P;
+    }
+    // ----- docks: arrivals, and the ferry to the next island -----
+    const nx = customIsle(n + 1);
+    for (const D of C.DOCKS) {
+        const yaw = Math.atan2(D.DIR.x, D.DIR.z);
+        const planks = batch(lamb(D.kind === "arr" ? 0x6a5a4a : 0x5a4a3a)), posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(glowM(D.kind === "arr" ? 0xbfe8ff : 0xffd890));
+        for (let i = 0; i < D.LEN; i++) { const p = D.pt(i + 0.5); planks.add(BOX, p.x, 0.22, p.z, 0, yaw, 0, 3.6, 0.14, 0.92); }
+        for (let i = 0; i <= D.LEN; i += 3) for (const s of [-1.9, 1.9]) { const p = D.pt(i, s); posts.add(CYL6, p.x, -0.9, p.z, 0, 0, 0, 0.12, 4.2, 0.12); if (i % 6 === 0) bulbs.add(ICO, p.x, 1.45, p.z, 0, 0, 0, 0.16); }
+        for (let i = 0; i < D.LEN; i++) for (const s of [-1.9, 1.9]) { const p = D.pt(i + 0.5, s, 0.95); rails.add(BOX, p.x, 0.95, p.z, 0, yaw, 0, 0.08, 0.1, 1.02); }
+        planks.build(); posts.build(); rails.build(); bulbs.build();
+        const [a1, a2, c1] = D.kind === "arr" ? ["WELCOME TO", C.name.toUpperCase(), "#bfe8ff"] : [`REBIRTH ${n}`, nx ? nx.name.toUpperCase() : "COMING SOON", "#ffd890"];
+        const s1 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(a1, a2, c1) })); s1.position.copy(D.pt(5.5, 0, 3.3)); s1.rotation.y = D.kind === "arr" ? yaw : yaw + Math.PI; scene.add(s1);
+        const s2 = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.5), new THREE.MeshBasicMaterial({ map: signTex(D.kind === "arr" ? "ARRIVALS" : C.LM[0].name, D.kind === "arr" ? "" : "THIS WAY ↑", c1) })); s2.position.copy(D.pt(5.5, 0, 3.3)); s2.rotation.y = D.kind === "arr" ? yaw + Math.PI : yaw; scene.add(s2);
+        for (const s of [-2.0, 2.0]) { const p = D.pt(5.5, s); const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 6), woodDark); m.position.set(p.x, 1.8, p.z); scene.add(m); }
+        const dl = label(D.kind === "arr" ? "ARRIVALS" : `REBIRTH ${n} FERRY`, c1, 3.2, 0.7); dl.position.copy(D.pt(5.5, 0, 4.6)); dl.maxD = 80;
+        const b = makeBoat3(D.kind === "arr" ? 0x1a2a3a : 0x2a2a3a, D.kind === "arr" ? 0x4a7a9a : 0x8a8a9a, D.kind === "arr" ? 0x9fe8ff : 0xffd890);
+        b.position.copy(D.pt(D.LEN - 7, 4.4, -0.15)); b.rotation.y = yaw; scene.add(b);
+        if (D.kind === "arr") C.boatArr = b; else C.boatNext = b;
+        const lp = batch(woodDark), lgl = batch(glowM(0xffd890)), land = Math.hypot(D.B.x, D.B.z);
+        for (let s = 4, k = 0; s < land - 26; s += 9, k++) { const sd = k % 2 ? 3.2 : -3.2, x = D.B.x - D.DIR.x * s + D.PERP.x * sd, z = D.B.z - D.DIR.z * s + D.PERP.z * sd, y = C.groundY(x, z); lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lgl.add(ICO, x, y + 2.5, z, 0, 0, 0, 0.18); }
+        lp.build(); lgl.build();
+    }
+    {
+        const yaw = Math.atan2(C.NEXT.DIR.x, C.NEXT.DIR.z);
+        C.man = makeFerrymanFigure(0x2a2a3a, 0x8a8a9a, 0xffd890); C.man.position.set(C.FERRY.x, 0.3, C.FERRY.z); C.man.rotation.y = yaw + Math.PI; scene.add(C.man);
+        const fm = label("FERRYMAN", "#ffd890", 2.6, 0.6); fm.position.set(C.FERRY.x, 4.7, C.FERRY.z); fm.maxD = 60;
+    }
+    // ----- scenery and chests -----
+    const okSpot = (x, z) => { const dd = Math.hypot(x, z); return dd > SAFE_R + 2 && dd < C.shoreAt(x, z) - 10 && C.treeOk(x, z); };
+    const scatter = (count, fn) => { let made = 0, guard = 0; while (made < count && guard++ < count * 40) { const a = srand() * 6.283, dd = srange(SAFE_R + 2, C.shoreR(a) - 10), x = Math.cos(a) * dd, z = Math.sin(a) * dd; if (!okSpot(x, z)) continue; fn(x, z, C.terrain(x, z)); made++; } };
+    const decor = clamp(d.decor === undefined ? 1 : +d.decor, 0, 3);
+    {
+        const rock = batch(lamb(cols.rock)), bush = batch(lamb(cols.bush));
+        scatter(Math.round(40 * decor), (x, z, y) => { const s = srange(0.5, 1.5); rock.add(ICO, x, y + s * 0.3, z, srand() * 3, srand() * 3, 0, s, s * 0.7, s); if (s > 1.2) circles.push({ x, z, r: s * 0.85 }); });
+        scatter(Math.round(60 * decor), (x, z, y) => { for (let k = 0; k < 3; k++) bush.add(SPH, x + srange(-0.5, 0.5), y + 0.35, z + srange(-0.5, 0.5), 0, 0, 0, srange(0.35, 0.7)); });
+        rock.build(); bush.build();
+    }
+    for (let i = 0; i < 8; i++) { let guard = 0; while (guard++ < 60) { const a = srand() * 6.283, dd = srange(36, C.shoreR(a) - 14), x = Math.cos(a) * dd, z = Math.sin(a) * dd; if (!okSpot(x, z)) continue; const c = makeChest(x, z, srand() * 6, i % 4 === 0); const y = C.terrain(x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; break; } }
+    for (const rec of placed) if (+rec.o.isle === n && rec.g.parent !== C.G) C.G.add(rec.g); // signs and props placed here in the Studio
+    addTgt = prevAdd; curBuild = prevB;
+}
+function enterCI(C) {
+    leaveWorld();
+    if (!C.built) { buildCI(C); snapWorld(C.n); } else loadWorld(C.n);
+    isle = C.n; save.isle = C.n;
+    showWorld(C.n);
+    groundFn = C.groundY;
+    waterMesh.geometry = C.waterGeo; waterMesh.material.needsUpdate = true;
+    smokeEmit.length = 0; C.emit.forEach(e => smokeEmit.push(e));
+    RESPAWN.x = 2; RESPAWN.z = 4;
+    syncGhosts();
+    resetIsleTrees(clamp(+C.d.treeCount || 90, 10, 220));
+    resetChests();
+}
+function updateCustomIsles(dt) {
+    const C = CI(); if (!C || !C.built) return;
+    updateNpcs(dt, C.npcs);
+    if (C.fireLight) C.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
+    for (const [b, ph] of [[C.boatArr, 0], [C.boatNext, 1.3]]) if (b) { b.position.y = -0.15 + Math.sin(time * 1.1 + ph) * 0.07; b.rotation.z = Math.sin(time * 0.9 + ph) * 0.03; }
+    if (C.man) C.man.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
+}
+// ---- the ferry onwards: from the Iceberg to the first Studio island, and from each Studio island to the next ----
+function rebirthReadyFrom(from) {
+    if (from >= 6) { const nx = customIsle(from + 1); return !!nx && nx.ready(); }
+    return from === 5 ? rebirth5Ready() : from === 4 ? rebirth4Ready() : from === 3 ? rebirth3Ready() : from === 2 ? rebirth2Ready() : save.money >= rebirthCost();
+}
+function openFerryC() {
+    ferryConfirm = 0;
+    const nx = customIsle(isle + 1);
+    $("ferrySay").textContent = "“" + (nx ? String(nx.d.ferryLine || `Next stop: ${nx.name}. Hold on tight.`) : "That's as far as the sea goes. For now.") + "”";
+    openPanel("ferry");
+}
+function renderFerryC() {
+    const nx = customIsle(isle + 1), rb = save.rebirths || 0, b = $("ferryBuy");
+    document.querySelector("#panelFerry h2").textContent = nx ? `REBIRTH ${isle}: THE FERRY TO ${nx.name.toUpperCase()}` : "THE FERRYMAN";
+    let html;
+    if (!nx) {
+        html = `<div class="fprice">Rebirths so far: <b>★${rb}</b> <span>(+${rb * 50}% cash, +${rb * 10}% damage, +${rb * 50} max HP)</span></div><div class="flist"><div class="gain"><h4>REBIRTH ${isle}</h4>Nothing past here yet. The Ferryman is still charting the way.</div></div>`;
+        b.disabled = true; b.classList.remove("danger"); b.textContent = `REBIRTH ${isle}: COMING SOON`;
+    } else {
+        const cashOk = save.money >= nx.cost, items = Object.entries(nx.items), miss = items.find(([k, v]) => (save.mats[k] || 0) < v), ok = nx.ready();
+        html = `<div class="fprice">Rebirth ${isle} ticket: <b>${money(nx.cost)}</b>${items.map(([k, v]) => ` + <b>${v} ${ciEsc(MATS[k].name)}</b>`).join("")}</div>
+          <div class="flist">${items.map(([k, v]) => { const have = save.mats[k] || 0; return `<div class="${have >= v ? "keep" : "lose"}"><h4>${have >= v ? "✔" : "✘"} ${ciEsc(MATS[k].name.toUpperCase())}</h4>${have} / ${v}</div>`; }).join("")}
+            <div class="${cashOk ? "keep" : "lose"}"><h4>${cashOk ? "✔" : "✘"} CASH</h4>${money(save.money)} of ${money(nx.cost)}</div>
+            <div class="lose"><h4>YOU LEAVE BEHIND</h4>cash and materials · every axe and gun · all upgrades and potions · the day count</div>
+            <div class="gain"><h4>YOU GAIN (stacks every rebirth)</h4>★ +50% cash · ★ +10% damage · ★ +50 max health · ★ ${ciEsc(nx.name.toUpperCase())}${nx.d.sub ? ": " + ciEsc(nx.d.sub) : ""}</div></div>`;
+        b.disabled = !ok; b.classList.toggle("danger", ok && !!ferryConfirm);
+        b.textContent = miss ? `BRING ${miss[1] - (save.mats[miss[0]] || 0)} MORE ${MATS[miss[0]].name.toUpperCase()}` : !cashOk ? "NEED " + money(nx.cost - save.money) + " MORE" : ferryConfirm ? "CLICK AGAIN TO CONFIRM" : `SAIL TO ${nx.name.toUpperCase()}`;
+    }
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+}
+function ciRideCfg(from) {
+    const nx = customIsle(from + 1), C = customIsle(from), lines = nx ? nx.lines : ["...", "..."], finish = () => finishRebirthC(from + 1);
+    if (from === 6) return { boat: isle6.boatNext, man: ferryman6, pt: (a, s) => NEXT6.pt(a, s), DIR: NEXT6.DIR, A: NEXT6.LEN - 7, S: 4.4, lines, finish };
+    return { boat: C.boatNext, man: C.man, pt: (a, s) => C.NEXT.pt(a, s), DIR: C.NEXT.DIR, A: C.NEXT.LEN - 7, S: 4.4, lines, finish };
+}
+function finishRebirthC(n) {
+    const C = customIsle(n); if (!C) { ride = null; return; }
+    save.rebirths = n - 1;
+    if (typeof B5 !== "undefined") B5.on = false;
+    resetForRebirth();
+    enterCI(C); newContract();
+    holdingReset();
+    player.maxHp = maxHpNow(); player.hp = player.maxHp;
+    const a = C.ARR.pt(C.ARR.LEN - 9, 0);
+    player.pos.set(a.x, 1.75, a.z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(C.ARR.DIR.x, C.ARR.DIR.z); player.pitch = 0;
+    player.invuln = 6; ride = null;
+    writeSave(); say("");
+    setTimeout(() => {
+        $("rebirthFx").classList.remove("show"); say(C.name.toUpperCase()); setTimeout(() => say(""), 3600);
+        toast(`You are reborn. ★${save.rebirths}  +${save.rebirths * 50}% cash, +${save.rebirths * 10}% damage, +${save.rebirths * 50} max HP.`, "cash");
+        toast(String(C.d.arrive || `Welcome to ${C.name}. Walk inland to ${C.LM[0].name.toLowerCase()}: the forge, the trading post and the witch are there.`), "good");
+    }, 2200);
+}
+function drawMapC(C) {
+    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, E = C.extent + 6, sc = (S / 2 - 14) / E;
+    if (!C.mapBg) {
+        const N = 320, oc = document.createElement("canvas"); oc.width = oc.height = N;
+        const og = oc.getContext("2d"), img = og.createImageData(N, N), col = new THREE.Color(), grass = new THREE.Color(C.cols.grass), rock = new THREE.Color(C.cols.rock), snow = new THREE.Color(C.cols.snow), sand = new THREE.Color(C.cols.sand);
+        for (let py = 0; py < N; py++) for (let px = 0; px < N; px++) {
+            const x = ((px + 0.5) / N - 0.5) * E * 2, z = ((py + 0.5) / N - 0.5) * E * 2, inside = C.shoreAt(x, z) - Math.hypot(x, z), i = (py * N + px) * 4;
+            if (inside < 0) col.setRGB(0.08, 0.18, 0.3);
+            else if (C.L && Math.hypot(x - C.L.x, z - C.L.z) < C.L.r) col.setRGB(0.45, 0.72, 0.9);
+            else { const y = C.terrain(x, z), shd = clamp((C.terrain(x - 2, z - 2) - C.terrain(x + 2, z + 2)) * 0.05, -0.4, 0.4); col.copy(y > C.snowline ? snow : inside < C.beach + 2 ? sand : y > C.P + 14 ? rock : grass).multiplyScalar(1 + shd); }
+            img.data[i] = clamp(col.r * 255, 0, 255); img.data[i + 1] = clamp(col.g * 255, 0, 255); img.data[i + 2] = clamp(col.b * 255, 0, 255); img.data[i + 3] = 255;
+        }
+        og.putImageData(img, 0, 0); C.mapBg = oc;
+    }
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#0a1a2a"; g.beginPath(); g.arc(c, c, c - 6, 0, 7); g.fill(); g.strokeStyle = "rgba(255,216,144,.5)"; g.lineWidth = 3; g.stroke();
+    g.save(); g.beginPath(); g.arc(c, c, c - 8, 0, 7); g.clip(); g.drawImage(C.mapBg, c - E * sc, c - E * sc, E * 2 * sc, E * 2 * sc); g.restore();
+    const X = x => c + x * sc, Z = z => c + z * sc;
+    g.font = "bold 11px Consolas"; g.textAlign = "center"; g.lineWidth = 3; g.strokeStyle = "#000";
+    for (const lm of C.LM) { g.fillStyle = lm.col; g.strokeText(lm.name, X(lm.x), Z(lm.z) - 6); g.fillText(lm.name, X(lm.x), Z(lm.z) - 6); }
+    for (const [D, txt, colr] of [[C.ARR, "ARRIVALS", "#bfe8ff"], [C.NEXT, `REBIRTH ${C.n} FERRY`, "#ffd890"]]) { const e = D.pt(D.LEN); g.strokeStyle = colr; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D.B.x), Z(D.B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); g.fillStyle = colr; g.strokeStyle = "#000"; g.lineWidth = 3; g.strokeText(txt, X(e.x), Z(e.z) + 14); g.fillText(txt, X(e.x), Z(e.z) + 14); }
+    for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
+    for (const t of trees) { if (t.gone || t.dying || t.boss) continue; g.fillStyle = t.mut ? mutCol(t.mut) : t.type.rare ? t.type.col : "rgba(40,60,40,.9)"; g.beginPath(); g.arc(X(t.x), Z(t.z), 2.5, 0, 7); g.fill(); }
+    g.fillStyle = "#fff"; g.font = "bold 12px Consolas"; g.fillText("N", c, 22); g.fillText(C.name.toUpperCase(), c, S - 16);
+    g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw); g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke(); g.restore();
+}
+// the Studio swaps an island's data and rebuilds it live (or adds a new one at the end)
+function ciRemoveLabels(n) { for (let i = labelList.length - 1; i >= 0; i--) if (labelList[i].isle === n) { labelList[i].el.remove(); labelList.splice(i, 1); } }
+function ciSet(i, d) {
+    const n = CI_BASE + i, old = ciList[i], here = isle === n;
+    for (const T of Object.values(TYPES)) if (!T.custom && T.isl && T.isl.includes(n)) T.isl = T.isl.filter(q => q !== n);
+    if (old) { scene.remove(old.G); ciRemoveLabels(n); delete worldSnap[n]; terrainMesh[n] = null; }
+    ciList[i] = makeCI(d, n);
+    if (here) { ciList[i].G.visible = true; enterCI(ciList[i]); }
+    return ciList[i];
+}
+function ciDropLast() {
+    const i = ciList.length - 1; if (i < 0 || isle === CI_BASE + i) return false;
+    const n = CI_BASE + i, old = ciList[i];
+    for (const T of Object.values(TYPES)) if (!T.custom && T.isl && T.isl.includes(n)) T.isl = T.isl.filter(q => q !== n);
+    scene.remove(old.G); ciRemoveLabels(n); delete worldSnap[n]; terrainMesh[n] = null; ciList.pop();
+    return true;
+}
+for (const d of Array.isArray(CONTENT_ISLANDS) ? CONTENT_ISLANDS : []) if (d && typeof d === "object") ciList.push(makeCI(d, CI_BASE + ciList.length));
+
 // a save that's already on another island starts there (this must run after everything above is defined)
-if (save.isle === 6) enterIsle6(); else if (save.isle === 5) enterIsle5(); else if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
+if (save.isle >= CI_BASE) { if (customIsle(save.isle)) enterCI(customIsle(save.isle)); else enterIsle6(); } else if (save.isle === 6) enterIsle6(); else if (save.isle === 5) enterIsle5(); else if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
 placeEnchTable();
 if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1, Mooncap Isle = Rebirth 2, Ashfall Isle = Rebirth 3
 
@@ -13066,7 +13388,7 @@ if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1,
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
-    ...PROMPTS5, ferry6: () => "[F] Talk to the Ferryman",
+    ...PROMPTS5, ferry6: () => "[F] Talk to the Ferryman", ferryC: () => "[F] Talk to the Ferryman", placed: n => placedPrompt(n.o),
     shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => "[F] Enter the Casino", ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
@@ -13144,35 +13466,130 @@ const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night &
 //  Tree Sim 4 Studio content: the signs and props you place in the editor (content/world.js).
 //  Each one sits in its island's group, so it shows and hides with the island. Heights are stored, not worked out.
 // =====================================================================
-const placed = []; // { o, g, r, tex } for every sign and prop in the world
 const propMats = {};
 const pmat = c => propMats[c] || (propMats[c] = new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
 const pglow = c => propMats["g" + c] || (propMats["g" + c] = new THREE.MeshBasicMaterial({ color: c }));
 const PSPH = new THREE.IcosahedronGeometry(1, 1), PTENT = new THREE.ConeGeometry(1, 1, 4), SIGN_FACE = new THREE.PlaneGeometry(2.2, 1.1);
+const PTORUS = new THREE.TorusGeometry(1, 0.28, 8, 24), PSPH2 = new THREE.SphereGeometry(1, 16, 12), PHALF = new THREE.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), PCYL = new THREE.CylinderGeometry(1, 1, 1, 16);
+const PWEDGE_G = (() => { const g = new THREE.BufferGeometry(), v = [-0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, 0.5, -0.5, 1, -0.5, 0.5, 1, -0.5], i = [0, 2, 1, 0, 3, 2, 0, 1, 5, 0, 5, 4, 3, 4, 5, 3, 5, 2, 0, 4, 3, 1, 2, 5]; g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3)); g.setIndex(i); const n = g.toNonIndexed(); n.computeVertexNormals(); return n; })();
 function pm(g, geo, mat, x, y, z, sx, sy = sx, sz = sx, rx = 0, ry = 0, rz = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz); g.add(m); return m; }
-// the prop kit: r = how wide it is to walk into (0 = you walk through it), tint = its main colour can be changed
+const PROP_CATS = [["nature", "Nature"], ["camp", "Camp & village"], ["build", "Building"], ["spooky", "Spooky"], ["lights", "Lights"], ["fun", "Fun"], ["shapes", "Shapes"]];
+// the prop kit. r = how wide it is to bump into (0 = walk-through), box = walls you bump into [[x, z, halfWidth, halfDepth]],
+// tint = its main colour (you can change it), light = a real light it gives off [colour, power, range, height]
 const PROPS = {
-    rock:      { name: "Rock", r: 0.6, make(g) { pm(g, ICO, pmat(0x7a7a84), 0, 0.32, 0, 0.7, 0.5, 0.6, 0.3, 0.5, 0.2); } },
-    boulder:   { name: "Boulder", r: 1.5, make(g) { const m = pmat(0x6a6a74); pm(g, ICO, m, 0, 0.85, 0, 1.4, 1.1, 1.2, 0.2, 0.4, 0.1); pm(g, ICO, m, 0.95, 0.45, 0.45, 0.75, 0.6, 0.7, 0.5); pm(g, ICO, m, -0.85, 0.38, -0.5, 0.65, 0.5, 0.6, 0.1, 1.2); } },
-    bush:      { name: "Bush", r: 0, tint: 0x2f6a3a, make(g, c) { const m = pmat(c); pm(g, PSPH, m, 0, 0.5, 0, 0.7, 0.6, 0.7); pm(g, PSPH, m, 0.5, 0.38, 0.2, 0.5); pm(g, PSPH, m, -0.42, 0.34, -0.2, 0.48); } },
-    crate:     { name: "Crate", r: 0.65, make(g) { pm(g, BOX, pmat(0x9a6a3a), 0, 0.5, 0, 1); const d = pmat(0x5a3a20); for (const y of [0.06, 0.94]) pm(g, BOX, d, 0, y, 0, 1.04, 0.12, 1.04); pm(g, BOX, d, 0, 0.5, 0.51, 0.12, 1, 0.04, 0, 0, 0.78); } },
-    barrel:    { name: "Barrel", r: 0.5, make(g) { pm(g, CYL8, pmat(0x8a5a30), 0, 0.55, 0, 0.45, 1.1, 0.45); const d = pmat(0x3a3a40); for (const y of [0.2, 0.9]) pm(g, CYL8, d, 0, y, 0, 0.47, 0.08, 0.47); } },
-    lantern:   { name: "Lantern post", r: 0.2, tint: 0xffd890, make(g, c) { const w = pmat(0x3a2a20); pm(g, BOX, w, 0, 1.1, 0, 0.12, 2.2, 0.12); pm(g, BOX, w, 0.25, 2.12, 0, 0.55, 0.08, 0.08); pm(g, BOX, pglow(c), 0.48, 1.86, 0, 0.28, 0.34, 0.28); pm(g, CONE6, w, 0.48, 2.1, 0, 0.24, 0.16, 0.24); } },
-    torch:     { name: "Torch", r: 0, make(g) { pm(g, CYL6, pmat(0x5a3a20), 0, 0.7, 0, 0.05, 1.4, 0.05); pm(g, CONE6, pglow(0xff8a2a), 0, 1.58, 0, 0.14, 0.42, 0.14); pm(g, CONE6, pglow(0xffe070), 0, 1.52, 0, 0.08, 0.26, 0.08); } },
-    fence:     { name: "Fence", r: 0, make(g) { const w = pmat(0x7a5232); for (const x of [-1.2, 0, 1.2]) pm(g, BOX, w, x, 0.55, 0, 0.14, 1.1, 0.14); for (const y of [0.45, 0.85]) pm(g, BOX, w, 0, y, 0, 2.5, 0.1, 0.06); } },
-    bench:     { name: "Bench", r: 0.5, make(g) { const w = pmat(0x8a5a34); pm(g, BOX, w, 0, 0.45, 0, 1.6, 0.1, 0.45); pm(g, BOX, w, 0, 0.76, -0.2, 1.6, 0.4, 0.08); for (const x of [-0.7, 0.7]) pm(g, BOX, w, x, 0.22, 0, 0.1, 0.45, 0.4); } },
-    campfire:  { name: "Campfire", r: 0.7, make(g) { const s = pmat(0x6a6a70), w = pmat(0x5a3a20); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; pm(g, ICO, s, Math.cos(a) * 0.62, 0.1, Math.sin(a) * 0.62, 0.17, 0.13, 0.17, a); } for (let i = 0; i < 3; i++) pm(g, CYL6, w, 0, 0.14, 0, 0.08, 0.95, 0.08, 0, (i / 3) * Math.PI, Math.PI / 2 - 0.25); pm(g, CONE6, pglow(0xff7a2a), 0, 0.48, 0, 0.36, 0.8, 0.36); pm(g, CONE6, pglow(0xffd040), 0, 0.4, 0, 0.2, 0.56, 0.2); } },
-    logpile:   { name: "Log pile", r: 1.0, make(g) { const w = pmat(0x7a5232); [[-0.46, 0.22], [0, 0.22], [0.46, 0.22], [-0.23, 0.6], [0.23, 0.6], [0, 0.98]].forEach(([x, y]) => pm(g, CYL8, w, 0, y, x, 0.22, 1.8, 0.22, 0, 0, Math.PI / 2)); } },
-    stump:     { name: "Stump", r: 0.5, make(g) { pm(g, CYL8, pmat(0x5a3a24), 0, 0.25, 0, 0.5, 0.5, 0.5); pm(g, CYL8, pmat(0xc8a070), 0, 0.51, 0, 0.44, 0.02, 0.44); } },
-    mushroom:  { name: "Giant mushroom", r: 0.35, tint: 0xd8303a, make(g, c) { pm(g, CYL8, pmat(0xf0e8d8), 0, 0.6, 0, 0.18, 1.2, 0.18); pm(g, PSPH, pmat(c), 0, 1.25, 0, 0.8, 0.38, 0.8); const d = pmat(0xffffff); for (let i = 0; i < 6; i++) { const a = i * 1.1; pm(g, PSPH, d, Math.cos(a) * 0.5, 1.42, Math.sin(a) * 0.5, 0.09); } } },
-    tent:      { name: "Tent", r: 1.3, tint: 0xc89a5a, make(g, c) { pm(g, PTENT, pmat(c), 0, 0.8, 0, 1.5, 1.6, 1.5, 0, Math.PI / 4); pm(g, BOX, pmat(0x2a1a14), 0, 0.42, 1.06, 0.6, 0.84, 0.04); } },
-    flag:      { name: "Flag", r: 0, tint: 0xff5a3a, make(g, c) { pm(g, CYL6, pmat(0xd8d8e0), 0, 1.5, 0, 0.04, 3, 0.04); pm(g, BOX, pmat(c), 0.47, 2.65, 0, 0.9, 0.55, 0.03); } },
-    chest:     { name: "Chest", r: 0.55, make(g) { const w = pmat(0x8a5a2a), au = pmat(0xd8a840); pm(g, BOX, w, 0, 0.25, 0, 0.9, 0.5, 0.6); pm(g, BOX, w, 0, 0.6, 0, 0.92, 0.22, 0.62); pm(g, BOX, au, 0, 0.32, 0, 0.94, 0.08, 0.64); pm(g, BOX, au, 0, 0.46, 0.32, 0.14, 0.16, 0.04); } },
-    gravestone:{ name: "Gravestone", r: 0.35, make(g) { const s = pmat(0x8a8a96); pm(g, BOX, s, 0, 0.5, 0, 0.7, 1.0, 0.18); pm(g, CYL8, s, 0, 1.0, 0, 0.35, 0.18, 0.35, Math.PI / 2); pm(g, BOX, pmat(0x4a3a2a), 0, 0.06, 0.75, 0.8, 0.12, 1.3); } },
-    pumpkin:   { name: "Pumpkin", r: 0.4, make(g) { pm(g, PSPH, pmat(0xff7a1a), 0, 0.36, 0, 0.45, 0.36, 0.45); pm(g, CYL6, pmat(0x4a6a2a), 0, 0.76, 0, 0.05, 0.2, 0.05); const e = pglow(0xffd040); for (const x of [-0.15, 0.15]) pm(g, BOX, e, x, 0.44, 0.43, 0.1, 0.08, 0.02); pm(g, BOX, e, 0, 0.3, 0.44, 0.24, 0.05, 0.02); } },
-    stone:     { name: "Standing stone", r: 0.6, make(g) { pm(g, BOX, pmat(0x6a6a78), 0, 1.5, 0, 0.9, 3, 0.6, 0.04, 0.3, 0.06); } },
-    crystal:   { name: "Crystal cluster", r: 0.45, tint: 0x7affef, make(g, c) { const m = pglow(c); pm(g, CONE6, m, 0, 0.7, 0, 0.25, 1.4, 0.25); pm(g, CONE6, m, 0.3, 0.42, 0.1, 0.16, 0.85, 0.16, 0, 0, -0.5); pm(g, CONE6, m, -0.25, 0.36, -0.15, 0.14, 0.72, 0.14, 0.3, 0, 0.55); } }
+    // ---- nature ----
+    rock:       { cat: "nature", name: "Rock", r: 0.6, tint: 0x7a7a84, make(g, c) { pm(g, ICO, pmat(c), 0, 0.32, 0, 0.7, 0.5, 0.6, 0.3, 0.5, 0.2); } },
+    boulder:    { cat: "nature", name: "Boulder", r: 1.5, tint: 0x6a6a74, make(g, c) { const m = pmat(c); pm(g, ICO, m, 0, 0.85, 0, 1.4, 1.1, 1.2, 0.2, 0.4, 0.1); pm(g, ICO, m, 0.95, 0.45, 0.45, 0.75, 0.6, 0.7, 0.5); pm(g, ICO, m, -0.85, 0.38, -0.5, 0.65, 0.5, 0.6, 0.1, 1.2); } },
+    pebbles:    { cat: "nature", name: "Pebbles", r: 0, tint: 0x8a8a94, make(g, c) { const m = pmat(c); for (let i = 0; i < 7; i++) { const a = i * 0.9; pm(g, ICO, m, Math.cos(a) * (0.3 + i * 0.08), 0.06, Math.sin(a) * (0.3 + i * 0.08), 0.12 + (i % 3) * 0.04, 0.08, 0.12, a, a); } } },
+    mossyrock:  { cat: "nature", name: "Mossy rock", r: 0.8, tint: 0x4a8a3a, make(g, c) { pm(g, ICO, pmat(0x6a6a72), 0, 0.45, 0, 0.9, 0.65, 0.8, 0.2, 0.7); pm(g, PHALF, pmat(c), 0, 0.72, 0, 0.75, 0.25, 0.65); } },
+    cliffrock:  { cat: "nature", name: "Tall rock", r: 1.1, tint: 0x6a6670, make(g, c) { const m = pmat(c); pm(g, BOX, m, 0, 1.6, 0, 1.6, 3.2, 1.2, 0.05, 0.3, 0.04); pm(g, ICO, m, 0.5, 3.1, 0.1, 0.8, 0.5, 0.7); pm(g, ICO, m, -0.7, 0.4, 0.4, 0.7, 0.5, 0.6); } },
+    bush:       { cat: "nature", name: "Bush", r: 0, tint: 0x2f6a3a, make(g, c) { const m = pmat(c); pm(g, PSPH, m, 0, 0.5, 0, 0.7, 0.6, 0.7); pm(g, PSPH, m, 0.5, 0.38, 0.2, 0.5); pm(g, PSPH, m, -0.42, 0.34, -0.2, 0.48); } },
+    berrybush:  { cat: "nature", name: "Berry bush", r: 0, tint: 0xd83a5a, make(g, c) { const m = pmat(0x2f6a3a), b = pmat(c); pm(g, PSPH, m, 0, 0.5, 0, 0.75, 0.6, 0.75); for (let i = 0; i < 9; i++) { const a = i * 0.7; pm(g, PSPH, b, Math.cos(a) * 0.6, 0.45 + (i % 3) * 0.15, Math.sin(a) * 0.6, 0.08); } } },
+    hedge:      { cat: "nature", name: "Hedge", r: 0, box: [[0, 0, 1.5, 0.45]], tint: 0x2f5a2a, make(g, c) { pm(g, BOX, pmat(c), 0, 0.6, 0, 3, 1.2, 0.9); } },
+    fern:       { cat: "nature", name: "Fern", r: 0, tint: 0x3a8a3a, make(g, c) { const m = pmat(c); for (let i = 0; i < 6; i++) pm(g, CONE6, m, 0, 0.35, 0, 0.12, 0.9, 0.12, 0.9, (i / 6) * Math.PI * 2, 0).position.set(Math.cos(i) * 0.25, 0.3, Math.sin(i) * 0.25); } },
+    flowers:    { cat: "nature", name: "Flowers", r: 0, tint: 0xff6ab0, make(g, c) { const st = pmat(0x3a7a2a), f = pmat(c), mid = pmat(0xffd040); for (let i = 0; i < 6; i++) { const a = i * 1.05, d = 0.25 + (i % 2) * 0.2, x = Math.cos(a) * d, z = Math.sin(a) * d, h = 0.4 + (i % 3) * 0.12; pm(g, CYL6, st, x, h / 2, z, 0.02, h, 0.02); pm(g, ICO, f, x, h, z, 0.11, 0.06, 0.11); pm(g, ICO, mid, x, h + 0.04, z, 0.04); } } },
+    tallgrass:  { cat: "nature", name: "Tall grass", r: 0, tint: 0x6a9a3a, make(g, c) { const m = pmat(c); for (let i = 0; i < 9; i++) { const a = i * 0.7, d = (i % 3) * 0.2; pm(g, CONE6, m, Math.cos(a) * d, 0.4, Math.sin(a) * d, 0.05, 0.8 + (i % 4) * 0.15, 0.05, Math.sin(i) * 0.2, 0, Math.cos(i) * 0.2); } } },
+    reeds:      { cat: "nature", name: "Reeds", r: 0, tint: 0x5a3a20, make(g, c) { const st = pmat(0x6a8a3a), top = pmat(c); for (let i = 0; i < 7; i++) { const a = i * 0.9, d = 0.1 + (i % 3) * 0.15, h = 1.2 + (i % 3) * 0.3; pm(g, CYL6, st, Math.cos(a) * d, h / 2, Math.sin(a) * d, 0.025, h, 0.025); pm(g, CYL6, top, Math.cos(a) * d, h, Math.sin(a) * d, 0.06, 0.28, 0.06); } } },
+    cactus:     { cat: "nature", name: "Cactus", r: 0.4, tint: 0x3a8a4a, make(g, c) { const m = pmat(c); pm(g, CYL8, m, 0, 1.2, 0, 0.32, 2.4, 0.32); pm(g, PHALF, m, 0, 2.4, 0, 0.32); pm(g, CYL8, m, 0.5, 1.3, 0, 0.18, 0.5, 0.18, 0, 0, Math.PI / 2); pm(g, CYL8, m, 0.68, 1.65, 0, 0.18, 0.8, 0.18); pm(g, CYL8, m, -0.45, 1.0, 0, 0.16, 0.45, 0.16, 0, 0, Math.PI / 2); pm(g, CYL8, m, -0.6, 1.3, 0, 0.16, 0.6, 0.16); } },
+    deadtree:   { cat: "nature", name: "Dead tree", r: 0.4, tint: 0x3a2a24, make(g, c) { const m = pmat(c); pm(g, CYL6, m, 0, 1.6, 0, 0.22, 3.2, 0.22); pm(g, CYL6, m, 0.45, 2.6, 0, 0.08, 1.3, 0.08, 0, 0, -0.8); pm(g, CYL6, m, -0.4, 2.2, 0.1, 0.07, 1.1, 0.07, 0.2, 0, 0.9); pm(g, CYL6, m, 0.1, 3.3, -0.3, 0.06, 0.9, 0.06, -0.6, 0, 0.2); } },
+    sapling:    { cat: "nature", name: "Sapling", r: 0, tint: 0x2f7a3a, make(g, c) { pm(g, CYL6, pmat(0x5a3a24), 0, 0.5, 0, 0.06, 1, 0.06); const m = pmat(c); pm(g, CONE6, m, 0, 1.2, 0, 0.5, 0.9, 0.5); pm(g, CONE6, m, 0, 1.6, 0, 0.36, 0.7, 0.36); } },
+    fallenlog:  { cat: "nature", name: "Fallen log", r: 0, box: [[0, 0, 1.6, 0.4]], tint: 0x5a3a24, make(g, c) { pm(g, CYL8, pmat(c), 0, 0.38, 0, 0.38, 3.2, 0.38, 0, 0, Math.PI / 2); pm(g, CYL8, pmat(0xc8a070), 1.61, 0.38, 0, 0.34, 0.02, 0.34, 0, 0, Math.PI / 2); } },
+    stump:      { cat: "nature", name: "Stump", r: 0.5, tint: 0x5a3a24, make(g, c) { pm(g, CYL8, pmat(c), 0, 0.25, 0, 0.5, 0.5, 0.5); pm(g, CYL8, pmat(0xc8a070), 0, 0.51, 0, 0.44, 0.02, 0.44); } },
+    mushroom:   { cat: "nature", name: "Giant mushroom", r: 0.35, tint: 0xd8303a, make(g, c) { pm(g, CYL8, pmat(0xf0e8d8), 0, 0.6, 0, 0.18, 1.2, 0.18); pm(g, PSPH, pmat(c), 0, 1.25, 0, 0.8, 0.38, 0.8); const d = pmat(0xffffff); for (let i = 0; i < 6; i++) { const a = i * 1.1; pm(g, PSPH, d, Math.cos(a) * 0.5, 1.42, Math.sin(a) * 0.5, 0.09); } } },
+    shrooms:    { cat: "nature", name: "Little mushrooms", r: 0, tint: 0xb07aff, make(g, c) { const st = pmat(0xf0e8d8), cap = pmat(c); for (let i = 0; i < 5; i++) { const a = i * 1.3, d = 0.1 + i * 0.07, h = 0.15 + (i % 3) * 0.08; pm(g, CYL6, st, Math.cos(a) * d, h / 2, Math.sin(a) * d, 0.03, h, 0.03); pm(g, PHALF, cap, Math.cos(a) * d, h, Math.sin(a) * d, 0.1, 0.07, 0.1); } } },
+    lilypads:   { cat: "nature", name: "Lily pads", r: 0, tint: 0x3a8a3a, make(g, c) { const m = pmat(c), fl = pmat(0xffc8e0); for (let i = 0; i < 4; i++) { const a = i * 1.6; pm(g, CYL8, m, Math.cos(a) * 0.6, 0.02, Math.sin(a) * 0.6, 0.35, 0.02, 0.35); } pm(g, ICO, fl, 0.6, 0.1, 0, 0.12); } },
+    coral:      { cat: "nature", name: "Coral", r: 0.4, tint: 0xff7a8a, make(g, c) { const m = pmat(c); for (let i = 0; i < 6; i++) pm(g, CONE6, m, Math.cos(i) * 0.2, 0.4, Math.sin(i) * 0.2, 0.1, 0.9 - (i % 3) * 0.15, 0.1, Math.sin(i * 2) * 0.4, 0, Math.cos(i * 2) * 0.4); } },
+    shell:      { cat: "nature", name: "Seashell", r: 0, tint: 0xffe0c8, make(g, c) { pm(g, PHALF, pmat(c), 0, 0, 0, 0.3, 0.18, 0.25); } },
+    starfish:   { cat: "nature", name: "Starfish", r: 0, tint: 0xff8a3a, make(g, c) { const m = pmat(c); for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; pm(g, BOX, m, Math.cos(a) * 0.12, 0.03, Math.sin(a) * 0.12, 0.26, 0.05, 0.08, 0, -a, 0); } } },
+    icechunk:   { cat: "nature", name: "Ice chunk", r: 0.8, tint: 0xbff0ff, make(g, c) { const m = new THREE.MeshLambertMaterial({ color: c, emissive: 0x0a2a3a, transparent: true, opacity: 0.9, flatShading: true }); pm(g, ICO, m, 0, 0.6, 0, 0.9, 0.8, 0.8, 0.3, 0.4); pm(g, ICO, m, 0.6, 0.3, 0.3, 0.45); } },
+    snowpile:   { cat: "nature", name: "Snow pile", r: 0.6, tint: 0xf4f8ff, make(g, c) { pm(g, PHALF, pmat(c), 0, 0, 0, 1.1, 0.6, 0.9); } },
+    crystal:    { cat: "nature", name: "Crystal cluster", r: 0.45, tint: 0x7affef, make(g, c) { const m = pglow(c); pm(g, CONE6, m, 0, 0.7, 0, 0.25, 1.4, 0.25); pm(g, CONE6, m, 0.3, 0.42, 0.1, 0.16, 0.85, 0.16, 0, 0, -0.5); pm(g, CONE6, m, -0.25, 0.36, -0.15, 0.14, 0.72, 0.14, 0.3, 0, 0.55); } },
+    // ---- camp & village ----
+    crate:      { cat: "camp", name: "Crate", r: 0.65, tint: 0x9a6a3a, make(g, c) { pm(g, BOX, pmat(c), 0, 0.5, 0, 1); const d = pmat(0x5a3a20); for (const y of [0.06, 0.94]) pm(g, BOX, d, 0, y, 0, 1.04, 0.12, 1.04); pm(g, BOX, d, 0, 0.5, 0.51, 0.12, 1, 0.04, 0, 0, 0.78); } },
+    barrel:     { cat: "camp", name: "Barrel", r: 0.5, tint: 0x8a5a30, make(g, c) { pm(g, CYL8, pmat(c), 0, 0.55, 0, 0.45, 1.1, 0.45); const d = pmat(0x3a3a40); for (const y of [0.2, 0.9]) pm(g, CYL8, d, 0, y, 0, 0.47, 0.08, 0.47); } },
+    sack:       { cat: "camp", name: "Sack", r: 0.35, tint: 0xc8a878, make(g, c) { const m = pmat(c); pm(g, PSPH, m, 0, 0.35, 0, 0.38, 0.4, 0.32); pm(g, CYL6, m, 0, 0.78, 0, 0.12, 0.18, 0.12); } },
+    bench:      { cat: "camp", name: "Bench", r: 0.5, tint: 0x8a5a34, make(g, c) { const w = pmat(c); pm(g, BOX, w, 0, 0.45, 0, 1.6, 0.1, 0.45); pm(g, BOX, w, 0, 0.76, -0.2, 1.6, 0.4, 0.08); for (const x of [-0.7, 0.7]) pm(g, BOX, w, x, 0.22, 0, 0.1, 0.45, 0.4); } },
+    table:      { cat: "camp", name: "Table", r: 0.7, tint: 0x8a5a34, make(g, c) { const w = pmat(c); pm(g, BOX, w, 0, 0.82, 0, 1.6, 0.08, 0.9); for (const x of [-0.7, 0.7]) for (const z of [-0.35, 0.35]) pm(g, BOX, w, x, 0.4, z, 0.08, 0.8, 0.08); } },
+    chair:      { cat: "camp", name: "Chair", r: 0.3, tint: 0x8a5a34, make(g, c) { const w = pmat(c); pm(g, BOX, w, 0, 0.48, 0, 0.5, 0.06, 0.5); pm(g, BOX, w, 0, 0.82, -0.22, 0.5, 0.65, 0.06); for (const x of [-0.21, 0.21]) for (const z of [-0.21, 0.21]) pm(g, BOX, w, x, 0.24, z, 0.05, 0.48, 0.05); } },
+    stool:      { cat: "camp", name: "Stool", r: 0.25, tint: 0x8a5a34, make(g, c) { const w = pmat(c); pm(g, CYL8, w, 0, 0.55, 0, 0.25, 0.06, 0.25); for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; pm(g, CYL6, w, Math.cos(a) * 0.15, 0.27, Math.sin(a) * 0.15, 0.03, 0.55, 0.03, Math.sin(a) * 0.15, 0, -Math.cos(a) * 0.15); } } },
+    campfire:   { cat: "camp", name: "Campfire", r: 0.7, light: [0xff9a40, 14, 16, 1.4], make(g) { const s = pmat(0x6a6a70), w = pmat(0x5a3a20); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; pm(g, ICO, s, Math.cos(a) * 0.62, 0.1, Math.sin(a) * 0.62, 0.17, 0.13, 0.17, a); } for (let i = 0; i < 3; i++) pm(g, CYL6, w, 0, 0.14, 0, 0.08, 0.95, 0.08, 0, (i / 3) * Math.PI, Math.PI / 2 - 0.25); pm(g, CONE6, pglow(0xff7a2a), 0, 0.48, 0, 0.36, 0.8, 0.36); pm(g, CONE6, pglow(0xffd040), 0, 0.4, 0, 0.2, 0.56, 0.2); } },
+    logpile:    { cat: "camp", name: "Log pile", r: 1.0, tint: 0x7a5232, make(g, c) { const w = pmat(c); [[-0.46, 0.22], [0, 0.22], [0.46, 0.22], [-0.23, 0.6], [0.23, 0.6], [0, 0.98]].forEach(([x, y]) => pm(g, CYL8, w, 0, y, x, 0.22, 1.8, 0.22, 0, 0, Math.PI / 2)); } },
+    tent:       { cat: "camp", name: "Tent", r: 1.3, tint: 0xc89a5a, make(g, c) { pm(g, PTENT, pmat(c), 0, 0.8, 0, 1.5, 1.6, 1.5, 0, Math.PI / 4); pm(g, BOX, pmat(0x2a1a14), 0, 0.42, 1.06, 0.6, 0.84, 0.04); } },
+    bedroll:    { cat: "camp", name: "Bedroll", r: 0, tint: 0x8a2a3a, make(g, c) { pm(g, BOX, pmat(c), 0, 0.06, 0, 0.8, 0.12, 1.9); pm(g, CYL8, pmat(0xe8e0d0), 0, 0.14, -0.8, 0.14, 0.7, 0.14, 0, 0, Math.PI / 2); } },
+    cauldron:   { cat: "camp", name: "Cauldron", r: 0.5, tint: 0x6aff8a, make(g, c) { const k = pmat(0x1a1a1e); pm(g, PSPH2, k, 0, 0.45, 0, 0.5, 0.42, 0.5); for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; pm(g, CYL6, k, Math.cos(a) * 0.32, 0.1, Math.sin(a) * 0.32, 0.04, 0.2, 0.04); } pm(g, CYL8, pglow(c), 0, 0.78, 0, 0.4, 0.02, 0.4); } },
+    well:       { cat: "camp", name: "Well", r: 1.1, tint: 0x7a7a84, make(g, c) { const s = pmat(c), w = pmat(0x5a3a24); pm(g, CYL8, s, 0, 0.45, 0, 1, 0.9, 1); pm(g, CYL8, pmat(0x0a1a2a), 0, 0.91, 0, 0.8, 0.02, 0.8); for (const x of [-0.85, 0.85]) pm(g, BOX, w, x, 1.4, 0, 0.12, 1.9, 0.12); pm(g, PTENT, pmat(0x8a3a2a), 0, 2.55, 0, 1.4, 0.7, 1.1, 0, Math.PI / 4); pm(g, CYL6, w, 0, 1.9, 0, 0.06, 1.7, 0.06, 0, 0, Math.PI / 2); } },
+    wheelbarrow:{ cat: "camp", name: "Wheelbarrow", r: 0.5, tint: 0x8a5a34, make(g, c) { const w = pmat(c); pm(g, BOX, w, 0, 0.55, 0, 0.7, 0.35, 0.9); pm(g, PTORUS, pmat(0x2a2a30), 0, 0.25, 0.55, 0.2, 0.2, 0.2, 0, Math.PI / 2); for (const x of [-0.25, 0.25]) pm(g, BOX, w, x, 0.45, -0.75, 0.05, 0.05, 0.7); } },
+    cart:       { cat: "camp", name: "Cart", r: 1.0, tint: 0x8a5a34, make(g, c) { const w = pmat(c), k = pmat(0x3a2a20); pm(g, BOX, w, 0, 0.8, 0, 1.4, 0.5, 2.2); for (const x of [-0.78, 0.78]) for (const z of [-0.6, 0.6]) pm(g, PTORUS, k, x, 0.45, z, 0.42, 0.42, 0.42, 0, Math.PI / 2); pm(g, BOX, w, 0, 0.7, 1.6, 0.08, 0.08, 1.2); } },
+    anvil:      { cat: "camp", name: "Anvil", r: 0.4, tint: 0x3a3a44, make(g, c) { const m = pmat(c); pm(g, BOX, pmat(0x5a3a24), 0, 0.3, 0, 0.5, 0.6, 0.5); pm(g, BOX, m, 0, 0.7, 0, 0.36, 0.2, 0.7); pm(g, CONE6, m, 0, 0.7, 0.45, 0.12, 0.3, 0.12, Math.PI / 2); } },
+    haystack:   { cat: "camp", name: "Haystack", r: 0.9, tint: 0xd8b84a, make(g, c) { pm(g, CONE6, pmat(c), 0, 0.8, 0, 1.1, 1.6, 1.1); } },
+    scarecrow:  { cat: "camp", name: "Scarecrow", r: 0.2, tint: 0x8a3a2a, make(g, c) { const w = pmat(0x5a3a24); pm(g, CYL6, w, 0, 1.1, 0, 0.06, 2.2, 0.06); pm(g, CYL6, w, 0, 1.6, 0, 0.05, 1.5, 0.05, 0, 0, Math.PI / 2); pm(g, BOX, pmat(c), 0, 1.45, 0, 0.6, 0.6, 0.25); pm(g, PSPH, pmat(0xd8c890), 0, 2.15, 0, 0.25); pm(g, CONE6, pmat(0x3a2a20), 0, 2.45, 0, 0.35, 0.3, 0.35); } },
+    mailbox:    { cat: "camp", name: "Mailbox", r: 0.15, tint: 0xc8302a, make(g, c) { pm(g, BOX, pmat(0x5a3a24), 0, 0.5, 0, 0.08, 1, 0.08); pm(g, BOX, pmat(c), 0, 1.1, 0, 0.3, 0.3, 0.5); } },
+    umbrella:   { cat: "camp", name: "Beach umbrella", r: 0, tint: 0xff5a5a, make(g, c) { pm(g, CYL6, pmat(0xe8e0d0), 0, 1.1, 0, 0.04, 2.2, 0.04); pm(g, PTENT, pmat(c), 0, 2.2, 0, 1.4, 0.5, 1.4, 0, Math.PI / 4); } },
+    deckchair:  { cat: "camp", name: "Deck chair", r: 0.4, tint: 0x3a8ac8, make(g, c) { const w = pmat(0xd8c8a0); pm(g, BOX, pmat(c), 0, 0.35, 0.1, 0.55, 0.05, 1.0, -0.35); pm(g, BOX, w, 0, 0.18, 0.3, 0.6, 0.05, 0.05); pm(g, BOX, w, 0, 0.18, -0.35, 0.6, 0.05, 0.05); } },
+    rowboat:    { cat: "camp", name: "Rowboat", r: 1.0, tint: 0x7a4a2a, make(g, c) { const w = pmat(c); pm(g, PHALF, w, 0, 0.45, 0, 0.7, 0.45, 1.8, Math.PI); pm(g, BOX, pmat(0xa87a4a), 0, 0.4, 0, 1.1, 0.05, 0.35); } },
+    blanket:    { cat: "camp", name: "Picnic blanket", r: 0, tint: 0xd84a4a, make(g, c) { pm(g, BOX, pmat(c), 0, 0.02, 0, 1.8, 0.03, 1.8); const w = pmat(0xf4f0e8); for (let i = 0; i < 3; i++) pm(g, BOX, w, -0.6 + i * 0.6, 0.04, 0, 0.2, 0.01, 1.8); } },
+    signpost:   { cat: "camp", name: "Signpost", r: 0.15, tint: 0x8a5a34, make(g, c) { const w = pmat(c); pm(g, BOX, pmat(0x5a3a24), 0, 1.2, 0, 0.12, 2.4, 0.12); pm(g, BOX, w, 0.45, 2.0, 0, 0.9, 0.25, 0.06); pm(g, CONE6, w, 0.98, 2.0, 0, 0.16, 0.2, 0.06, 0, 0, -Math.PI / 2); pm(g, BOX, w, -0.4, 1.6, 0, 0.8, 0.25, 0.06, 0, 0.5); } },
+    // ---- building ----
+    wall:       { cat: "build", name: "Wall", r: 0, box: [[0, 0, 2, 0.15]], tint: 0x8a6a4a, make(g, c) { pm(g, BOX, pmat(c), 0, 1.5, 0, 4, 3, 0.3); } },
+    stonewall:  { cat: "build", name: "Stone wall", r: 0, box: [[0, 0, 2, 0.3]], tint: 0x7a7a84, make(g, c) { const m = pmat(c); pm(g, BOX, m, 0, 0.5, 0, 4, 1, 0.6); for (let i = 0; i < 5; i++) pm(g, ICO, m, -1.6 + i * 0.8, 1.02, 0, 0.32, 0.12, 0.3, 0, i); } },
+    windowwall: { cat: "build", name: "Wall with window", r: 0, box: [[-1.35, 0, 0.65, 0.15], [1.35, 0, 0.65, 0.15]], tint: 0x8a6a4a, make(g, c) { const m = pmat(c); pm(g, BOX, m, -1.35, 1.5, 0, 1.3, 3, 0.3); pm(g, BOX, m, 1.35, 1.5, 0, 1.3, 3, 0.3); pm(g, BOX, m, 0, 0.5, 0, 1.4, 1, 0.3); pm(g, BOX, m, 0, 2.65, 0, 1.4, 0.7, 0.3); pm(g, BOX, pglow(0xffe0a0), 0, 1.65, 0, 1.4, 1.0, 0.04); } },
+    doorway:    { cat: "build", name: "Doorway", r: 0, box: [[-1.4, 0, 0.6, 0.15], [1.4, 0, 0.6, 0.15]], tint: 0x8a6a4a, make(g, c) { const m = pmat(c); pm(g, BOX, m, -1.4, 1.5, 0, 1.2, 3, 0.3); pm(g, BOX, m, 1.4, 1.5, 0, 1.2, 3, 0.3); pm(g, BOX, m, 0, 2.6, 0, 1.6, 0.8, 0.3); } },
+    floor:      { cat: "build", name: "Floor", r: 0, tint: 0x9a7a5a, make(g, c) { pm(g, BOX, pmat(c), 0, 0.06, 0, 4, 0.12, 4); } },
+    roof:       { cat: "build", name: "Roof", r: 0, tint: 0x8a3a2a, make(g, c) { const m = pmat(c); pm(g, PWEDGE_G, m, 0, 3, 1, 4.2, 1.6, 2.1, 0, 0, 0); pm(g, PWEDGE_G, m, 0, 3, -1, 4.2, 1.6, 2.1, 0, Math.PI, 0); } },
+    pillar:     { cat: "build", name: "Pillar", r: 0.4, tint: 0xd8d0c0, make(g, c) { const m = pmat(c); pm(g, CYL8, m, 0, 1.6, 0, 0.35, 3.2, 0.35); pm(g, BOX, m, 0, 0.1, 0, 0.9, 0.2, 0.9); pm(g, BOX, m, 0, 3.25, 0, 0.9, 0.2, 0.9); } },
+    arch:       { cat: "build", name: "Arch", r: 0, box: [[-1.5, 0, 0.4, 0.4], [1.5, 0, 0.4, 0.4]], tint: 0xd8d0c0, make(g, c) { const m = pmat(c); for (const x of [-1.5, 1.5]) pm(g, BOX, m, x, 1.6, 0, 0.8, 3.2, 0.8); pm(g, BOX, m, 0, 3.6, 0, 3.9, 0.8, 0.9); } },
+    fence:      { cat: "build", name: "Fence", r: 0, box: [[0, 0, 1.25, 0.1]], tint: 0x7a5232, make(g, c) { const w = pmat(c); for (const x of [-1.2, 0, 1.2]) pm(g, BOX, w, x, 0.55, 0, 0.14, 1.1, 0.14); for (const y of [0.45, 0.85]) pm(g, BOX, w, 0, y, 0, 2.5, 0.1, 0.06); } },
+    picket:     { cat: "build", name: "Picket fence", r: 0, box: [[0, 0, 1.25, 0.08]], tint: 0xf4f0e8, make(g, c) { const w = pmat(c); for (let i = 0; i < 7; i++) { const x = -1.2 + i * 0.4; pm(g, BOX, w, x, 0.45, 0, 0.12, 0.9, 0.04); pm(g, CONE6, w, x, 0.95, 0, 0.07, 0.14, 0.03); } for (const y of [0.3, 0.7]) pm(g, BOX, w, 0, y, -0.04, 2.5, 0.08, 0.04); } },
+    gate:       { cat: "build", name: "Gate", r: 0, box: [[-1.3, 0, 0.15, 0.15], [1.3, 0, 0.15, 0.15]], tint: 0x7a5232, make(g, c) { const w = pmat(c); for (const x of [-1.3, 1.3]) pm(g, BOX, w, x, 0.8, 0, 0.2, 1.6, 0.2); pm(g, BOX, w, 0, 1.75, 0, 2.8, 0.15, 0.15); } },
+    // ---- spooky ----
+    gravestone: { cat: "spooky", name: "Gravestone", r: 0.35, tint: 0x8a8a96, make(g, c) { const s = pmat(c); pm(g, BOX, s, 0, 0.5, 0, 0.7, 1.0, 0.18); pm(g, CYL8, s, 0, 1.0, 0, 0.35, 0.18, 0.35, Math.PI / 2); pm(g, BOX, pmat(0x4a3a2a), 0, 0.06, 0.75, 0.8, 0.12, 1.3); } },
+    crossgrave: { cat: "spooky", name: "Cross grave", r: 0.25, tint: 0x8a8a96, make(g, c) { const s = pmat(c); pm(g, BOX, s, 0, 0.7, 0, 0.16, 1.4, 0.16); pm(g, BOX, s, 0, 1.05, 0, 0.7, 0.16, 0.16); pm(g, BOX, pmat(0x4a3a2a), 0, 0.06, 0.7, 0.8, 0.12, 1.3); } },
+    coffin:     { cat: "spooky", name: "Coffin", r: 0.6, tint: 0x3a2420, make(g, c) { pm(g, BOX, pmat(c), 0, 0.25, 0, 0.7, 0.5, 2); pm(g, BOX, pmat(0xc8a040), 0, 0.51, -0.2, 0.08, 0.02, 0.5); pm(g, BOX, pmat(0xc8a040), 0, 0.51, -0.3, 0.3, 0.02, 0.08); } },
+    skull:      { cat: "spooky", name: "Skull", r: 0, tint: 0xf0e8d0, make(g, c) { const b = pmat(c), k = pmat(0x1a1a1a); pm(g, PSPH, b, 0, 0.22, 0, 0.22, 0.2, 0.24); pm(g, BOX, b, 0, 0.08, 0.06, 0.16, 0.08, 0.16); for (const x of [-0.08, 0.08]) pm(g, PSPH, k, x, 0.24, 0.19, 0.055); } },
+    bones:      { cat: "spooky", name: "Bones", r: 0, tint: 0xf0e8d0, make(g, c) { const b = pmat(c); for (let i = 0; i < 4; i++) { pm(g, CYL6, b, Math.cos(i) * 0.3, 0.05, Math.sin(i) * 0.3, 0.04, 0.6, 0.04, Math.PI / 2, i * 0.9, 0); } } },
+    jackolantern:{ cat: "spooky", name: "Jack-o'-lantern", r: 0.9, light: [0xff9a2a, 8, 10, 0.9], tint: 0xff7a1a, make(g, c) { pm(g, PSPH, pmat(c), 0, 0.85, 0, 1, 0.8, 1); pm(g, CYL6, pmat(0x4a6a2a), 0, 1.75, 0, 0.1, 0.35, 0.1); const e = pglow(0xffd040); for (const x of [-0.35, 0.35]) pm(g, CONE6, e, x, 1.05, 0.93, 0.16, 0.2, 0.04, -0.3); pm(g, BOX, e, 0, 0.62, 0.96, 0.6, 0.12, 0.04); } },
+    pumpkin:    { cat: "spooky", name: "Pumpkin", r: 0.4, tint: 0xff7a1a, make(g, c) { pm(g, PSPH, pmat(c), 0, 0.36, 0, 0.45, 0.36, 0.45); pm(g, CYL6, pmat(0x4a6a2a), 0, 0.76, 0, 0.05, 0.2, 0.05); const e = pglow(0xffd040); for (const x of [-0.15, 0.15]) pm(g, BOX, e, x, 0.44, 0.43, 0.1, 0.08, 0.02); pm(g, BOX, e, 0, 0.3, 0.44, 0.24, 0.05, 0.02); } },
+    cobweb:     { cat: "spooky", name: "Cobweb", r: 0, make(g) { const m = new THREE.MeshBasicMaterial({ color: 0xf4f4f8, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }); for (let i = 0; i < 4; i++) pm(g, BOX, m, 0, 1, 0, 0.02, 1.6, 0.01, 0, 0, (i / 4) * Math.PI); pm(g, PTORUS, m, 0, 1, 0, 0.5, 0.5, 0.05, 0, 0, 0); pm(g, PTORUS, m, 0, 1, 0, 0.25, 0.25, 0.05, 0, 0, 0); } },
+    candles:    { cat: "spooky", name: "Candles", r: 0, light: [0xffc070, 4, 6, 0.6], make(g) { const w = pmat(0xf0e8d0), f = pglow(0xffc040); [[0, 0.5], [0.18, 0.35], [-0.15, 0.28]].forEach(([x, h], i) => { const z = i === 0 ? 0 : 0.12; pm(g, CYL8, w, x, h / 2, z, 0.06, h, 0.06); pm(g, CONE6, f, x, h + 0.07, z, 0.035, 0.12, 0.035); }); } },
+    altar:      { cat: "spooky", name: "Altar", r: 0.8, tint: 0x5a5a66, light: [0xb07aff, 6, 8, 1.4], make(g, c) { const s = pmat(c); pm(g, BOX, s, 0, 0.45, 0, 1.6, 0.9, 0.9); pm(g, BOX, s, 0, 0.95, 0, 1.8, 0.1, 1.0); pm(g, PSPH, pglow(0xb07aff), 0, 1.25, 0, 0.18); } },
+    ghostorb:   { cat: "spooky", name: "Ghost light", r: 0, tint: 0x9fe8ff, light: [0x9fe8ff, 6, 9, 1.6], make(g, c) { pm(g, PSPH, pglow(c), 0, 1.6, 0, 0.22); pm(g, PSPH, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.25, depthWrite: false }), 0, 1.6, 0, 0.45); } },
+    stone:      { cat: "spooky", name: "Standing stone", r: 0.6, tint: 0x6a6a78, make(g, c) { pm(g, BOX, pmat(c), 0, 1.5, 0, 0.9, 3, 0.6, 0.04, 0.3, 0.06); } },
+    obelisk:    { cat: "spooky", name: "Obelisk", r: 0.5, tint: 0x2a2a34, make(g, c) { const m = pmat(c); pm(g, BOX, m, 0, 2, 0, 0.8, 4, 0.8); pm(g, PTENT, m, 0, 4.3, 0, 0.57, 0.6, 0.57, 0, Math.PI / 4); pm(g, BOX, pglow(0xb07aff), 0, 2.6, 0.41, 0.3, 0.5, 0.02); } },
+    // ---- lights ----
+    lantern:    { cat: "lights", name: "Lantern post", r: 0.2, tint: 0xffd890, light: [0xffc070, 10, 14, 1.9], make(g, c) { const w = pmat(0x3a2a20); pm(g, BOX, w, 0, 1.1, 0, 0.12, 2.2, 0.12); pm(g, BOX, w, 0.25, 2.12, 0, 0.55, 0.08, 0.08); pm(g, BOX, pglow(c), 0.48, 1.86, 0, 0.28, 0.34, 0.28); pm(g, CONE6, w, 0.48, 2.1, 0, 0.24, 0.16, 0.24); } },
+    torch:      { cat: "lights", name: "Torch", r: 0, light: [0xff9a40, 7, 10, 1.6], make(g) { pm(g, CYL6, pmat(0x5a3a20), 0, 0.7, 0, 0.05, 1.4, 0.05); pm(g, CONE6, pglow(0xff8a2a), 0, 1.58, 0, 0.14, 0.42, 0.14); pm(g, CONE6, pglow(0xffe070), 0, 1.52, 0, 0.08, 0.26, 0.08); } },
+    tiki:       { cat: "lights", name: "Tiki torch", r: 0, light: [0xff9a40, 7, 10, 2.2], make(g) { pm(g, CYL6, pmat(0x8a6a3a), 0, 1.0, 0, 0.06, 2.0, 0.06); pm(g, CYL8, pmat(0x6a4a2a), 0, 2.0, 0, 0.12, 0.3, 0.12); pm(g, CONE6, pglow(0xff8a2a), 0, 2.35, 0, 0.14, 0.45, 0.14); } },
+    brazier:    { cat: "lights", name: "Brazier", r: 0.5, light: [0xff9a40, 12, 14, 1.3], make(g) { const k = pmat(0x2a2a30); pm(g, PHALF, k, 0, 1.1, 0, 0.5, 0.35, 0.5, Math.PI); for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; pm(g, CYL6, k, Math.cos(a) * 0.3, 0.45, Math.sin(a) * 0.3, 0.04, 0.95, 0.04); } pm(g, CONE6, pglow(0xff7a2a), 0, 1.4, 0, 0.35, 0.65, 0.35); pm(g, CONE6, pglow(0xffd040), 0, 1.3, 0, 0.18, 0.45, 0.18); } },
+    lamppost:   { cat: "lights", name: "Lamp post", r: 0.2, tint: 0xfff0c8, light: [0xfff0c8, 12, 16, 3.2], make(g, c) { const k = pmat(0x1a1a20); pm(g, CYL8, k, 0, 1.6, 0, 0.07, 3.2, 0.07); pm(g, CYL8, k, 0, 0.1, 0, 0.25, 0.2, 0.25); pm(g, PSPH2, pglow(c), 0, 3.35, 0, 0.25); pm(g, CONE6, k, 0, 3.65, 0, 0.3, 0.2, 0.3); } },
+    orb:        { cat: "lights", name: "Glowing orb", r: 0, tint: 0x7affef, light: [0x7affef, 8, 10, 1.2], make(g, c) { pm(g, PSPH2, pglow(c), 0, 1.2, 0, 0.3); } },
+    stringlights:{ cat: "lights", name: "String lights", r: 0, tint: 0xffd890, light: [0xffd890, 6, 9, 2.4], make(g, c) { const k = pmat(0x3a2a20); for (const x of [-2, 2]) pm(g, CYL6, k, x, 1.3, 0, 0.05, 2.6, 0.05); const cols = [c, 0xff6a6a, 0x6affb0, 0x6ab0ff]; for (let i = 0; i <= 10; i++) { const x = -2 + i * 0.4, y = 2.55 - Math.sin((i / 10) * Math.PI) * 0.45; pm(g, PSPH, pglow(cols[i % 4]), x, y, 0, 0.06); if (i < 10) pm(g, BOX, k, x + 0.2, y - 0.02, 0, 0.4, 0.01, 0.01); } } },
+    // ---- fun ----
+    flag:       { cat: "fun", name: "Flag", r: 0, tint: 0xff5a3a, make(g, c) { pm(g, CYL6, pmat(0xd8d8e0), 0, 1.5, 0, 0.04, 3, 0.04); pm(g, BOX, pmat(c), 0.47, 2.65, 0, 0.9, 0.55, 0.03); } },
+    banner:     { cat: "fun", name: "Banner", r: 0, tint: 0x6a2a8a, make(g, c) { pm(g, CYL6, pmat(0x3a2a20), 0, 2, 0, 0.05, 4, 0.05); pm(g, CYL6, pmat(0x3a2a20), 0, 3.85, 0, 0.03, 1.2, 0.03, 0, 0, Math.PI / 2); pm(g, BOX, pmat(c), 0, 2.95, 0, 1.1, 1.8, 0.03); pm(g, CONE6, pmat(c), 0, 1.95, 0, 0.55, 0.3, 0.02, Math.PI); } },
+    chest:      { cat: "fun", name: "Chest", r: 0.55, tint: 0x8a5a2a, make(g, c) { const w = pmat(c), au = pmat(0xd8a840); pm(g, BOX, w, 0, 0.25, 0, 0.9, 0.5, 0.6); pm(g, BOX, w, 0, 0.6, 0, 0.92, 0.22, 0.62); pm(g, BOX, au, 0, 0.32, 0, 0.94, 0.08, 0.64); pm(g, BOX, au, 0, 0.46, 0.32, 0.14, 0.16, 0.04); } },
+    statue:     { cat: "fun", name: "Axe statue", r: 0.6, tint: 0xd8d0c0, make(g, c) { const m = pmat(c); pm(g, BOX, m, 0, 0.5, 0, 1.2, 1, 1.2); pm(g, BOX, m, 0, 2.2, 0, 0.18, 2.6, 0.18, 0, 0, 0.15); pm(g, BOX, m, 0.25, 3.3, 0, 0.7, 0.6, 0.12, 0, 0, 0.15); } },
+    giantaxe:   { cat: "fun", name: "Giant axe in a stump", r: 0.8, tint: 0xb8c4d8, make(g, c) { pm(g, CYL8, pmat(0x5a3a24), 0, 0.4, 0, 0.8, 0.8, 0.8); pm(g, CYL8, pmat(0xc8a070), 0, 0.81, 0, 0.74, 0.02, 0.74); pm(g, BOX, pmat(0x6a4a2a), 0.4, 1.8, 0, 0.14, 2.6, 0.14, 0, 0, -0.5); pm(g, BOX, pmat(c), 0.05, 0.95, 0, 0.9, 0.7, 0.1, 0, 0, -0.5); } },
+    trophy:     { cat: "fun", name: "Trophy", r: 0.3, tint: 0xffd040, make(g, c) { const au = pmat(c); pm(g, BOX, pmat(0x3a2a20), 0, 0.5, 0, 0.6, 1, 0.6); pm(g, CYL8, au, 0, 1.08, 0, 0.08, 0.2, 0.08); pm(g, PHALF, au, 0, 1.45, 0, 0.32, 0.35, 0.32, Math.PI); for (const x of [-0.36, 0.36]) pm(g, PTORUS, au, x, 1.35, 0, 0.12, 0.12, 0.12); } },
+    fountain:   { cat: "fun", name: "Fountain", r: 1.4, tint: 0x5ac8ff, make(g, c) { const s = pmat(0xc8c0b0); pm(g, PCYL, s, 0, 0.3, 0, 1.4, 0.6, 1.4); pm(g, PCYL, new THREE.MeshLambertMaterial({ color: c, emissive: 0x0a2a3a }), 0, 0.55, 0, 1.25, 0.05, 1.25); pm(g, CYL8, s, 0, 1.1, 0, 0.18, 1.4, 0.18); pm(g, PHALF, s, 0, 1.75, 0, 0.6, 0.25, 0.6, Math.PI); pm(g, CONE6, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.6 }), 0, 2.1, 0, 0.18, 0.6, 0.18); } },
+    snowman:    { cat: "fun", name: "Snowman", r: 0.5, tint: 0xf4f8ff, make(g, c) { const s = pmat(c); pm(g, PSPH, s, 0, 0.5, 0, 0.55); pm(g, PSPH, s, 0, 1.2, 0, 0.4); pm(g, PSPH, s, 0, 1.75, 0, 0.28); pm(g, CONE6, pmat(0xff7a1a), 0, 1.75, 0.35, 0.05, 0.25, 0.05, Math.PI / 2); for (const x of [-0.1, 0.1]) pm(g, PSPH, pmat(0x1a1a1e), x, 1.85, 0.24, 0.04); pm(g, CYL8, pmat(0x1a1a1e), 0, 2.08, 0, 0.22, 0.3, 0.22); } },
+    beachball:  { cat: "fun", name: "Beach ball", r: 0, tint: 0xff4a4a, make(g, c) { pm(g, PSPH2, pmat(c), 0, 0.35, 0, 0.35); pm(g, PTORUS, pmat(0xffffff), 0, 0.35, 0, 0.35, 0.35, 0.2); } },
+    balloon:    { cat: "fun", name: "Balloon", r: 0, tint: 0xff5ab0, make(g, c) { pm(g, PSPH2, new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.15 }), 0, 2.6, 0, 0.35, 0.42, 0.35); pm(g, CYL6, pmat(0xf4f4f4), 0, 1.2, 0, 0.01, 2.3, 0.01); } },
+    portal:     { cat: "fun", name: "Portal", r: 0, tint: 0xb07aff, light: [0xb07aff, 8, 10, 1.6], make(g, c) { pm(g, PTORUS, pglow(c), 0, 1.6, 0, 1.2, 1.4, 1.2); pm(g, PCYL, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }), 0, 1.6, 0, 1.05, 0.02, 1.25, Math.PI / 2); } },
+    shrine:     { cat: "fun", name: "Shrine", r: 0.7, tint: 0x7affb0, light: [0x7affb0, 6, 8, 1.6], make(g, c) { const s = pmat(0x8a8a96); pm(g, BOX, s, 0, 0.2, 0, 1.4, 0.4, 1.4); pm(g, CYL8, s, 0, 0.9, 0, 0.25, 1.1, 0.25); pm(g, ICO, pglow(c), 0, 1.75, 0, 0.3); } },
+    // ---- shapes ----
+    cube:       { cat: "shapes", name: "Cube", r: 0, box: [[0, 0, 0.5, 0.5]], tint: 0xc8c8d0, make(g, c) { pm(g, BOX, pmat(c), 0, 0.5, 0, 1); } },
+    sphere:     { cat: "shapes", name: "Sphere", r: 0.5, tint: 0xc8c8d0, make(g, c) { pm(g, PSPH2, pmat(c), 0, 0.5, 0, 0.5); } },
+    cylinder:   { cat: "shapes", name: "Cylinder", r: 0.5, tint: 0xc8c8d0, make(g, c) { pm(g, PCYL, pmat(c), 0, 0.5, 0, 0.5, 1, 0.5); } },
+    cone:       { cat: "shapes", name: "Cone", r: 0.45, tint: 0xc8c8d0, make(g, c) { pm(g, new THREE.ConeGeometry(0.5, 1, 16), pmat(c), 0, 0.5, 0, 1); } },
+    pyramid:    { cat: "shapes", name: "Pyramid", r: 0.5, tint: 0xd8c890, make(g, c) { pm(g, PTENT, pmat(c), 0, 0.5, 0, 0.71, 1, 0.71, 0, Math.PI / 4); } },
+    torus:      { cat: "shapes", name: "Ring", r: 0, tint: 0xc8c8d0, make(g, c) { pm(g, PTORUS, pmat(c), 0, 0.8, 0, 0.6); } },
+    ramp:       { cat: "shapes", name: "Ramp", r: 0, tint: 0xc8c8d0, make(g, c) { pm(g, PWEDGE_G, pmat(c), 0, 0, 0, 2, 1, 3); } },
+    panel:      { cat: "shapes", name: "Panel", r: 0, box: [[0, 0, 1, 0.05]], tint: 0xc8c8d0, make(g, c) { pm(g, BOX, pmat(c), 0, 1, 0, 2, 2, 0.1); } }
 };
+// the people you can place: a face, colours, and something to say
+const NPC_LOOKS = { villager: { face: "clerk", skin: 0xf0c8a0, shirt: 0x3a6a9a, pants: 0x2a2a3a, hair: 0x6a4a2a }, smith: { face: "smith", skin: 0xe8b890, shirt: 0x5a3a2a, pants: 0x2a2a3a, apron: 0x3a2a1a, beard: 0x6a4a2a, hat: "cap", hatCol: 0x2a2a30, wide: 1.3, belly: true },
+    witch: { face: "witch", skin: 0xc8e0b0, shirt: 0x3a2a5a, pants: 0x1a1a2a, hair: 0x2a1a3a, hat: "witch", hatCol: 0x2a1a3a }, sailor: { face: "clerk", skin: 0xe8c0a0, shirt: 0xf2f2f2, vest: 0x1a3a6a, pants: 0x1a2a4a, hat: "cap", hatCol: 0x1a3a6a, beard: 0xd8d0c8 },
+    ghost: { face: "clerk", skin: 0x9fe8ff, shirt: 0x5ab8d8, pants: 0x3a8aa8, hair: 0xd8f8ff, ghost: true }, miner: { face: "smith", skin: 0xe8b890, shirt: 0x6a5a3a, pants: 0x3a3a3a, hat: "mask", beard: 0x3a2a1a } };
 // a sign's face: a wooden board with carved letters, or the game's dark board with glowing ones
 function signTexture(o) {
     const cv = document.createElement("canvas"); cv.width = 512; cv.height = 256;
@@ -13198,26 +13615,51 @@ function buildSign(g, o) {
     if (post) pm(g, BOX, pmat(0x4a3020), 0, (y - 0.3) / 2, 0, 0.16, y - 0.3, 0.16);
     return { r: post ? 0.3 : 0.5, tex };
 }
+// looks you can give anything: glowing, see-through like a ghost, or a dark silhouette
+const fxMats = new Map();
+function fxMat(m, fx) {
+    const k = m.uuid + "|" + fx; if (fxMats.has(k)) return fxMats.get(k);
+    const c = m.color ? m.color.getHex() : 0xffffff;
+    const out = fx === "glow" ? new THREE.MeshBasicMaterial({ color: c }) : fx === "ghost" ? new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: 0.35, transparent: true, opacity: 0.42, depthWrite: false }) : fx === "dark" ? new THREE.MeshLambertMaterial({ color: new THREE.Color(c).multiplyScalar(0.18), flatShading: true }) : m;
+    fxMats.set(k, out); return out;
+}
+if (!save.studioDone || typeof save.studioDone !== "object") save.studioDone = {}; // chests looted and shrines used, by object id
 function placedBuild(o) {
     const G = isleGroup(+o.isle);
     if (!G) return null;
-    const g = new THREE.Group();
-    let r = 0, tex = null;
-    if (o.kind === "sign") ({ r, tex } = buildSign(g, o));
-    else { const P = PROPS[o.prop] || PROPS.rock; P.make(g, o.col ? hexN(o.col) : P.tint); r = P.r; }
+    const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+    let r = 0, tex = null, npc = null, P = null;
+    if (o.kind === "sign") ({ r, tex } = buildSign(body, o));
+    else if (o.kind === "npc") {
+        const look = { ...(NPC_LOOKS[o.look] || NPC_LOOKS.villager) };
+        if (o.col) look.shirt = hexN(o.col);
+        npc = makeHumanoid(look); body.add(npc.g); npc.yaw = +o.ry || 0; r = 0.45; if (look.face === "smith") giveHammer(npc);
+        if (look.ghost) body.traverse(m => { if (m.isMesh && m.material && !m.material.map) m.material = fxMat(m.material, "ghost"); });
+    } else if (o.kind === "treespot") { if (STUDIO) { pm(body, PTORUS, pglow(0x6dffa0), 0, 0.05, 0, 0.9, 0.9, 0.15, Math.PI / 2); pm(body, CONE6, pglow(0x6dffa0), 0, 0.6, 0, 0.12, 0.8, 0.12); } }
+    else { P = PROPS[o.prop] || PROPS.rock; P.make(body, o.col ? hexN(o.col) : P.tint); r = P.r; }
+    if (o.fx && o.fx !== "none") body.traverse(m => { if (m.isMesh && m.material && !m.material.map) m.material = fxMat(m.material, o.fx); });
+    const L = o.light && o.light.on !== false ? o.light : P && P.light && !(o.light && o.light.on === false) ? { color: "#" + P.light[0].toString(16).padStart(6, "0"), power: P.light[1], range: P.light[2], y: P.light[3] } : null;
+    let light = null;
+    if (L) { light = new THREE.PointLight(hexN(L.color || "#ffc070"), clamp(+L.power || 10, 0, 60), clamp(+L.range || 14, 2, 60), 1.6); light.position.y = +L.y || (P && P.light ? P.light[3] : 1.5); g.add(light); }
     g.userData.placed = o;
     G.add(g);
-    const rec = { o, g, r, tex };
+    const rec = { o, g, body, r, tex, npc, light, box: P && P.box ? P.box : null, tree: null, regrowAt: 0, label: null, paused: false };
+    if (o.label) { const l = label(String(o.label).slice(0, 40), o.labelCol || "#ffd040", 2.8, 0.7); l.isle = +o.isle; l.maxD = 60; rec.label = l; }
     placed.push(rec);
     placedPose(rec);
     return rec;
 }
 const placedFind = o => placed.find(p => p.o === o);
-function placedPose(rec) { // where it stands, how it's turned, its size, and its collision circle if it's solid
-    const { o, g } = rec, s = +o.s || 1;
-    g.position.set(+o.x || 0, +o.y || 0, +o.z || 0); g.rotation.set(+o.rx || 0, +o.ry || 0, +o.rz || 0); g.scale.setScalar(s);
-    const i = placedSolids.findIndex(c => c.o === o); if (i >= 0) placedSolids.splice(i, 1);
-    if (o.solid && rec.r > 0) placedSolids.push({ x: g.position.x, z: g.position.z, r: rec.r * s, isle: +o.isle, o });
+function placedPose(rec) { // where it stands, how it's turned, its size, and the walls you bump into (animations only move the inner body)
+    const { o, g } = rec, s = +o.s || 1, sx = s * (+o.sx || 1), sy = s * (+o.sy || 1), sz = s * (+o.sz || 1);
+    g.position.set(+o.x || 0, +o.y || 0, +o.z || 0); g.rotation.set(+o.rx || 0, +o.ry || 0, +o.rz || 0); g.scale.set(sx, sy, sz);
+    rec.body.rotation.set(0, 0, 0); rec.body.scale.set(1, 1, 1); rec.body.position.set(0, 0, 0);
+    if (rec.npc) rec.npc.yaw = +o.ry || 0;
+    if (rec.label) rec.label.position.set(g.position.x, g.position.y + (o.kind === "sign" ? 3 : o.kind === "npc" ? 2.7 : 2.4) * sy, g.position.z);
+    for (let i = placedSolids.length - 1; i >= 0; i--) if (placedSolids[i].o === o) placedSolids.splice(i, 1);
+    if (!o.solid) return;
+    if (rec.box) { const cs = Math.cos(+o.ry || 0), sn = Math.sin(+o.ry || 0); for (const [bx, bz, hx, hz] of rec.box) placedSolids.push({ box: true, x: g.position.x + (bx * sx) * cs + (bz * sz) * sn, z: g.position.z - (bx * sx) * sn + (bz * sz) * cs, hx: hx * sx, hz: hz * sz, cs, sn, isle: +o.isle, o }); }
+    else if (rec.r > 0) placedSolids.push({ x: g.position.x, z: g.position.z, r: rec.r * Math.max(sx, sz), isle: +o.isle, o });
 }
 function placedRemove(o) {
     const i = placed.findIndex(p => p.o === o);
@@ -13225,10 +13667,90 @@ function placedRemove(o) {
     const rec = placed[i];
     if (rec.g.parent) rec.g.parent.remove(rec.g);
     if (rec.tex) { rec.tex.dispose(); rec.g.traverse(m => { if (m.isMesh && m.material.map === rec.tex) m.material.dispose(); }); }
+    if (rec.label) { rec.label.el.remove(); const j = labelList.indexOf(rec.label); if (j >= 0) labelList.splice(j, 1); }
+    if (rec.tree && !rec.tree.gone) { scene.remove(rec.tree.g); rec.tree.gone = true; }
     placed.splice(i, 1);
-    const j = placedSolids.findIndex(c => c.o === o); if (j >= 0) placedSolids.splice(j, 1);
+    for (let k = placedSolids.length - 1; k >= 0; k--) if (placedSolids[k].o === o) placedSolids.splice(k, 1);
 }
 function placedRebuild(o) { placedRemove(o); return placedBuild(o); }
+// every frame: animations, day/night visibility, NPCs, and tree spots growing back
+function placedTick(dt) {
+    const night = isNight(), npcs = [];
+    for (const rec of placed) {
+        const o = rec.o; if (+o.isle !== isle) continue;
+        rec.g.visible = state === "studio" || !o.show || (o.show === "night" ? night : !night);
+        if (rec.npc) npcs.push(rec.npc);
+        if (o.anim && !rec.paused) {
+            const t = time * (+o.animSpeed || 1), b = rec.body;
+            if (o.anim === "spin") b.rotation.y = t;
+            else if (o.anim === "bob") b.position.y = Math.sin(t * 2) * 0.2;
+            else if (o.anim === "float") b.position.y = 0.6 + Math.sin(t * 1.3) * 0.35;
+            else if (o.anim === "sway") b.rotation.z = Math.sin(t * 1.6) * 0.12;
+            else if (o.anim === "pulse") b.scale.setScalar(1 + Math.sin(t * 3) * 0.07);
+            if (rec.light && o.anim === "flicker") rec.light.intensity = (+((o.light && o.light.power) || (PROPS[o.prop] && PROPS[o.prop].light && PROPS[o.prop].light[1]) || 10)) * (0.8 + Math.sin(t * 13) * 0.12 + Math.sin(t * 7.3) * 0.08);
+        }
+        if (o.kind === "treespot" && TYPES[o.tree]) { // a tree that always grows here, and grows back after it's chopped
+            if (!rec.tree || rec.tree.gone) {
+                if (!rec.regrowAt) rec.regrowAt = time + (rec.tree && rec.tree.hp <= 0 ? Math.max(0.1, +o.regrow || 3) * 60 : 0);
+                if (time >= rec.regrowAt) { rec.tree = makeTree(+o.x, +o.z, clamp(+o.height || 6, 3, 14), o.tree); rec.regrowAt = 0; }
+            }
+        }
+    }
+    if (npcs.length) updateNpcs(dt, npcs);
+}
+// walking up to something interactive
+const ACT_R = { talk: 2.8, read: 2.6, loot: 2.4, shrine: 2.8, portal: 2.2 };
+function nearestPlaced() {
+    let best = null, bd = 1e9;
+    for (const rec of placed) {
+        const o = rec.o; if (+o.isle !== isle || !o.act || !o.act.type || !rec.g.visible) continue;
+        const d = Math.hypot(player.pos.x - rec.g.position.x, player.pos.z - rec.g.position.z), lim = (ACT_R[o.act.type] || 2.5) + (rec.r || 0) * (+o.s || 1);
+        if (d < lim && d < bd) { bd = d; best = o; }
+    }
+    return best ? { k: "placed", o: best } : null;
+}
+const doneKey = o => "s" + o.id;
+function placedPrompt(o) {
+    const a = o.act || {}, done = save.studioDone[doneKey(o)];
+    if (a.type === "talk") return `[F] Talk to ${a.who || "them"}`;
+    if (a.type === "read") return `[F] Read${a.title ? " " + a.title : ""}`;
+    if (a.type === "loot") return (a.every === "day" ? done === save.day : done !== undefined) ? (a.every === "day" ? "Empty. It fills again tomorrow" : "Empty") : "[F] Open";
+    if (a.type === "shrine") return done === save.day ? "The shrine is quiet until tomorrow" : `[F] ${a.verb || "Pray at the shrine"}`;
+    if (a.type === "portal") return "[F] Step through";
+    return "[F] Use";
+}
+function placedInteract(o) {
+    const a = o.act || {}, k = doneKey(o);
+    if (a.type === "talk") { const lines = (Array.isArray(a.lines) ? a.lines : String(a.lines || "").split("\n")).map(s => String(s).trim()).filter(Boolean); startTalk(String(a.who || "STRANGER").toUpperCase(), lines.length ? lines : ["..."], null); return; }
+    if (a.type === "read") { startTalk(String(a.title || "A NOTE").toUpperCase(), String(a.text || "").split("\n\n").map(s => s.trim()).filter(Boolean).concat(a.text ? [] : ["(It's blank.)"]), null); return; }
+    if (a.type === "loot") {
+        const done = save.studioDone[k];
+        if (a.every === "day" ? done === save.day : done !== undefined) { toast("It's empty.", "bad"); return; }
+        save.studioDone[k] = a.every === "day" ? save.day : 1;
+        const cash = Math.round((+a.cash || 0) * (a.scale === false ? 1 : rebirthMult())), mat = MATS[a.mat] ? a.mat : null, n = Math.round(+a.amount || 0);
+        if (cash > 0) save.money += cash;
+        if (mat && n > 0) save.mats[mat] = (save.mats[mat] || 0) + n;
+        sfx(520, 0.2, "triangle", 0.12, 1.6); flash = 0.3;
+        toast(String(a.message || "You found treasure!") + (cash > 0 ? ` +${money(cash)}` : "") + (mat && n > 0 ? ` +${n} ${MATS[mat].name}` : ""), "cash");
+        writeSave(); return;
+    }
+    if (a.type === "shrine") {
+        if (save.studioDone[k] === save.day) { toast("The shrine is quiet. Come back tomorrow.", "bad"); return; }
+        save.studioDone[k] = save.day;
+        if (a.heal !== false) player.hp = player.maxHp;
+        const b = BUFFS[a.buff] ? a.buff : null; if (b) giveBuff(b, clamp(+a.secs || 120, 10, 900));
+        flash = 0.5; sfx(523, 0.6, "sine", 0.08, 1.5);
+        toast(String(a.message || "You feel blessed.") + (b ? ` ${BUFFS[b].name} for ${mmss(buffLeft(b))}.` : ""), "good");
+        writeSave(); return;
+    }
+    if (a.type === "portal") {
+        const to = placed.find(p => p.o.id === a.to && +p.o.isle === isle);
+        if (!to) { toast("The portal flickers. It doesn't lead anywhere yet.", "bad"); return; }
+        const yaw = +to.o.ry || 0, x = to.g.position.x + Math.sin(yaw) * 2.2, z = to.g.position.z + Math.cos(yaw) * 2.2;
+        player.pos.set(x, groundY(x, z) + 1.7, z); player.vel.set(0, 0, 0); player.yaw = yaw + Math.PI; flash = 0.6; sfx(300, 0.5, "sine", 0.1, 3);
+        return;
+    }
+}
 for (const o of CONTENT_WORLD && Array.isArray(CONTENT_WORLD.objects) ? CONTENT_WORLD.objects : []) placedBuild(o);
 let studioHook = null; // set by studio/studio.js: it flies the camera while you edit
 
@@ -13262,12 +13784,13 @@ function frameBody(now) {
         camera.position.set(Math.cos(orbit) * 15, 4.5, Math.sin(orbit) * 15 - 4);
         camera.lookAt(0, 2.2, -3);
         camera.fov = 70; camera.updateProjectionMatrix();
-        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateIsle6(real, true); updateWeather(real); updateEcosystem(real);
+        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateIsle6(real, true); updateCustomIsles(real); updateWeather(real); updateEcosystem(real);
         applySky();
     } else if (state === "studio") { // Tree Sim 4 Studio: the world keeps living while the editor flies the camera
         time += real;
         if (studioHook) studioHook.frame(real);
-        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateWeather(real); updateEcosystem(real);
+        placedTick(real);
+        updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateIsle6(real, true); updateCustomIsles(real); updateWeather(real); updateEcosystem(real);
         applySky();
         if (studioHook && studioHook.afterSky) studioHook.afterSky(); // the editor can thin the fog out to see a whole island
     }
@@ -13320,7 +13843,7 @@ if (DEBUG) import("./dev.js").catch(e => console.warn("dev panel failed to load:
 if (STUDIO) {
     Object.assign(window.__ts4, {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
-        CONTENT_TREES, CONTENT_WORLD, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
+        CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,
         setStudioHook(h) { studioHook = h; }, get wx() { return wx; }
     });
