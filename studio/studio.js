@@ -55,8 +55,8 @@ body:not(.studio-edit) .st { display: none !important; }
 #stLeft, #stRight { top: 54px; bottom: 44px; width: 330px; background: #150d24ee; border: 1px solid #3a2c55; border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
 #stLeft { left: 8px; } #stRight { right: 8px; width: 300px; }
 #stRight.empty { display: none !important; }
-.stTabs { display: flex; gap: 6px; padding: 10px 10px 0; }
-.stTabs .stB { flex: 1; }
+.stTabs { display: flex; gap: 4px; padding: 10px 10px 0; }
+.stTabs .stB { flex: 1; padding: 6px 3px; }
 .stBody { flex: 1; overflow-y: auto; padding: 10px; }
 .stBody::-webkit-scrollbar { width: 8px; } .stBody::-webkit-scrollbar-thumb { background: #4a3a6a; border-radius: 4px; }
 .stH { font: 800 11px "Segoe UI"; letter-spacing: 2.5px; color: #8a7aa8; margin: 12px 0 7px; display: flex; justify-content: space-between; align-items: center; }
@@ -126,7 +126,7 @@ bar.innerHTML = `<div class="logo">TREE SIM 4 STUDIO <span id="stVer" style="fon
   <button class="stB" id="stRelBtn" title="Ship an update to players">🚀 Release</button>
   <button class="stB go" id="stPlay" title="Play-test from the camera (F5)">▶ Play <small>F5</small></button>`;
 const left = document.createElement("div"); left.id = "stLeft"; left.className = "st";
-left.innerHTML = `<div class="stTabs"><button class="stB on" data-tab="place">Place</button><button class="stB" data-tab="props">Props</button><button class="stB" data-tab="trees">Trees</button><button class="stB" data-tab="islands">Islands</button></div><div class="stBody" id="stLeftBody"></div>`;
+left.innerHTML = `<div class="stTabs"><button class="stB on" data-tab="place">Place</button><button class="stB" data-tab="props">Props</button><button class="stB" data-tab="animals">Animals</button><button class="stB" data-tab="trees">Trees</button><button class="stB" data-tab="islands">Islands</button></div><div class="stBody" id="stLeftBody"></div>`;
 const right = document.createElement("div"); right.id = "stRight"; right.className = "st empty";
 right.innerHTML = `<div class="stBody" id="stInsp"></div>`;
 const help = document.createElement("div"); help.id = "stHelp"; help.className = "st";
@@ -230,14 +230,14 @@ function fromGizmo() {
     T.placedPose(rec);
 }
 function select(o) {
-    if (pmGizmo) { pmGizmo = false; partSel = -1; if (tab === "props") renderPropMaker(); }
+    if (pmGizmo) { pmGizmo = false; partSel = -1; if (makerTab()) renderMaker(); }
     const prev = selRec(); if (prev) prev.paused = false;
     sel = o;
     const rec = selRec();
     if (rec) { rec.paused = true; T.placedPose(rec); tc.attach(rec.g); } else tc.detach(); // it holds still while you edit it
     renderInspector(); renderObjects();
 }
-function deselect() { if (pmGizmo) { pmGizmo = false; partSel = -1; if (tab === "props") renderPropMaker(); } const prev = selRec(); if (prev) prev.paused = false; sel = null; tc.detach(); renderInspector(); renderObjects(); }
+function deselect() { if (pmGizmo) { pmGizmo = false; partSel = -1; if (makerTab()) renderMaker(); } const prev = selRec(); if (prev) prev.paused = false; sel = null; tc.detach(); renderInspector(); renderObjects(); }
 
 // ---------- undo ----------
 const undo = [], redo = [];
@@ -264,10 +264,10 @@ function doRedo() { if (!redo.length) { say("Nothing to redo"); return; } undo.p
 
 // ---------- saving ----------
 let islands = (Array.isArray(T.CONTENT_ISLANDS) ? T.CONTENT_ISLANDS : []).map(d => JSON.parse(JSON.stringify(d)));
-let islandsDirty = false, propsDirty = false;
+let islandsDirty = false, propsDirty = false, animalsDirty = false;
 function changed(what = "world") {
-    if (what === "world") worldDirty = true; else if (what === "trees") treesDirty = true; else if (what === "props") propsDirty = true; else islandsDirty = true;
-    $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty);
+    if (what === "world") worldDirty = true; else if (what === "trees") treesDirty = true; else if (what === "props") propsDirty = true; else if (what === "animals") animalsDirty = true; else islandsDirty = true;
+    $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty);
     clearTimeout(saveT);
     if ($("stAuto").checked) saveT = setTimeout(() => saveAll(true), 1500);
 }
@@ -278,9 +278,10 @@ async function saveAll(quiet) {
     if (treesDirty) jobs.push(S.save("trees", trees).then(r => { if (r.ok) treesDirty = false; return r; }));
     if (islandsDirty) jobs.push(S.save("islands", islands).then(r => { if (r.ok) islandsDirty = false; return r; }));
     if (propsDirty) jobs.push(S.save("props", myProps).then(r => { if (r.ok) propsDirty = false; return r; }));
+    if (animalsDirty) jobs.push(S.save("animals", myAnimals).then(r => { if (r.ok) animalsDirty = false; return r; }));
     if (!jobs.length) { if (!quiet) say("Everything is saved"); return; }
     const res = await Promise.all(jobs), bad = res.find(r => !r.ok);
-    $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty);
+    $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty);
     if (bad) say("Couldn't save: " + bad.error, 5000); else say(quiet ? "Autosaved" : "Saved to content/", quiet ? 900 : 2200);
 }
 
@@ -495,11 +496,11 @@ function bindInspector(o) {
 }
 
 // ---------- the left panel: Place, Trees, Islands ----------
-let tab = ["trees", "islands", "props"].includes(pref("tab")) ? pref("tab") : "place";
+let tab = ["trees", "islands", "props", "animals"].includes(pref("tab")) ? pref("tab") : "place";
 let propCat = pref("propCat") || "all", propFind = "";
 function renderLeft() {
     left.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
-    if (tab === "trees") renderTrees(); else if (tab === "islands") renderIslands(); else if (tab === "props") renderPropMaker(); else renderPlace();
+    if (tab === "trees") renderTrees(); else if (tab === "islands") renderIslands(); else if (tab === "props" || tab === "animals") renderMaker(); else renderPlace();
 }
 function propGrid() {
     const q = propFind.trim().toLowerCase(), list = Object.entries(T.PROPS).filter(([k, p]) => (propCat === "all" || p.cat === propCat) && (!q || p.name.toLowerCase().includes(q) || k.includes(q)));
@@ -531,7 +532,7 @@ function renderObjects() {
 }
 left.addEventListener("click", e => {
     const t = e.target.closest("[data-tab]");
-    if (t) { tab = t.dataset.tab; pref("tab", tab); clearPreview(); pmClearPreview(); renderLeft(); if (tab === "trees") showPreview(true); if (tab === "props") pmShowPreview(true); return; }
+    if (t) { tab = t.dataset.tab; pref("tab", tab); clearPreview(); pmClearPreview(); partSel = -1; pmAt = null; renderLeft(); if (tab === "trees") showPreview(true); if (makerTab()) pmShowPreview(true); return; }
     const c = e.target.closest("[data-cat]");
     if (c) { propCat = c.dataset.cat; pref("propCat", propCat); renderPlace(); return; }
     const p = e.target.closest("[data-place]");
@@ -552,6 +553,7 @@ const toHex = n => "#" + ((n >>> 0) & 0xffffff).toString(16).padStart(6, "0");
 const isHex = s => typeof s === "string" && /^#[0-9a-f]{6}$/i.test(s);
 const clampN = (v, a, b, d) => { v = +v; return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : d; };
 let treeSel = trees[0] ? trees[0].key : null, preview = null, previewH = 7;
+let treeGroup = pref("treeGroup") === "used" ? "used" : "unused"; // the Trees tab lists the Unused ones or the ones On islands
 const curTree = () => trees.find(t => t.key === treeSel) || null;
 function uniqueKey(name) {
     const base = "c_" + (String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 24) || "tree");
@@ -559,15 +561,14 @@ function uniqueKey(name) {
     while (T.TYPES[k] || trees.some(t => t.key === k)) k = base + "_" + n++;
     return k;
 }
-function blankTree(name = "New Tree") {
-    const i = curIsle();
+function blankTree(name = "New Tree") { // new trees wait in Unused until you put them on an island
     return { key: uniqueKey(name), name, shape: "round", leaf: ["#3a7a3a", "#2f6a3a"], trunk: "#4a3024", glow: "", dots: "", snow: false, rocks: false, col: "#a0d060",
-        hp: 1.6, logs: 1.4, dmg: 1.1, speed: 1, bonus: 6, wd: 0.3, wn: 0.25, isl: [i], arch: i === 5 ? T.getArch() : "", minTier: 0, mat: "", rare: false, night: false, flee: false, titan: false, tall: false };
+        hp: 1.6, logs: 1.4, dmg: 1.1, speed: 1, bonus: 6, wd: 0.3, wn: 0.25, isl: [], arch: "", minTier: 0, mat: "", rare: false, night: false, flee: false, titan: false, tall: false };
 }
 function fromBuiltin(k) {
     const B = T.TYPES[k], St = T.TREE_STYLE[k] || { s: "conifer" };
     return { ...blankTree(B.name + " Copy"), name: B.name + " Copy", shape: St.s, leaf: B.leaf.map(toHex), trunk: toHex(B.trunk), glow: B.glow !== undefined ? toHex(B.glow) : "", dots: St.dots !== undefined ? toHex(St.dots) : "",
-        snow: !!St.snow, rocks: !!St.rocks, col: B.col, hp: B.hp, logs: B.logs, dmg: B.dmg, speed: B.speed, bonus: B.bonus, wd: B.wd, wn: B.wn, isl: [...(B.isl || [1])], arch: B.arch || "",
+        snow: !!St.snow, rocks: !!St.rocks, col: B.col, hp: B.hp, logs: B.logs, dmg: B.dmg, speed: B.speed, bonus: B.bonus, wd: B.wd, wn: B.wn, isl: [], arch: "",
         minTier: B.minTier || 0, mat: B.mat || "", rare: !!B.rare, night: !!B.night, flee: !!B.flee, titan: !!B.titan, tall: !!B.tall };
 }
 const builtins = () => Object.entries(T.TYPES).filter(([k, B]) => !B.custom && !B.rush && (B.isl || [1]).length).map(([k, B]) => [k, B.name]);
@@ -612,14 +613,16 @@ function spawnTest(n) {
     for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, d = 5 + Math.random() * 10; T.makeTree(c.x + Math.cos(a) * d, c.z + Math.sin(a) * d, tr.titan ? 10 : 3 + Math.random() * 6, tr.key); }
     say(`${n} ${tr.name}s planted. Press F5 to go and chop them`);
 }
-function newTree(tr) { trees.push(tr); treeSel = tr.key; applyTree(tr); previewAt = null; renderTrees(); showPreview(true); }
+function newTree(tr) { trees.push(tr); treeSel = tr.key; treeGroup = (tr.isl || []).length ? "used" : "unused"; applyTree(tr); previewAt = null; renderTrees(); showPreview(true); }
 function renderTrees() {
     const tr = curTree(), opt = (v, cur, label) => `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(label)}</option>`;
+    const unused = trees.filter(t => !(t.isl || []).length), used = trees.filter(t => (t.isl || []).length), shown = treeGroup === "unused" ? unused : used;
     let h = `<div class="stH">YOUR TREES <small>${trees.length ? trees.length + " made" : ""}</small></div>
-      <div class="stList">${trees.map(t => `<div class="stItem${t.key === treeSel ? " on" : ""}" data-tree="${esc(t.key)}"><span><span style="color:${esc(t.col)}">●</span> ${esc(t.name)}</span><small>${t.isl.map(i => esc(isleName(i))).join(", ")}</small></div>`).join("") || `<div class="stHint">No custom trees yet. Make one below, copy a tree from the game, or ask Claude.</div>`}</div>
+      <div class="stBtns" style="margin:0 0 6px"><button class="stB${treeGroup === "unused" ? " on" : ""}" data-tgroup="unused" style="flex:1">Unused (${unused.length})</button><button class="stB${treeGroup === "used" ? " on" : ""}" data-tgroup="used" style="flex:1">On islands (${used.length})</button></div>
+      <div class="stList">${shown.map(t => `<div class="stItem${t.key === treeSel ? " on" : ""}" data-tree="${esc(t.key)}"><span><span style="color:${esc(t.col)}">●</span> ${esc(t.name)}</span><small>${(t.isl || []).length ? t.isl.map(i => esc(isleName(i))).join(", ") : "not on an island yet"}</small></div>`).join("") || `<div class="stHint">${treeGroup === "unused" ? "Nothing waiting here. New trees start in Unused: make one below, copy a game tree, or ask Claude. Then put it on an island: tick one under WHERE AND WHEN, or add it in the Islands tab." : "None of your trees are on an island yet. Tick an island under a tree's WHERE AND WHEN, or add it in the Islands tab."}</div>`}</div>
       <div class="stBtns"><button class="stB" id="tNew">+ New tree</button><select class="stSel" id="tCopy" style="flex:1"><option value="">Copy a game tree…</option>${builtins().map(([k, n]) => opt(k, "", n)).join("")}</select></div>`;
     if (!tr) { $("stLeftBody").innerHTML = h; bindTrees(); clearPreview(); return; }
-    const mats = matsFor(tr), axes = T.AXES.map((a, i) => [i, `${i} · ${a.name}`]), c3 = (id, v, on) => `<input class="stIn" type="color" id="${id}" value="${isHex(v) ? v : "#808080"}"${on === false ? " disabled" : ""}>`;
+    const mats = matsFor(tr), axes = T.AXES.slice(0, T.BASE_AXES).map((a, i) => [i, i ? a.name + " or better" : "Rusty Axe: from the start"]), c3 = (id, v, on) => `<input class="stIn" type="color" id="${id}" value="${isHex(v) ? v : "#808080"}"${on === false ? " disabled" : ""}>`;
     h += `<div class="stClaude" style="margin-top:12px"><div class="stH">✦ ASK CLAUDE <select class="stSel" id="tModel" title="Haiku is the cheapest">${opt("haiku", pref("model") || "haiku", "Haiku (cheapest)")}${opt("sonnet", pref("model") || "haiku", "Sonnet")}${opt("opus", pref("model") || "haiku", "Opus")}</select></div>
         <textarea class="stTa" id="tAsk" placeholder="Describe a tree, e.g. a ghostly willow that only grows at night on Mooncap and drops Voidglass"></textarea>
         <div class="stBtns"><button class="stB" id="tAskGo" style="flex:1">Design it with Claude</button></div><div class="stMsg" id="tAskMsg"></div></div>
@@ -640,7 +643,8 @@ function renderTrees() {
       ${tr.isl.includes(5) ? `<div class="stRow"><label>Archipelago island</label><select class="stSel" id="tArch">${opt("", tr.arch, "any")}${["haven", "coral", "skull", "frost", "storm"].map(k => opt(k, tr.arch, T.ARCH_BY[k].name)).join("")}</select></div>` : ""}
       ${num("tWd", "Day weight", tr.wd, 0.01)}${num("tWn", "Night weight", tr.wn, 0.01)}
       <div class="stHint">Weights are chances next to the island's other trees: common ones are 0.5–0.9, rare ones 0.02–0.15.</div>
-      <div class="stRow"><label>Appears from</label><select class="stSel" id="tTier" style="max-width:170px">${axes.map(([i, n]) => opt(i, tr.minTier, n)).join("")}</select></div>
+      <div class="stRow"><label>Grows once players own</label><select class="stSel" id="tTier" style="max-width:170px">${axes.map(([i, n]) => opt(i, tr.minTier, n)).join("")}</select></div>
+      ${tr.minTier ? `<div class="stHint">After every rebirth players start again with the Rusty Axe, so this tree stays away until they've made the ${esc(axeName(tr.minTier))}. The Studio shows it anyway. An island can also let every tree grow from the start (Islands tab).</div>` : ""}
       <div class="stRow"><label>Drops</label><select class="stSel" id="tMat">${opt("", tr.mat, tr.isl.some(i => i >= 2) ? "island default" : "logs (Pine Island)")}${mats.map(k => opt(k, tr.mat, T.MATS[k].name)).join("")}</select></div>
       <div class="stChecks">${[["rare", "Rare"], ["night", "Night only"], ["flee", "Runs away"], ["titan", "Titan (huge)"], ["tall", "Tall"]].map(([k, n]) => `<label><input type="checkbox" data-flag="${k}"${tr[k] ? " checked" : ""}> ${n}</label>`).join("")}</div>
       <div class="stH">PREVIEW</div>
@@ -654,6 +658,8 @@ function bindTrees() {
     const on = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); };
     on("tNew", "click", () => newTree(blankTree()));
     on("tCopy", "change", e => { if (e.target.value) newTree(fromBuiltin(e.target.value)); });
+    $("stLeftBody").querySelectorAll("[data-tgroup]").forEach(b => b.addEventListener("click", () => { treeGroup = b.dataset.tgroup; pref("treeGroup", treeGroup); renderTrees(); }));
+    $("stLeftBody").querySelectorAll("[data-tree]").forEach(it => it.addEventListener("click", () => { treeSel = it.dataset.tree; renderTrees(); showPreview(true); }));
     const tr = curTree(); if (!tr) return;
     const set = (fn, rerender) => { fn(tr); applyTree(tr); if (rerender) renderTrees(); };
     on("tName", "input", e => set(t => (t.name = e.target.value.slice(0, 32) || "Tree")));
@@ -673,12 +679,14 @@ function bindTrees() {
     const numT = (id, k, a, b) => on(id, "input", e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) set(t => (t[k] = r3(Math.min(b, Math.max(a, v))))); });
     numT("tHp", "hp", 0.3, 12); numT("tLogs", "logs", 0.1, 10); numT("tDmg", "dmg", 0, 3); numT("tSpeed", "speed", 0.3, 3); numT("tBonus", "bonus", 0, 150); numT("tWd", "wd", 0, 1.5); numT("tWn", "wn", 0, 1.5);
     $("stLeftBody").querySelectorAll("[data-isl]").forEach(cb => cb.addEventListener("change", () => {
-        const isl = [...$("stLeftBody").querySelectorAll("[data-isl]")].filter(c => c.checked).map(c => +c.dataset.isl);
-        if (!isl.length) { cb.checked = true; say("A tree needs at least one island"); return; }
+        const isl = [...$("stLeftBody").querySelectorAll("[data-isl]")].filter(c => c.checked).map(c => +c.dataset.isl), here = curIsle(), was = tr.isl.includes(here);
+        treeGroup = isl.length ? "used" : "unused"; pref("treeGroup", treeGroup); // with no islands it waits in Unused
         set(t => { t.isl = isl; if (!isl.includes(5)) t.arch = ""; if (t.mat && !matsFor(t).includes(t.mat)) t.mat = ""; }, true);
+        if (was !== isl.includes(here)) regrowSoon(); // the forest here grows again, with or without it
+        say(isl.length ? `${tr.name} grows on ${isl.map(i => isleName(i)).join(", ")}` : `${tr.name} is waiting in Unused`);
     }));
     on("tArch", "change", e => set(t => (t.arch = e.target.value)));
-    on("tTier", "change", e => set(t => (t.minTier = +e.target.value)));
+    on("tTier", "change", e => set(t => (t.minTier = +e.target.value), true));
     on("tMat", "change", e => set(t => (t.mat = e.target.value)));
     $("stLeftBody").querySelectorAll("[data-flag]").forEach(cb => cb.addEventListener("change", () => set(t => { t[cb.dataset.flag] = cb.checked; if (t.flee) t.dmg = 0; }, cb.dataset.flag === "flee")));
     on("tH", "input", e => { previewH = +e.target.value; showPreview(); });
@@ -690,7 +698,6 @@ function bindTrees() {
     });
     on("tModel", "change", e => pref("model", e.target.value));
     on("tAskGo", "click", () => askClaude(tr));
-    $("stLeftBody").querySelectorAll("[data-tree]").forEach(it => it.addEventListener("click", () => { treeSel = it.dataset.tree; renderTrees(); showPreview(true); }));
 }
 
 // ---------- Ask Claude: one short request, a JSON tree back ----------
@@ -701,15 +708,15 @@ function claudePrompt(desc, tr) {
     const mats = matsFor(tr).map(k => `${k} (${T.MATS[k].name}, $${T.MATS[k].price})`).join(", ");
     return `Design one tree from this description: "${desc}"
 
-It grows on: ${isl.map(i => isleName(i)).join(", ")}. Trees already there, for balance: ${JSON.stringify(here)}
+${isl.length ? `It grows on: ${isl.map(i => isleName(i)).join(", ")}. Trees already there, for balance: ${JSON.stringify(here)}` : "It isn't on an island yet: balance it like a mid-game tree."}
 ${mats ? "Material keys it can drop: " + mats + "." : "On Pine Island trees drop plain logs, so leave mat empty."}
-Axes go from index 0 (Rusty Axe) to ${T.AXES.length - 1} (${T.AXES[T.AXES.length - 1].name}); minTier is the best axe needed before the tree appears.
+minTier is the axe players need before the tree appears, from 0 (Rusty Axe) to ${T.BASE_AXES - 1}. After every rebirth players start again with the Rusty Axe, so most trees should be 0: use 1-4 only for a rarer, tougher tree, and more only for a titan.
 
 Return JSON with exactly these fields:
 {"name": "1-3 words, Title Case", "shape": "conifer|round|tall|birch|spiky|dead|crystal|shroom|xmas", "leaf": ["#rrggbb", up to 3 canopy colours], "trunk": "#rrggbb",
  "glow": "#rrggbb dark emissive tint for magical trees, like #1a0a30, or empty string", "dots": "#rrggbb glowing fruit or sparkle dots, or empty string", "snow": false, "rocks": false,
  "col": "#rrggbb bright nameplate colour", "hp": 0.6-9, "logs": 0.3-8, "dmg": 0-2.5 (0 if it runs away), "speed": 0.6-2, "bonus": 0-100,
- "wd": 0-1 day spawn weight, "wn": 0-1 night spawn weight, "minTier": 0-${T.AXES.length - 1}, "mat": "a material key above or empty",
+ "wd": 0-1 day spawn weight, "wn": 0-1 night spawn weight, "minTier": 0-${T.BASE_AXES - 1} (usually 0), "mat": "a material key above or empty",
  "rare": bool, "night": bool (only at night), "flee": bool (runs away, never attacks), "titan": bool (huge), "tall": bool}
 Make it fit the description and the island's mood, and keep the numbers balanced against the trees already there.`;
 }
@@ -724,10 +731,11 @@ async function askClaude(tr) {
     let j = null;
     try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
     if (!j) { msg.className = "stMsg bad"; msg.textContent = "Claude's answer wasn't a tree. Try again or reword it."; return; }
-    const cur = curTree(); if (!cur) return;
+    if (!trees.includes(tr)) return; // the tree it was asked about, even if you've clicked another one since
+    const cur = tr;
     Object.assign(cur, cleanTree(j, cur));
-    applyTree(cur); renderTrees();
-    const m2 = $("tAskMsg"); if (m2) { m2.className = "stMsg good"; m2.textContent = `${cur.name}, designed by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens`; }
+    applyTree(cur); if (tab === "trees") renderTrees();
+    const m2 = $("tAskMsg"); if (m2 && treeSel === cur.key) { m2.className = "stMsg good"; m2.textContent = `${cur.name}, designed by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens`; }
     $("tAsk") && ($("tAsk").value = desc);
 }
 
@@ -745,12 +753,20 @@ const BUILTIN_THEMES = {
 };
 let myThemes = {}; // your own themes, saved next to the Studio (studio/my-themes.json), not shipped with the game
 const THEMES = () => ({ ...BUILTIN_THEMES, ...Object.fromEntries(Object.entries(myThemes).map(([k, t]) => ["my:" + k, t])) });
-const THEME_KEYS = ["colors", "trees", "snowline", "economy", "hills", "hillSize", "beach", "cliffs", "decor", "plateau", "wobble", "radius", "features", "treeCount"];
-const ECON = { 2: "the Highland Isle (wood, stone, ore)", 3: "Mooncap Isle (spores, moonsilver)", 4: "Ashfall Isle (ash, cinder, obsidian)", 5: "the Archipelago (driftwood, pearls)", 6: "the Iceberg (icicles, glacite)" };
+const THEME_KEYS = ["colors", "trees", "snowline", "economy", "hills", "hillSize", "beach", "cliffs", "decor", "plateau", "wobble", "radius", "features", "treeCount", "treeW", "allTiers", "animals", "cover", "coverCol", "flies", "fliesCol"];
+const ECON = { 2: "the Highland Isle", 3: "Mooncap Isle", 4: "Ashfall Isle", 5: "the Archipelago", 6: "the Iceberg" };
 const FTYPES = { mountain: "⛰ Mountain", hill: "Hill", spire: "Spire", crater: "Crater", plateau: "Plateau (mesa)", ridge: "Ridge", valley: "Valley", lake: "Lake", islet: "Islet", bay: "Bay" };
 const FDEF = { mountain: { r: 40, h: 35, dist: 0.55 }, hill: { r: 30, h: 10, dist: 0.5 }, spire: { r: 12, h: 45, dist: 0.6 }, crater: { r: 26, h: 16, dist: 0.55 }, plateau: { r: 28, h: 12, dist: 0.55 }, ridge: { r: 14, h: 22, len: 80, dist: 0.55 }, valley: { r: 10, len: 70, dist: 0.45 }, lake: { r: 14, dist: 0.5 }, islet: { r: 16, h: 6, dist: 1.4 }, bay: { width: 0.35, depth: 0.25 } };
-let islandSel = Math.max(0, islands.length - 1), isleT = 0, featOpen = -1;
+// ground cover: [key, label, most, colour key]
+const COVER = [["grass", "Grass tufts", 300], ["flowers", "Flowers", 80, "flowers"], ["berries", "Berry bushes", 80, "berries"], ["mush", "Mushrooms", 80, "mush"], ["glowshroom", "Glowing mushrooms", 80, "glowshroom"], ["rings", "Fairy rings", 30, "glowshroom"],
+    ["logs", "Fallen logs", 60], ["stumps", "Stumps", 60], ["crystals", "Crystals", 80, "crystals"], ["cracks", "Glowing cracks", 80, "cracks"], ["bones", "Bones", 40], ["cairns", "Stone piles", 40]];
+const COVER_COL = { mush: "#9a1a12", glowshroom: "#7affef", berries: "#d02a4a", flowers: "#b07aff", crystals: "#9a7aff", cracks: "#ff6a1a" };
+const FLIES = { fireflies: "Fireflies at night", spores: "Glowing spores, day and night", embers: "Rising embers", none: "Nothing" };
+const FOREST = { 1: 60, 2: 90, 3: 95, 4: 100, 6: 95 }; // how many trees the game's own islands grow
+let islandSel = Math.max(0, islands.length - 1), featOpen = -1;
 const prevMats = n => (n - 1 === 6 ? T.MATS_BY_ISLE[6] : T.MATS_BY_ISLE[n - 1]) || T.MATS_BY_ISLE[6] || [];
+const axeName = i => (T.AXES[i] ? T.AXES[i].name : "axe " + i);
+const slug = (s, fb) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 22) || fb;
 function migrateIsland(d) { // older islands had one mountain and one lake: they become features
     if (!d) return;
     d.features = Array.isArray(d.features) ? d.features : [];
@@ -758,22 +774,11 @@ function migrateIsland(d) { // older islands had one mountain and one lake: they
     if (d.lake) { if (d.lake.on) d.features.push({ ...d.lake, type: "lake" }); delete d.lake; }
     for (const f of d.features) delete f.on;
 }
-function newIsland(theme = "meadow") {
-    const Th = THEMES()[theme] || BUILTIN_THEMES.meadow, n = T.CI_BASE + islands.length, pm = prevMats(n), item = pm[Math.min(5, pm.length - 1)];
-    const d = { name: "New Island", sub: "", theme, seed: r3(1 + Math.random() * 8), radius: 130, wobble: 0.12, plateau: 2.5, hills: 8, hillSize: 1, beach: 6, cliffs: 0, decor: 1,
-        features: startFeatures(theme),
-        colors: {}, snowline: "", trees: [], treeCount: 90, economy: 6,
-        rebirth: { cost: Math.round(25000000 * Math.pow(2, n - T.CI_BASE)), items: item ? { [item]: 5 } : {} },
-        rideLine1: "The sea goes quiet. Something new waits ahead...", rideLine2: "", ferryLine: "", arrive: "", campName: "CAMP", arrDir: 125, nextDir: -35 };
-    applyTheme(d, Th);
-    islands.push(d); islandSel = islands.length - 1;
-    T.ciSet(islandSel, d);
-    if (islandSel > 0) T.ciSet(islandSel - 1, islands[islandSel - 1]); // the island before shows this one on its ferry sign now
-    renderIsleSelect(); changed("islands"); renderIslands();
-    say(`Island ${n} made: Rebirth ${n - 1}. Press "Go there" to see it`, 3500);
-}
-function applyTheme(d, Th) { for (const k of THEME_KEYS) if (Th[k] !== undefined) d[k] = JSON.parse(JSON.stringify(Th[k])); if (Th.snowline === undefined) d.snowline = ""; d.trees = (d.trees || []).filter(k => T.TYPES[k]); if (!d.trees.length) d.trees = ["pine"]; }
-// what a new island starts with, by theme (your own themes bring their own features)
+// the whole forest of the island you're on grows again (after you change which trees live there)
+function regrowHere() { const n = curIsle(), C = T.customIsle(n); if (C) T.resetIsleTrees(Math.min(220, Math.max(10, +C.d.treeCount || 90))); else if (FOREST[n]) T.resetIsleTrees(FOREST[n]); }
+let regrowT = 0;
+const regrowSoon = () => { clearTimeout(regrowT); regrowT = setTimeout(regrowHere, 350); };
+// what a new island starts with, by theme (your own themes bring their own)
 const START = {
     meadow: [["mountain", "THE PEAK"], ["lake", "THE LAKE"], ["hill", ""]],
     tropical: [["mountain", "THE PEAK"], ["bay", ""], ["islet", "THE ISLET"], ["lake", "THE LAGOON"]],
@@ -783,17 +788,55 @@ const START = {
     desert: [["plateau", "THE MESA"], ["plateau", ""], ["valley", "THE DRY CANYON"]],
     mushroom: [["hill", ""], ["lake", "THE GLOW POOL"], ["crater", "THE HOLLOW"]]
 };
+const START_ECO = {
+    meadow: { animals: [["deer", 6], ["rabbit", 9], ["squirrel", 6], ["butterfly", 10], ["eagle", 3]], cover: { grass: 110, flowers: 24, berries: 16, mush: 14, logs: 12, stumps: 10 }, flies: "fireflies" },
+    tropical: { animals: [["monkey", 7], ["parrot", 6], ["skyparrot", 5], ["crab5", 8], ["pig", 5], ["gull5", 4], ["butterfly", 8]], cover: { grass: 70, flowers: 26, berries: 10, logs: 6 }, coverCol: { flowers: "#ff5a8a", berries: "#ffb040" }, flies: "fireflies" },
+    snow: { animals: [["penguin", 12], ["pbear", 3], ["afox", 5], ["hare", 7], ["seal", 4]], cover: { cairns: 10, crystals: 10, stumps: 6, logs: 4 }, coverCol: { crystals: "#bff4ff" }, flies: "none" },
+    volcanic: { animals: [["salamander", 12], ["beetle", 14], ["crow", 8], ["bat", 6], ["skycrow", 4]], cover: { cracks: 44, crystals: 18, bones: 8, stumps: 14, grass: 70 }, coverCol: { crystals: "#3a2a4a", cracks: "#ff6a1a" }, flies: "embers" },
+    spooky: { animals: [["crow", 10], ["bat", 8], ["fox", 4], ["moth", 18], ["snail", 8]], cover: { glowshroom: 18, rings: 6, bones: 10, logs: 12, stumps: 10, grass: 80 }, coverCol: { glowshroom: "#b07aff" }, flies: "spores", fliesCol: "#c8a0ff" },
+    desert: { animals: [["lizard", 12], ["beetle", 8], ["crow", 5], ["eagle", 3], ["goat", 4]], cover: { bones: 10, cairns: 10, stumps: 6, grass: 30 }, flies: "none" },
+    mushroom: { animals: [["shroom", 14], ["snail", 14], ["moth", 20], ["fox", 6]], cover: { glowshroom: 30, rings: 8, crystals: 12, mush: 16, grass: 100 }, coverCol: { glowshroom: "#7affef", crystals: "#d07aff" }, flies: "spores", fliesCol: "#9ffff0" }
+};
+function ecoPreset(theme) {
+    const E = START_ECO[theme] || START_ECO.meadow;
+    return { animals: E.animals.filter(([k]) => T.WILD_KINDS[k]).map(([kind, n]) => ({ kind, n })), cover: { ...E.cover }, coverCol: { ...(E.coverCol || {}) }, flies: E.flies || "fireflies", fliesCol: E.fliesCol || "" };
+}
 function startFeatures(theme) {
     const Th = THEMES()[theme] || {}; if (Array.isArray(Th.features)) return JSON.parse(JSON.stringify(Th.features));
     const list = START[theme] || START.meadow, base = Math.random() * 360;
     return list.map(([type, name, lava], i) => { const f = { type, dir: Math.round(base + (i * 360) / list.length + Math.random() * 40) % 360 }; for (const k of ["dist", "r", "h", "len", "width", "depth"]) if (FDEF[type][k] !== undefined) f[k] = FDEF[type][k]; if (name) f.name = name; if (lava) f.lava = true; return f; });
 }
-function islandChanged(rerender) {
-    const d = islands[islandSel]; if (!d) return;
-    changed("islands");
-    clearTimeout(isleT);
-    const i = islandSel; isleT = setTimeout(() => { T.ciSet(i, islands[i]); renderIsleSelect(); }, 450); // rebuild it live (heavy, so not on every keypress)
-    if (rerender) renderIslands();
+function applyTheme(d, Th) { for (const k of THEME_KEYS) if (Th[k] !== undefined) d[k] = JSON.parse(JSON.stringify(Th[k])); if (Th.snowline === undefined) d.snowline = ""; d.trees = (d.trees || []).filter(k => T.TYPES[k]); if (!d.trees.length) d.trees = ["pine"]; }
+function newIsland(theme = "meadow") {
+    const Th = THEMES()[theme] || BUILTIN_THEMES.meadow, n = T.CI_BASE + islands.length, pm = prevMats(n), item = pm[Math.min(5, pm.length - 1)];
+    const d = { name: "New Island", sub: "", theme, seed: r3(1 + Math.random() * 8), radius: 130, wobble: 0.12, plateau: 2.5, hills: 8, hillSize: 1, beach: 6, cliffs: 0, decor: 1,
+        features: startFeatures(theme), colors: {}, snowline: "", trees: [], treeCount: 90, treeW: {}, allTiers: false, economy: 6, mats: [], axes: [], ...ecoPreset(theme),
+        rebirth: { cost: Math.round(25000000 * Math.pow(2, n - T.CI_BASE)), items: item ? { [item]: 5 } : {} },
+        rideLine1: "The sea goes quiet. Something new waits ahead...", rideLine2: "", ferryLine: "", arrive: "", campName: "CAMP", arrDir: 125, nextDir: -35 };
+    applyTheme(d, Th);
+    islands.push(d); islandSel = islands.length - 1;
+    T.ciSet(islandSel, d);
+    if (islandSel > 0) T.ciSet(islandSel - 1, islands[islandSel - 1]); // the island before shows this one on its ferry sign now
+    renderIsleSelect(); changed("islands"); renderIslands();
+    say(`Island ${n} made: Rebirth ${n - 1}. Press "Go there" to see it`, 3500);
+}
+let rebuildRender = false;
+const isleTs = {}; // one rebuild timer per island, so rebuilding one never cancels another's
+function rebuildNow(i) { // rebuild island i, and carry its materials over to the next island's ticket
+    clearTimeout(isleTs[i]); if (!islands[i]) return;
+    T.ciSet(i, islands[i]);
+    const nx = islands[i + 1], C = T.customIsle(T.CI_BASE + i);
+    if (nx && nx.rebirth && nx.rebirth.items && C && C.subMats) { const it = C.subMats(nx.rebirth.items); if (JSON.stringify(it) !== JSON.stringify(nx.rebirth.items)) { nx.rebirth.items = it; changed("islands"); T.ciSet(i + 1, nx); } }
+}
+function rebuildIsle(i, wait = 450, rerender) { // rebuilding is heavy, so not on every keypress
+    if (rerender) rebuildRender = true;
+    clearTimeout(isleTs[i]);
+    isleTs[i] = setTimeout(() => { rebuildNow(i); renderIsleSelect(); if (rebuildRender && tab === "islands" && i === islandSel) { rebuildRender = false; renderIslands(); } }, wait); // then prices and recipes show
+}
+function islandChanged(rerender, i = islandSel) {
+    const d = islands[i]; if (!d) return;
+    changed("islands"); rebuildIsle(i, 450, rerender);
+    if (rerender && tab === "islands" && i === islandSel) renderIslands();
 }
 function renderIsleSelect() { const s = $("stIsle"), v = s.value; s.innerHTML = ISLES().map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join(""); s.value = curEntry().id || v; }
 function testRebirth(i) { // ride the real ferry from the island before, with the ticket paid for you (your save is never touched)
@@ -803,33 +846,91 @@ function testRebirth(i) { // ride the real ferry from the island before, with th
     T.setState("studio"); play();
     setTimeout(() => { T.startRebirthRide(from); say(`Riding the Rebirth ${from} ferry to ${C.name}… (F5 to stop)`, 5000); }, 350);
 }
+// the trees an island grows: game trees it borrows (d.trees), plus your own trees that have it ticked
+const isleTreeList = (d, n) => [...(d.trees || []).filter(k => T.TYPES[k]).map(k => ({ k, own: null })), ...trees.filter(t => (t.isl || []).includes(n)).map(t => ({ k: t.key, own: t }))];
+function setTreeOnIsle(t, n, on) {
+    t.isl = (t.isl || []).filter(i => i !== n); if (on) t.isl.push(n);
+    if (t.mat && !matsFor(t).includes(t.mat)) t.mat = ""; // it can only drop what its islands drop
+    if (t.isl.length && treeGroup === "unused") treeGroup = "used";
+    T.defineCustomTree(t); changed("trees");
+}
+// the island's own materials and axes
+function uniqueKey2(prefix, name, taken) { const base = prefix + slug(name, prefix === "m_" ? "material" : "axe"); let k = base, n = 2; while (taken(k)) k = base + "_" + n++; return k; }
+const matTaken = (k, d) => (T.MATS[k] && !(d.mats || []).some(m => m.key === k)) || islands.some(o => o !== d && (o.mats || []).some(m => m.key === k));
+const axeTaken = (k, d) => T.AXES.some(a => a.key === k && !(d.axes || []).some(x => x.key === k)) || islands.some(o => o !== d && (o.axes || []).some(x => x.key === k));
+function dropMatEverywhere(key) { // a material is gone: trees that dropped it drop the island's default, and tickets and recipes forget it
+    for (const t of trees) if (t.mat === key) { t.mat = ""; T.defineCustomTree(t); changed("trees"); }
+    islands.forEach((o, i) => {
+        let hit = false;
+        if (o.rebirth && o.rebirth.items && o.rebirth.items[key]) { delete o.rebirth.items[key]; hit = true; }
+        for (const a of o.axes || []) if (a.recipe && a.recipe[key]) { delete a.recipe[key]; hit = true; }
+        if (hit && i !== islandSel) { changed("islands"); T.ciSet(i, o); }
+    });
+}
 // ---- Ask Claude for a whole island ----
 function treeChoices() { const out = []; for (const [k, t] of Object.entries(T.TYPES)) { if (t.rush || t.custom) continue; out.push(`${k} (${t.name}, ${isleName((t.isl || [1]).filter(i => i <= 6)[0] || 1)}${t.rare ? ", rare" : ""}${t.night ? ", night" : ""})`); } return out.join("; "); }
+const animalChoices = () => Object.entries(T.WILD_KINDS).map(([k, W]) => `${k} (${W.name}${W.fly ? ", flies" : ""}${W.custom ? ", made in the Studio" : ""})`).join("; ");
+const abilChoices = () => T.ABIL.slice(0, T.BASE_AXES).map((a, i) => `${i} ${a.name}`).join(", ");
 async function askClaudeIsland(d) {
-    const desc = ($("iAsk").value || "").trim(), msg = $("iAskMsg"), btn = $("iAskGo");
+    const desc = ($("iAsk").value || "").trim(), msg = $("iAskMsg"), btn = $("iAskGo"), invent = $("iInvent").checked, i0 = islandSel, n = T.CI_BASE + i0;
     if (!desc) { msg.className = "stMsg bad"; msg.textContent = "Describe the island first."; return; }
-    const model = $("iModel").value; pref("model", model);
+    const model = $("iModel").value; pref("model", model); pref("invent", invent ? "1" : "0");
     btn.disabled = true; btn.textContent = "Claude is shaping it…"; msg.className = "stMsg"; msg.textContent = `Asking ${model}…`;
     const prompt = `Design an island from this description: "${desc}"
 
-It's island ${T.CI_BASE + islandSel} in a chain of rebirth islands for a spooky low-poly tree-chopping game. The camp sits flat in the middle (radius ~30 m): keep features away from the centre.
+It's island ${n} in a chain of rebirth islands for a spooky low-poly tree-chopping game. The camp sits flat in the middle (radius ~30 m): keep features away from the centre.
 Return JSON with exactly these fields:
 {"name": "2-4 words", "sub": "a short line for the ferry ticket", "radius": 90-200, "wobble": 0-0.3 (how ragged the coast is), "plateau": 1-8 (land height at camp), "hills": 0-30, "hillSize": 0.5-2.5, "beach": 3-20, "cliffs": 0-1 (sea cliffs), "decor": 0-2 (rocks and bushes),
  "colors": {"grass": "#rrggbb", "grass2": "#rrggbb", "sand": "#rrggbb", "rock": "#rrggbb (cliffs)", "snow": "#rrggbb (high peaks)", "camp": "#rrggbb", "bush": "#rrggbb", "shallow": "#rrggbb (shallow sea)", "deep": "#rrggbb (deep sea)"},
  "snowline": a height in metres above which the peaks colour is used, or "" for never,
  "trees": 2-6 keys from this list: ${treeChoices()},
- "treeCount": 40-160, "economy": 2-6 (which island's materials it uses: 2 Highland, 3 Mooncap, 4 Ashfall, 5 Archipelago, 6 Iceberg),
+ "treeW": {"tree key": 0.2-3, how common each tree is next to the others (1 = normal)},
+ "treeCount": 40-160, "economy": 2-6 (whose recipes and prices it copies: 2 Highland, 3 Mooncap, 4 Ashfall, 5 Archipelago, 6 Iceberg),
+ "mats": 4-7 new materials its trees drop, cheapest first: [{"name": "1-2 words", "color": "#rrggbb", "glow": true for magical ones}],
+ "axes": 1-3 new axes forged from those materials, weakest first: [{"name": "2-3 words", "steel": "#rrggbb head colour", "edge": "#rrggbb bright edge colour", "glow": "#rrggbb dark glow", "ability": the number of the special move it borrows, one of: ${abilChoices()}}],
+ "animals": 3-7 of [{"kind": "a key from this list", "n": 3-14}]: ${animalChoices()},
+ "cover": {ground cover counts: "grass": 0-200, "flowers": 0-50, "berries": 0-40, "mush": 0-40, "glowshroom": 0-40, "rings": 0-12, "logs": 0-30, "stumps": 0-30, "crystals": 0-40, "cracks": 0-60, "bones": 0-20, "cairns": 0-20},
+ "coverCol": {"flowers": "#rrggbb", "berries": "#rrggbb", "mush": "#rrggbb", "glowshroom": "#rrggbb", "crystals": "#rrggbb", "cracks": "#rrggbb"},
+ "flies": "fireflies|spores|embers|none", "fliesCol": "#rrggbb or empty",
  "features": up to 10 of {"type": "mountain|hill|spire|crater|plateau|ridge|valley|lake|islet|bay", "dir": 0-359 (direction from the centre), "dist": 0.35-0.9 (fraction of the radius; islets 1.2-2), "r": size in metres (5-60), "h": height in metres (spires up to 70, hills 5-20), "len": length for ridges and valleys (30-150), "rot": angle of a ridge or valley in degrees, "width": bay width 0.1-1, "depth": bay depth 0.1-0.5, "lava": true for a lava crater, "name": "THE SOMETHING" or ""},
- "campName": "1-2 words", "rideLine1": "what you see on the ferry ride", "rideLine2": "the island coming into view", "ferryLine": "what the Ferryman says before you sail", "arrive": "a welcome message"}
+ "campName": "1-2 words", "rideLine1": "what you see on the ferry ride", "rideLine2": "the island coming into view", "ferryLine": "what the Ferryman says before you sail", "arrive": "a welcome message"${invent ? `,
+ "newTrees": 2-3 short descriptions of new trees that only grow here (one sentence each, with their look and mood),
+ "newAnimals": 1-2 short descriptions of new animals that only live here (one sentence each)` : ""}}
 Make it match the description and feel distinct.`;
     const r = await S.askClaude({ prompt, system: "You design islands for Hypergamous Tree Chopping Simulator 4, a spooky, cheerful first-person tree-chopping game. Reply with ONLY one JSON object: no prose, no code fences.", model });
-    btn.disabled = false; btn.textContent = "Design it with Claude";
-    if (!r.ok) { msg.className = "stMsg bad"; msg.textContent = r.error; return; }
+    if (!r.ok) { btn.disabled = false; btn.textContent = "Design it with Claude"; msg.className = "stMsg bad"; msg.textContent = r.error; return; }
     let j = null; try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
-    if (!j) { msg.className = "stMsg bad"; msg.textContent = "Claude's answer wasn't an island. Try again or reword it."; return; }
-    cleanIsland(j, d);
-    islandChanged(true);
-    const m2 = $("iAskMsg"); if (m2) { m2.className = "stMsg good"; m2.textContent = `${d.name}, shaped by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens. The ticket stays as you set it.`; }
+    if (!j) { btn.disabled = false; btn.textContent = "Design it with Claude"; msg.className = "stMsg bad"; msg.textContent = "Claude's answer wasn't an island. Try again or reword it."; return; }
+    cleanIsland(j, d); d.theme = ""; // Claude's own look, not one of the themes
+    changed("islands"); rebuildNow(i0); if (tab === "islands" && islandSel === i0) renderIslands(); // built straight away, so the trees it invents can pick its new materials
+    let note = `${d.name}, shaped by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens.`, tok = r.tokens;
+    const say2 = t => { const m = $("iAskMsg"); if (m) { m.className = "stMsg"; m.textContent = t; } };
+    if (invent) { // then each new tree and animal gets its own short request, one at a time
+        const tr0 = Array.isArray(j.newTrees) ? j.newTrees.filter(s => typeof s === "string" && s.trim()).slice(0, 3) : [], an0 = Array.isArray(j.newAnimals) ? j.newAnimals.filter(s => typeof s === "string" && s.trim()).slice(0, 2) : [];
+        let made = 0;
+        for (const [k, tdesc] of tr0.entries()) {
+            say2(`${note} Inventing tree ${k + 1} of ${tr0.length}…`);
+            const tr = blankTree("New Tree"); tr.isl = [n];
+            const rt = await S.askClaude({ prompt: claudePrompt(tdesc.slice(0, 300), tr), system: CLAUDE_SYSTEM, model });
+            let jt = null; if (rt.ok) try { jt = JSON.parse((rt.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
+            if (!jt) continue;
+            const t2 = cleanTree(jt, tr); t2.key = uniqueKey(t2.name); t2.isl = [n]; t2.minTier = Math.min(t2.minTier, k); // the first one grows from the start
+            trees.push(t2); T.defineCustomTree(t2); changed("trees"); tok += rt.tokens; made++;
+            if (!curTree()) treeSel = t2.key;
+        }
+        for (const [k, adesc] of an0.entries()) {
+            say2(`${note} Inventing animal ${k + 1} of ${an0.length}…`);
+            const res = await claudeBuild("animals", adesc.slice(0, 300), model, starterAnimal());
+            if (!res.ok) continue;
+            const a = res.data; a.key = pmKeyFor(MK.animals, a.name); myAnimals.push(a); T.defineCustomAnimal(a); changed("animals"); tok += res.tokens; made++;
+            if (!MK.animals.sel) MK.animals.sel = a.key;
+            const isl = islands[i0]; isl.animals = isl.animals || []; isl.animals.push({ kind: a.key, n: 6 });
+        }
+        note += ` Invented ${made} new tree${made === 1 ? "" : "s"} and animals (~${(tok / 1000).toFixed(1)}k tokens in all).`;
+        islandChanged(true, i0);
+    }
+    btn.disabled = false; btn.textContent = "Design it with Claude";
+    const m2 = $("iAskMsg"); if (m2) { m2.className = "stMsg good"; m2.textContent = note + " The ticket stays as you set it."; }
     $("iAsk") && ($("iAsk").value = desc);
 }
 function cleanIsland(src, d) { // every field checked before it reaches the game
@@ -840,7 +941,24 @@ function cleanIsland(src, d) { // every field checked before it reaches the game
     if (src.colors && typeof src.colors === "object") { d.colors = { ...(d.colors || {}) }; for (const k of ["grass", "grass2", "sand", "rock", "snow", "camp", "bush", "shallow", "deep"]) if (hex(src.colors[k])) d.colors[k] = hex(src.colors[k]); }
     d.snowline = src.snowline === "" || src.snowline === null || src.snowline === undefined ? "" : num(src.snowline, 0, 200, "");
     if (Array.isArray(src.trees)) { const t = src.trees.filter(k => T.TYPES[k] && !T.TYPES[k].rush && !T.TYPES[k].custom).slice(0, 8); if (t.length) d.trees = t; }
+    if (src.treeW && typeof src.treeW === "object") { d.treeW = {}; for (const [k, v] of Object.entries(src.treeW)) if ((d.trees || []).includes(k) && Number.isFinite(+v)) d.treeW[k] = r3(num(v, 0, 3, 1)); }
     if ([2, 3, 4, 5, 6].includes(+src.economy)) d.economy = +src.economy;
+    // a material or axe that keeps its name keeps its key, so trees, tickets and what players already own stay with it
+    if (Array.isArray(src.mats) && src.mats.length) {
+        const old = (d.mats || []).map(m => m.key), nm = [];
+        for (const m of src.mats.slice(0, 7)) { if (!m || !str(m.name, 24).trim()) continue; const name = str(m.name, 24).trim(); nm.push({ key: uniqueKey2("m_", name, k => matTaken(k, d) || nm.some(q => q.key === k)), name, color: hex(m.color) || "#9a9aa4", glow: !!m.glow }); }
+        if (nm.length) { d.mats = nm; for (const k of old) if (!nm.some(m => m.key === k)) dropMatEverywhere(k); }
+    }
+    if (Array.isArray(src.axes) && src.axes.length) {
+        const nx = [];
+        for (const a of src.axes.slice(0, 3)) { if (!a || !str(a.name, 28).trim()) continue; const name = str(a.name, 28).trim(); nx.push({ key: uniqueKey2("x_", name, k => axeTaken(k, d) || nx.some(q => q.key === k)), name, steel: hex(a.steel) || "#4a4a5a", edge: hex(a.edge) || "#e8f0ff", glow: hex(a.glow) || "#2a2a4a", ability: Math.round(num(a.ability, 0, T.BASE_AXES - 1, 14)) }); }
+        if (nx.length) d.axes = nx;
+    }
+    if (Array.isArray(src.animals)) { const a = src.animals.filter(q => q && T.WILD_KINDS[q.kind]).slice(0, 10).map(q => ({ kind: q.kind, n: Math.round(num(q.n, 1, 30, 6)) })); if (a.length) d.animals = a; }
+    if (src.cover && typeof src.cover === "object") { d.cover = {}; for (const [k, , most] of COVER) d.cover[k] = Math.round(num(src.cover[k], 0, most, 0)); }
+    if (src.coverCol && typeof src.coverCol === "object") { d.coverCol = {}; for (const k of Object.keys(COVER_COL)) if (hex(src.coverCol[k])) d.coverCol[k] = hex(src.coverCol[k]); }
+    if (FLIES[src.flies]) d.flies = src.flies;
+    if (src.fliesCol !== undefined) d.fliesCol = hex(src.fliesCol) || "";
     if (Array.isArray(src.features)) d.features = src.features.filter(f => f && FTYPES[f.type]).slice(0, 12).map(f => {
         const o = { type: f.type, dir: Math.round(num(f.dir, 0, 359, 0)), dist: r3(num(f.dist, 0, f.type === "islet" ? 2.2 : 0.95, FDEF[f.type].dist || 0.5)) };
         if (f.r !== undefined) o.r = Math.round(num(f.r, 4, 90, FDEF[f.type].r || 20)); if (f.h !== undefined) o.h = Math.round(num(f.h, 0, 90, FDEF[f.type].h || 10));
@@ -869,47 +987,91 @@ function featRows(d) {
         return h + `</div>`;
     }).join("");
 }
+const ISLE_JUMPS = [["iSecLand", "Shape"], ["iSecFeat", "Features"], ["iSecEco", "Ecosystem"], ["iSecEcon", "Materials & axes"], ["iSecStory", "Story"]];
 function renderIslands() {
     const rng = (id, label, v, min, max, step, unit = "") => `<div class="stRow"><label>${label}</label><span style="display:flex;align-items:center;gap:6px"><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${v}" style="width:120px"><small id="${id}V" style="width:38px;text-align:right">${v}${unit}</small></span></div>`;
     const live = T.customIsle(T.CI_BASE + islandSel); // colours you haven't picked show the ones the game is using
     const colr = (k, label) => `<label style="display:flex;align-items:center;gap:5px"><input class="stIn" type="color" data-colr="${k}" value="${(islands[islandSel] && islands[islandSel].colors && islands[islandSel].colors[k]) || (live ? hexOf(live.cols[k]) : "#808080")}"> ${label}</label>`;
-    const Th = THEMES();
+    const Th = THEMES(), scroll = $("stLeftBody").scrollTop;
     let h = `<div class="stH">THE REBIRTH CHAIN</div><div class="stHint" style="margin-top:0">Pine Island → Highland → Mooncap → Ashfall → Archipelago → <b>the Iceberg</b> → your islands:</div>
       <div class="stList">${islands.map((d, i) => `<div class="stItem${i === islandSel ? " on" : ""}" data-isl="${i}"><span>Rebirth ${T.CI_BASE + i - 1} · ${esc(d.name)}</span><small>${(d.rebirth && d.rebirth.cost ? "$" + Math.round(d.rebirth.cost / 1e6) + "M" : "")}</small></div>`).join("") || `<div class="stHint">No islands yet. Make one: it becomes Rebirth 6, sailing from the Iceberg.</div>`}</div>
       <div class="stBtns"><select class="stSel" id="iNewTheme" style="flex:1">${Object.entries(Th).map(([k, t]) => `<option value="${esc(k)}">${esc(t.label)}</option>`).join("")}</select><button class="stB go" id="iNew">+ New island</button></div>`;
     const d = islands[islandSel];
     if (!d) { $("stLeftBody").innerHTML = h; bindIslands(); return; }
     migrateIsland(d);
-    const n = T.CI_BASE + islandSel, pm = prevMats(n), item = Object.entries(d.rebirth && d.rebirth.items || {})[0] || ["", 0], model = pref("model") || "haiku";
-    const byHome = {}; for (const [k, t] of Object.entries(T.TYPES)) { if (t.rush || t.custom) continue; const home = (t.isl || [1]).filter(i => i <= 6)[0] || 1; (byHome[home] = byHome[home] || []).push([k, t.name]); }
+    const n = T.CI_BASE + islandSel, pm = prevMats(n), item = Object.entries(d.rebirth && d.rebirth.items || {})[0] || ["", 0], model = pref("model") || "haiku", C = T.customIsle(n);
+    // ----- trees -----
+    const tl = isleTreeList(d, n), w = d.treeW || {}, nowOk = tl.filter(x => (T.TYPES[x.k].minTier || 0) === 0);
+    const treeRow = x => { const B = T.TYPES[x.k], tier = d.allTiers ? 0 : B.minTier || 0, wv = w[x.k] ?? 1; return `<div class="stItem"><span style="min-width:0;line-height:1.25"><span style="color:${esc(B.col)}">●</span> ${esc(B.name)}${x.own || tier ? `<br><small>${x.own ? `<span style="color:#9fe8ff">yours</span>` : ""}${x.own && tier ? " · " : ""}${tier ? `<span style="color:#ffb060" title="Players see it once they own this axe">needs the ${esc(axeName(tier))}</span>` : ""}</small>` : ""}</span><span style="display:flex;align-items:center;gap:4px;flex:none"><input type="range" data-tw="${esc(x.k)}" min="0" max="3" step="0.1" value="${wv}" style="width:62px" title="How common"><small style="width:28px">${wv}×</small><button class="stB" data-trm="${esc(x.k)}" style="padding:1px 6px">✕</button></span></div>`; };
+    const onIsle = new Set(tl.map(x => x.k)), byHome = {};
+    for (const [k, t] of Object.entries(T.TYPES)) { if (t.rush || t.custom || onIsle.has(k)) continue; const home = (t.isl || [1]).filter(i => i <= 6)[0] || 1; (byHome[home] = byHome[home] || []).push([k, t.name]); }
+    const mine = trees.filter(t => !onIsle.has(t.key));
+    const treeAdd = `<select class="stSel" id="iTreeAdd" style="flex:1"><option value="">+ Add a tree…</option>${mine.length ? `<optgroup label="Your trees">${mine.map(t => `<option value="${esc(t.key)}">${esc(t.name)}${(t.isl || []).length ? "" : " (unused)"}</option>`).join("")}</optgroup>` : ""}${Object.entries(byHome).map(([home, list]) => `<optgroup label="From ${esc(isleName(+home))}">${list.map(([k, nm]) => `<option value="${k}">${esc(nm)}</option>`).join("")}</optgroup>`).join("")}</select>`;
+    // ----- animals -----
+    const an = (d.animals || []).filter(a => T.WILD_KINDS[a.kind]), anSet = new Set(an.map(a => a.kind)), anHome = {};
+    for (const [k, W] of Object.entries(T.WILD_KINDS)) if (!anSet.has(k)) (anHome[W.custom ? 0 : W.home] = anHome[W.custom ? 0 : W.home] || []).push([k, W.name]);
+    const animalAdd = `<select class="stSel" id="iAnAdd" style="flex:1"><option value="">+ Add animals…</option>${Object.entries(anHome).sort((a, b) => a[0] - b[0]).map(([home, list]) => `<optgroup label="${+home ? "From " + esc(isleName(+home)) : "Your animals"}">${list.map(([k, nm]) => `<option value="${esc(k)}">${esc(nm)}</option>`).join("")}</optgroup>`).join("")}</select>`;
+    const cover = d.cover || {}, ccol = d.coverCol || {};
+    // ----- materials and axes -----
+    const mats = d.mats || [], axes = d.axes || [], econMats = T.MATS_BY_ISLE[d.economy || 6] || [];
+    const recipeTxt = i => { const rc = T.RECIPES[n] && T.RECIPES[n][0][i]; return rc ? Object.entries(rc).map(([k, v]) => `${v} ${esc(T.MATS[k] ? T.MATS[k].name : k)}`).join(" + ") : ""; };
     h += `<div class="stBtns" style="margin-top:10px"><button class="stB" id="iGo">Go there</button><button class="stB go" id="iTest">▶ Test the rebirth</button>${islandSel === islands.length - 1 ? `<button class="stB warn" id="iDelIsl">Delete</button>` : ""}</div>
       <div class="stClaude" style="margin-top:10px"><div class="stH">✦ ASK CLAUDE <select class="stSel" id="iModel">${opt("haiku", model, "Haiku (cheapest)")}${opt("sonnet", model, "Sonnet")}${opt("opus", model, "Opus")}</select></div>
         <textarea class="stTa" id="iAsk" placeholder="Describe an island, e.g. a cursed swamp with three sunken towers, a lava crater and fog"></textarea>
-        <div class="stBtns"><button class="stB" id="iAskGo" style="flex:1">Design it with Claude</button></div><div class="stMsg" id="iAskMsg"></div></div>
+        <div class="stChecks"><label title="A few more short requests: about 4k tokens each on Haiku"><input type="checkbox" id="iInvent"${pref("invent") !== "0" ? " checked" : ""}> Also invent new trees and animals for it</label></div>
+        <div class="stBtns"><button class="stB" id="iAskGo" style="flex:1">Design it with Claude</button></div><div class="stMsg" id="iAskMsg"></div>
+        <div class="stHint" style="margin:4px 0 0">Claude picks the land, colours, trees, animals, ground cover, the island's own materials and axes, and the story. The ticket stays yours.</div></div>
+      <div class="stBtns" style="margin:8px 0 0">${ISLE_JUMPS.map(([id, l]) => `<button class="stB" data-jump="${id}" style="padding:3px 7px;font-size:11px">${l}</button>`).join("")}</div>
       <div class="stH">NAME <small>island ${n} · Rebirth ${n - 1}</small></div>
       <div class="stRow"><input class="stIn" type="text" id="iName" value="${esc(d.name)}" style="flex:1"></div>
       <div class="stRow"><input class="stIn" type="text" id="iSub" value="${esc(d.sub || "")}" placeholder="a short line for the ferry ticket" style="flex:1"></div>
-      <div class="stH">THEME <small>colours, trees and land in one click</small></div>
+      <div class="stH">THEME <small>colours, trees, land and wildlife in one click</small></div>
       <div class="stBtns" style="margin:0">${Object.entries(Th).map(([k, t]) => `<button class="stB${d.theme === k ? " on" : ""}" data-theme="${esc(k)}" style="padding:4px 8px;font-size:11px">${esc(t.label)}${k.startsWith("my:") ? ` <span data-deltheme="${esc(k.slice(3))}" title="Delete this theme">✕</span>` : ""}</button>`).join("")}</div>
       <div class="stRow" style="margin-top:6px"><input class="stIn" type="text" id="iThemeName" placeholder="name this look as a theme…" style="flex:1"><button class="stB" id="iThemeSave">Save as theme</button></div>
-      <div class="stH">SHAPE</div>${rng("iRad", "Size", d.radius || 130, 70, 220, 5, "m")}${rng("iWob", "Wobbly coast", d.wobble ?? 0.12, 0, 0.35, 0.01)}
+      <div class="stH" id="iSecLand">SHAPE</div>${rng("iRad", "Size", d.radius || 130, 70, 220, 5, "m")}${rng("iWob", "Wobbly coast", d.wobble ?? 0.12, 0, 0.35, 0.01)}
       <div class="stRow"><label>Seed</label><span><input class="stIn" type="number" id="iSeed" value="${d.seed}" step="0.1"> <button class="stB" id="iDice">🎲</button></span></div>
       <div class="stH">LAND</div>${rng("iPlat", "Camp height", d.plateau ?? 2.5, 0.6, 14, 0.1, "m")}${rng("iHills", "Hills", d.hills ?? 8, 0, 40, 1)}${rng("iHillS", "Hill size", d.hillSize || 1, 0.3, 3, 0.1)}${rng("iBeach", "Beach width", d.beach ?? 6, 2, 24, 1, "m")}${rng("iCliff", "Sea cliffs", d.cliffs || 0, 0, 1, 0.05)}${rng("iDecor", "Rocks and bushes", d.decor ?? 1, 0, 3, 0.1)}
-      <div class="stH">FEATURES <small>${(d.features || []).length} · click one to edit</small></div>
+      <div class="stH" id="iSecFeat">FEATURES <small>${(d.features || []).length} · click one to edit</small></div>
       <div class="stList" id="iFeats">${featRows(d) || `<div class="stHint">No features: a plain island.</div>`}</div>
       <div class="stBtns"><select class="stSel" id="iFeatType" style="flex:1">${Object.entries(FTYPES).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join("")}</select><button class="stB" id="iFeatAdd">+ Add</button></div>
       <div class="stH">COLOURS</div><div class="stChecks">${colr("grass", "Grass")}${colr("grass2", "Grass 2")}${colr("sand", "Sand")}${colr("rock", "Cliffs")}${colr("snow", "Peaks")}${colr("camp", "Camp")}${colr("bush", "Bushes")}${colr("shallow", "Shallows")}${colr("deep", "Deep sea")}</div>
       <div class="stRow"><label>Peaks colour above</label><input class="stIn" type="number" id="iSnowline" value="${d.snowline === "" || d.snowline === undefined ? "" : d.snowline}" placeholder="never" step="1"></div>
-      <div class="stH">TREES <small>${(d.trees || []).length} kinds</small></div>
+      <div class="stH" id="iSecEco">ECOSYSTEM: TREES <small>${tl.length} kinds · slider = how common</small></div>
+      <div class="stList">${tl.map(treeRow).join("") || `<div class="stHint">No trees yet: add some below.</div>`}</div>
+      <div class="stBtns">${treeAdd}</div>
+      <div class="stChecks"><label title="Normally a tree marked with an axe only grows once players own that axe. After a rebirth they start with the Rusty Axe."><input type="checkbox" id="iAllTiers"${d.allTiers ? " checked" : ""}> Every tree grows from the start (ignore the axe each one needs)</label></div>
+      ${tl.length && !nowOk.length && !d.allTiers ? `<div class="stMsg bad" style="margin:4px 0">Nothing here grows until players upgrade their axe: every tree needs a better axe than the Rusty Axe they arrive with. Tick the box above, or set a tree to "Rusty Axe" in the Trees tab.</div>` : ""}
       ${rng("iTreeN", "How many", d.treeCount || 90, 10, 220, 5)}
-      ${Object.entries(byHome).map(([home, list]) => `<div class="stHint" style="margin:6px 0 2px">From ${esc(isleName(+home))}</div><div class="stChecks">${list.map(([k, nm]) => `<label><input type="checkbox" data-tk="${k}"${(d.trees || []).includes(k) ? " checked" : ""}> ${esc(nm)}</label>`).join("")}</div>`).join("")}
-      <div class="stHint">Your own trees: tick "${esc(d.name)}" in the Trees tab.</div>
-      <div class="stH">ECONOMY</div><div class="stRow"><label>Like</label><select class="stSel" id="iEcon" style="max-width:190px">${Object.entries(ECON).map(([k, l]) => opt(k, d.economy || 6, l)).join("")}</select></div>
-      <div class="stHint">Uses that island's materials, forge recipes and brews. Trees here are ${Math.round(Math.pow(1.3, n - 6) * 45) / 10}× as tough as on Pine Island, and pay as much more.</div>
+      <div class="stBtns"><button class="stB" id="iRegrow">🌲 Regrow the forest now</button></div>
+      <div class="stHint">Make your own trees in the Trees tab, then add them here. The Studio shows every tree an island can grow; players see the ones marked with an axe once they own it.</div>
+      <div class="stH">ECOSYSTEM: ANIMALS <small>${an.reduce((s, a) => s + a.n, 0)} in all · they never attack</small></div>
+      <div class="stList">${an.map(a => `<div class="stItem"><span>${esc(T.WILD_KINDS[a.kind].name)}${T.WILD_KINDS[a.kind].custom ? ` <small style="color:#9fe8ff">yours</small>` : ""}</span><span style="display:flex;align-items:center;gap:4px"><input type="range" data-an="${esc(a.kind)}" min="1" max="30" step="1" value="${a.n}" style="width:80px"><small style="width:20px">${a.n}</small><button class="stB" data-anrm="${esc(a.kind)}" style="padding:1px 6px">✕</button></span></div>`).join("") || `<div class="stHint">No animals yet.</div>`}</div>
+      <div class="stBtns">${animalAdd}</div>
+      ${BUILTIN_THEMES[d.theme] ? `<div class="stBtns"><button class="stB" id="iEcoFill">Use the ${esc(BUILTIN_THEMES[d.theme].label.toLowerCase())} wildlife and ground cover</button></div>` : ""}
+      <div class="stHint">Make new animals in the Animals tab.</div>
+      <div class="stH">ECOSYSTEM: GROUND COVER</div>
+      ${COVER.map(([k, label, most, ck]) => `<div class="stRow"><label>${label}</label><span style="display:flex;align-items:center;gap:6px">${ck ? `<input class="stIn" type="color" data-ccol="${ck}" value="${ccol[ck] || COVER_COL[ck]}" style="width:26px;height:22px">` : ""}<input type="range" data-cov="${k}" min="0" max="${most}" step="1" value="${cover[k] || 0}" style="width:96px"><small style="width:26px;text-align:right">${cover[k] || 0}</small></span></div>`).join("")}
+      <div class="stRow"><label>In the air</label><span style="display:flex;gap:6px"><select class="stSel" id="iFlies">${Object.entries(FLIES).map(([k, l]) => opt(k, d.flies || "fireflies", l)).join("")}</select><input class="stIn" type="color" id="iFliesCol" value="${d.fliesCol || "#d8ff6a"}" title="Their colour"></span></div>
+      <div class="stH" id="iSecEcon">MATERIALS <small>${mats.length ? "this island's own · cheapest first" : "borrowed"}</small></div>
+      ${mats.length ? `<div class="stList">${mats.map((m, i) => `<div class="stItem"><span style="display:flex;align-items:center;gap:5px;min-width:0"><input class="stIn" type="color" data-mcol="${i}" value="${m.color || "#9a9aa4"}" style="width:26px;height:22px"><input class="stIn" type="text" data-mname="${i}" value="${esc(m.name)}" style="width:116px"><label title="Glows"><input type="checkbox" data-mglow="${i}"${m.glow ? " checked" : ""}>✦</label></span><span style="display:flex;align-items:center;gap:3px"><small>$${T.MATS[m.key] ? T.MATS[m.key].price : "?"}</small><button class="stB" data-mup="${i}" style="padding:1px 5px" title="Make it commoner">↑</button><button class="stB" data-mdel="${i}" style="padding:1px 6px">✕</button></span></div>`).join("")}</div>
+        <div class="stBtns"><button class="stB" id="iMatAdd">+ Material</button><button class="stB warn" id="iMatOff">Borrow instead</button></div>
+        <div class="stHint">Every tree here drops these (common trees the first ones, rare trees the last). The forge, the witch and the trading post use them too. Prices follow ${esc(ECON[d.economy || 6])}.</div>`
+        : `<div class="stHint" style="margin-top:0">Trees here drop ${esc(ECON[d.economy || 6])}'s materials: ${econMats.map(k => esc(T.MATS[k].name)).join(", ")}.</div><div class="stBtns"><button class="stB go" id="iMatOwn">+ Give it its own materials</button></div>`}
+      <div class="stRow"><label>Recipes and prices like</label><select class="stSel" id="iEcon" style="max-width:150px">${Object.entries(ECON).map(([k, l]) => opt(k, d.economy || 6, l)).join("")}</select></div>
+      <div class="stHint">Trees here are ${Math.round(Math.pow(1.3, n - 6) * 45) / 10}× as tough as on Pine Island, and pay as much more.</div>
+      <div class="stH">AXES <small>forged at this island's forge · strongest last</small></div>
+      <div class="stList">${axes.map((a, j) => { const idx = C && C.axeIdx ? C.axeIdx[j] : -1, A = T.AXES[idx]; return `<div style="border:1px solid #3a2c55;border-radius:8px;padding:6px;margin-bottom:6px">
+        <div class="stRow" style="margin:0 0 4px"><input class="stIn" type="text" data-xname="${j}" value="${esc(a.name)}" style="flex:1"><button class="stB" data-xdel="${j}" style="padding:1px 6px;margin-left:4px">✕</button></div>
+        <div class="stRow" style="margin:0 0 4px"><label>Head · edge · glow</label><span><input class="stIn" type="color" data-xcol="${j}:steel" value="${a.steel || "#4a4a5a"}" style="width:26px;height:22px"><input class="stIn" type="color" data-xcol="${j}:edge" value="${a.edge || "#e8f0ff"}" style="width:26px;height:22px"><input class="stIn" type="color" data-xcol="${j}:glow" value="${a.glow || "#2a2a4a"}" style="width:26px;height:22px"></span></div>
+        <div class="stRow" style="margin:0 0 4px"><label>Special move [Z]</label><select class="stSel" data-xab="${j}" style="max-width:150px">${T.ABIL.slice(0, T.BASE_AXES).map((b, i) => opt(i, a.ability ?? 14 + (j % 4), b.name)).join("")}</select></div>
+        <div class="stRow" style="margin:0 0 4px"><label>Damage</label><input class="stIn" type="number" data-xdmg="${j}" value="${a.dmg || ""}" placeholder="${A ? A.dmg : "auto"}" step="100"></div>
+        <div class="stHint" style="margin:0">${A ? `Costs ${recipeTxt(idx)}` : "Working out its recipe…"}</div></div>`; }).join("") || `<div class="stHint">No axes of its own: the forge sells ${esc(ECON[d.economy || 6])}'s.</div>`}</div>
+      <div class="stBtns">${axes.length < 4 ? `<button class="stB" id="iAxeAdd">+ Axe</button>` : ""}</div>
+      <div class="stHint">The island's own axes come after the forge's usual ones and cost its rarest materials. Leave damage empty to have it worked out.</div>
       <div class="stH">THE TICKET <small>from ${esc(isleName(n - 1))}</small></div>
       <div class="stRow"><label>Cash</label><input class="stIn" type="number" id="iCost" value="${d.rebirth && d.rebirth.cost !== undefined ? d.rebirth.cost : 25000000}" step="1000000" style="width:120px"></div>
-      <div class="stRow"><label>Bring</label><span><input class="stIn" type="number" id="iItemN" value="${item[1] || 0}" min="0" step="1" style="width:56px"> <select class="stSel" id="iItem" style="max-width:120px">${opt("", item[0], "nothing")}${pm.map(k => opt(k, item[0], T.MATS[k].name)).join("")}</select></span></div>
-      <div class="stH">STORY</div>
+      <div class="stRow"><label>Bring</label><span><input class="stIn" type="number" id="iItemN" value="${item[1] || 0}" min="0" step="1" style="width:56px"> <select class="stSel" id="iItem" style="max-width:120px">${opt("", item[0], "nothing")}${pm.map(k => opt(k, item[0], T.MATS[k] ? T.MATS[k].name : k)).join("")}</select></span></div>
+      <div class="stH" id="iSecStory">STORY</div>
       <div class="stRow"><label>Camp name</label><input class="stIn" type="text" id="iCamp" value="${esc(d.campName || "CAMP")}"></div>
       <div class="stHint">The ferry ride (two lines):</div><input class="stIn" type="text" id="iRide1" value="${esc(d.rideLine1 || "")}" style="width:100%;margin-bottom:4px"><input class="stIn" type="text" id="iRide2" value="${esc(d.rideLine2 || "")}" placeholder="${esc(d.name)} rises out of the sea." style="width:100%">
       <div class="stHint">The Ferryman, before you sail:</div><input class="stIn" type="text" id="iFerryLine" value="${esc(d.ferryLine || "")}" placeholder="Next stop: ${esc(d.name)}. Hold on tight." style="width:100%">
@@ -917,23 +1079,27 @@ function renderIslands() {
       <div class="stH">DOCKS</div>${rng("iArrDir", "Arrivals face", d.arrDir ?? 125, -180, 180, 1, "°")}${rng("iNextDir", "Ferry onwards faces", d.nextDir ?? -35, -180, 180, 1, "°")}
       <div class="stHint">Changes rebuild the island live. Go there to watch. Saved islands are in <b>content/islands.js</b> and ship on your next release.</div>`;
     $("stLeftBody").innerHTML = h;
+    $("stLeftBody").scrollTop = scroll;
     bindIslands();
 }
 function bindIslands() {
-    const body = $("stLeftBody"), on = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); };
-    body.querySelectorAll("[data-isl]").forEach(it => it.addEventListener("click", () => { islandSel = +it.dataset.isl; featOpen = -1; renderIslands(); }));
+    const body = $("stLeftBody"), on = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); }, all = (q, ev, fn) => body.querySelectorAll(q).forEach(e => e.addEventListener(ev, () => fn(e)));
+    all("[data-isl]", "click", it => { islandSel = +it.dataset.isl; featOpen = -1; body.scrollTop = 0; renderIslands(); });
     on("iNew", "click", () => newIsland($("iNewTheme").value));
     const d = islands[islandSel]; if (!d) return;
-    on("iGo", "click", () => goIsle(String(T.CI_BASE + islandSel)));
-    on("iTest", "click", () => { clearTimeout(isleT); T.ciSet(islandSel, d); testRebirth(islandSel); });
+    const n = T.CI_BASE + islandSel;
+    all("[data-jump]", "click", b => { const t = $(b.dataset.jump); if (t) body.scrollTop = t.offsetTop - 8; });
+    on("iGo", "click", () => goIsle(String(n)));
+    on("iTest", "click", () => { rebuildNow(islandSel); testRebirth(islandSel); });
     on("iAskGo", "click", () => askClaudeIsland(d));
     on("iDelIsl", "click", () => {
-        const n = T.CI_BASE + islandSel;
         if (curIsle() === n) { say("Go to another island first"); return; }
         if (!confirm(`Delete ${d.name}? It stops being Rebirth ${n - 1}, and everything you placed on it goes too.`)) return;
         if (!T.ciDropLast()) { say("Couldn't delete it"); return; }
+        for (const m of d.mats || []) dropMatEverywhere(m.key); // nothing may drop its materials any more
         islands.pop();
         for (const o of world.objects.filter(q => +q.isle === n)) { T.placedRemove(o); world.objects.splice(world.objects.indexOf(o), 1); }
+        for (const t of trees) if ((t.isl || []).includes(n)) setTreeOnIsle(t, n, false);
         islandSel = Math.max(0, islands.length - 1);
         if (islands.length) T.ciSet(islands.length - 1, islands[islands.length - 1]);
         changed("islands"); changed("world"); renderIsleSelect(); renderIslands();
@@ -959,17 +1125,63 @@ function bindIslands() {
     on("iDice", "click", () => { d.seed = r3(1 + Math.random() * 8); islandChanged(true); });
     // features
     body.querySelectorAll("[data-fopen]").forEach(it => it.addEventListener("click", e => { if (e.target.closest("[data-fdel]")) return; const i = +it.dataset.fopen; featOpen = featOpen === i ? -1 : i; renderIslands(); }));
-    body.querySelectorAll("[data-fdel]").forEach(b => b.addEventListener("click", () => { d.features.splice(+b.dataset.fdel, 1); featOpen = -1; islandChanged(true); }));
+    all("[data-fdel]", "click", b => { d.features.splice(+b.dataset.fdel, 1); featOpen = -1; islandChanged(true); });
     on("iFeatAdd", "click", () => { const t = $("iFeatType").value, D = FDEF[t]; const f = { type: t, dir: Math.round(Math.random() * 360) }; for (const k of ["dist", "r", "h", "len", "width", "depth"]) if (D[k] !== undefined) f[k] = D[k]; d.features = d.features || []; d.features.push(f); featOpen = d.features.length - 1; islandChanged(true); });
-    body.querySelectorAll("#iFeats [data-fk]").forEach(c => c.addEventListener(c.type === "checkbox" || c.type === "text" ? (c.type === "text" ? "input" : "change") : "input", () => {
+    body.querySelectorAll("#iFeats [data-fk]").forEach(c => c.addEventListener(c.type === "checkbox" ? "change" : "input", () => {
         const f = d.features[+c.dataset.fi], k = c.dataset.fk; if (!f) return;
         if (c.type === "checkbox") f[k] = c.checked; else if (c.type === "text") f[k] = c.value.slice(0, 30).toUpperCase(); else { f[k] = +c.value; const sm = c.parentElement.querySelector("small"); if (sm) sm.textContent = c.value + sm.textContent.replace(/^[-\d.]+/, ""); }
         islandChanged();
     }));
     body.querySelectorAll("[data-colr]").forEach(c => c.addEventListener("input", () => { d.colors = { ...(d.colors || {}), [c.dataset.colr]: c.value }; islandChanged(); }));
     on("iSnowline", "input", e => { d.snowline = e.target.value === "" ? "" : +e.target.value; islandChanged(); });
-    body.querySelectorAll("[data-tk]").forEach(c => c.addEventListener("change", () => { const k = c.dataset.tk; d.trees = (d.trees || []).filter(q => q !== k); if (c.checked) d.trees.push(k); if (!d.trees.length) { c.checked = true; d.trees = [k]; say("An island needs at least one kind of tree"); } islandChanged(); }));
+    // the ecosystem: trees
+    body.querySelectorAll("[data-tw]").forEach(c => c.addEventListener("input", () => { d.treeW = { ...(d.treeW || {}), [c.dataset.tw]: +c.value }; c.nextElementSibling.textContent = c.value + "×"; islandChanged(); }));
+    all("[data-trm]", "click", b => {
+        const k = b.dataset.trm, own = trees.find(t => t.key === k);
+        if (own) setTreeOnIsle(own, n, false); else d.trees = (d.trees || []).filter(q => q !== k);
+        if (d.treeW) delete d.treeW[k];
+        islandChanged(true);
+    });
+    on("iTreeAdd", "change", e => {
+        const k = e.target.value; if (!k) return;
+        const own = trees.find(t => t.key === k);
+        if (own) setTreeOnIsle(own, n, true); else d.trees = [...(d.trees || []), k];
+        islandChanged(true);
+    });
+    on("iAllTiers", "change", e => { d.allTiers = e.target.checked; islandChanged(true); });
+    on("iRegrow", "click", () => { rebuildNow(islandSel); say(curIsle() === n ? "The forest grew back" : `Rebuilt. Go to ${d.name} to see it`); });
+    // animals, ground cover, the air
+    body.querySelectorAll("[data-an]").forEach(c => c.addEventListener("input", () => { const a = (d.animals || []).find(q => q.kind === c.dataset.an); if (a) a.n = +c.value; c.nextElementSibling.textContent = c.value; islandChanged(); }));
+    all("[data-anrm]", "click", b => { d.animals = (d.animals || []).filter(q => q.kind !== b.dataset.anrm); islandChanged(true); });
+    on("iAnAdd", "change", e => { const k = e.target.value; if (!k) return; d.animals = [...(d.animals || []), { kind: k, n: T.WILD_KINDS[k].fly ? 4 : 6 }]; islandChanged(true); });
+    on("iEcoFill", "click", () => { Object.assign(d, ecoPreset(d.theme)); islandChanged(true); say("Wildlife and ground cover from the theme"); });
+    body.querySelectorAll("[data-cov]").forEach(c => c.addEventListener("input", () => { d.cover = { ...(d.cover || {}), [c.dataset.cov]: +c.value }; c.nextElementSibling.textContent = c.value; islandChanged(); }));
+    body.querySelectorAll("[data-ccol]").forEach(c => c.addEventListener("input", () => { d.coverCol = { ...(d.coverCol || {}), [c.dataset.ccol]: c.value }; islandChanged(); }));
+    on("iFlies", "change", e => { d.flies = e.target.value; islandChanged(); });
+    on("iFliesCol", "input", e => { d.fliesCol = e.target.value; islandChanged(); });
+    // materials
+    const matsChanged = () => islandChanged();
+    on("iMatOwn", "click", () => {
+        const base = [["Timber", "#b08a5a"], ["Pebble", "#a8a8b4"], ["Resin", "#e0a040"], ["Glimmer", "#9fe0ff", true], ["Heartstone", "#ff5a8a", true]];
+        d.mats = []; for (const [name, color, glow] of base) d.mats.push({ key: uniqueKey2("m_", slug(d.name, "isle") + "_" + name, k => matTaken(k, d) || d.mats.some(q => q.key === k)), name, color, glow: !!glow });
+        islandChanged(true); say("Rename them and pick colours: or ask Claude to invent them with the island");
+    });
+    on("iMatOff", "click", () => { if (!confirm("Stop using this island's own materials? Trees here go back to dropping borrowed ones.")) return; for (const m of d.mats || []) dropMatEverywhere(m.key); d.mats = []; d.axes = []; islandChanged(true); });
+    on("iMatAdd", "click", () => { if ((d.mats || []).length >= 8) { say("8 materials is the most"); return; } d.mats.push({ key: uniqueKey2("m_", slug(d.name, "isle") + "_material", k => matTaken(k, d) || d.mats.some(q => q.key === k)), name: "Material", color: "#c8c8d0", glow: false }); islandChanged(true); });
+    body.querySelectorAll("[data-mname]").forEach(c => c.addEventListener("input", () => { d.mats[+c.dataset.mname].name = c.value.slice(0, 24) || "Material"; matsChanged(); }));
+    body.querySelectorAll("[data-mcol]").forEach(c => c.addEventListener("input", () => { d.mats[+c.dataset.mcol].color = c.value; matsChanged(); }));
+    all("[data-mglow]", "change", c => { d.mats[+c.dataset.mglow].glow = c.checked; matsChanged(); });
+    all("[data-mup]", "click", b => { const i = +b.dataset.mup; if (i > 0) { const m = d.mats.splice(i, 1)[0]; d.mats.splice(i - 1, 0, m); islandChanged(true); } });
+    all("[data-mdel]", "click", b => { const i = +b.dataset.mdel; if (d.mats.length <= 1) { say("Keep at least one, or press Borrow instead"); return; } dropMatEverywhere(d.mats[i].key); d.mats.splice(i, 1); islandChanged(true); });
     on("iEcon", "change", e => { d.economy = +e.target.value; islandChanged(true); });
+    // axes
+    on("iAxeAdd", "click", () => { d.axes = d.axes || []; const name = d.name.split(" ")[0] + " Axe"; d.axes.push({ key: uniqueKey2("x_", name, k => axeTaken(k, d) || d.axes.some(q => q.key === k)), name, steel: "#4a4a5a", edge: "#9fe8ff", glow: "#1a3a5a", ability: 14 + (d.axes.length % 4) }); islandChanged(true); });
+    all("[data-xdel]", "click", b => { d.axes.splice(+b.dataset.xdel, 1); islandChanged(true); });
+    body.querySelectorAll("[data-xname]").forEach(c => c.addEventListener("input", () => { d.axes[+c.dataset.xname].name = c.value.slice(0, 28) || "Axe"; islandChanged(); }));
+    body.querySelectorAll("[data-xcol]").forEach(c => c.addEventListener("input", () => { const [j, k] = c.dataset.xcol.split(":"); d.axes[+j][k] = c.value; islandChanged(); }));
+    all("[data-xab]", "change", c => { d.axes[+c.dataset.xab].ability = +c.value; islandChanged(); });
+    body.querySelectorAll("[data-xdmg]").forEach(c => c.addEventListener("input", () => { const v = Math.round(+c.value); if (v > 0) d.axes[+c.dataset.xdmg].dmg = v; else delete d.axes[+c.dataset.xdmg].dmg; islandChanged(); }));
+    // the ticket and the story
     on("iCost", "input", e => { d.rebirth = { ...(d.rebirth || {}), cost: Math.max(0, Math.round(+e.target.value || 0)) }; islandChanged(); });
     const setItem = () => { const k = $("iItem").value, v = Math.max(0, Math.round(+$("iItemN").value || 0)); d.rebirth = { ...(d.rebirth || {}), items: k && v ? { [k]: v } : {} }; islandChanged(); };
     on("iItem", "change", setItem); on("iItemN", "input", setItem);
@@ -978,33 +1190,45 @@ function bindIslands() {
 }
 
 // =====================================================================
-//  the Prop Maker: props built from simple parts (content/props.js). By hand, or ask Claude
+//  the Prop Maker and the Animal Maker: things built from simple parts (content/props.js, content/animals.js). By hand, or ask Claude
 // =====================================================================
 let myProps = (Array.isArray(T.CONTENT_PROPS) ? T.CONTENT_PROPS : []).filter(p => p && /^u_/.test(p.key)).map(p => JSON.parse(JSON.stringify(p)));
-let pmSel = myProps[0] ? myProps[0].key : null, partSel = -1, pmPreview = null, pmAt = null, pmGizmo = false, pmT = 0;
+let myAnimals = (Array.isArray(T.CONTENT_ANIMALS) ? T.CONTENT_ANIMALS : []).filter(a => a && /^a_/.test(a.key)).map(a => JSON.parse(JSON.stringify(a)));
+const MK = {
+    props: { kind: "props", noun: "prop", Noun: "Prop", prefix: "u_", list: () => myProps, set: v => (myProps = v), define: d => T.defineCustomProp(d), drop: k => T.dropCustomProp(k), sel: myProps[0] ? myProps[0].key : null },
+    animals: { kind: "animals", noun: "animal", Noun: "Animal", prefix: "a_", list: () => myAnimals, set: v => (myAnimals = v), define: d => T.defineCustomAnimal(d), drop: k => T.dropCustomAnimal(k), sel: myAnimals[0] ? myAnimals[0].key : null }
+};
+const mk = () => (tab === "animals" ? MK.animals : MK.props);
+const makerTab = () => tab === "props" || tab === "animals";
+let partSel = -1, pmPreview = null, pmAt = null, pmGizmo = false, pmT = 0;
 const PART_LABEL = { box: "Box", sphere: "Ball", cyl: "Cylinder", cone: "Cone", pyramid: "Pyramid", torus: "Ring", dome: "Dome", wedge: "Wedge", rock: "Rock", gem: "Gem", hex: "Hex prism", tube: "Pipe", panel: "Flat panel" };
-const pmCur = () => myProps.find(p => p.key === pmSel) || null;
-function pmKey(name) { const base = "u_" + (String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 24) || "prop"); let k = base, n = 2; while (T.PROPS[k] || myProps.some(p => p.key === k)) k = base + "_" + n++; return k; }
-function pmClearPreview() { if (pmPreview) { T.placedRemove(pmPreview.o); pmPreview = null; } if (pmGizmo) { tc.detach(); pmGizmo = false; } }
+const ROLE_LABEL = { body: "Body", head: "Head", leg: "Leg", tail: "Tail", wing: "Wing", ear: "Ear", eye: "Eye" };
+const pmCur = () => mk().list().find(p => p.key === mk().sel) || null;
+function pmKeyFor(M, name) { const base = M.prefix + slug(name, M.noun); let k = base, n = 2; while (T.PROPS[k] || T.WILD_KINDS[k] || M.list().some(p => p.key === k)) k = base + "_" + n++; return k; }
+function pmRemovePreview() { if (!pmPreview) return; if (pmPreview.flat) T.scene.remove(pmPreview.g); else T.placedRemove(pmPreview.o); pmPreview = null; }
+function pmClearPreview() { pmRemovePreview(); if (pmGizmo) { tc.detach(); pmGizmo = false; } }
 function pmShowPreview(move) {
-    const p = pmCur(); if (!p || tab !== "props" || mode !== "edit") { pmClearPreview(); return; }
+    const p = pmCur(); if (!p || !makerTab() || mode !== "edit") { pmClearPreview(); return; }
     if (!pmAt || move) { // in view, and not in your face
         let s = previewSpot(); const f = fwd().setY(0).normalize();
         if (Math.hypot(s.x - cam.pos.x, s.z - cam.pos.z) < 4) s = { x: cam.pos.x + f.x * 5, z: cam.pos.z + f.z * 5 };
         pmAt = { x: s.x, z: s.z };
     }
-    if (pmPreview) T.placedRemove(pmPreview.o);
-    const o = { id: "__pm", isle: curIsle(), kind: "prop", prop: p.key, x: pmAt.x, y: T.groundY(pmAt.x, pmAt.z), z: pmAt.z, rx: 0, ry: 0, rz: 0, s: 1, solid: false };
-    pmPreview = T.placedBuild(o);
+    pmRemovePreview();
+    if (tab === "animals") { // a flat copy of the parts (no pivots), so the gizmo can move each one
+        const g = new THREE.Group(), body = T.makePartsGroup(p.parts); g.add(body);
+        g.scale.setScalar(Math.min(6, Math.max(0.1, +p.size || 1))); g.position.set(pmAt.x, T.groundY(pmAt.x, pmAt.z), pmAt.z);
+        T.scene.add(g); pmPreview = { g, body, flat: true };
+    } else pmPreview = T.placedBuild({ id: "__pm", isle: curIsle(), kind: "prop", prop: p.key, x: pmAt.x, y: T.groundY(pmAt.x, pmAt.z), z: pmAt.z, rx: 0, ry: 0, rz: 0, s: 1, solid: false });
     if (partSel >= 0 && pmPreview && pmPreview.body.children[partSel]) { if (sel) deselect(); tc.attach(pmPreview.body.children[partSel]); pmGizmo = true; } else if (pmGizmo) { tc.detach(); pmGizmo = false; }
 }
-function pmApply(rerender, now) { // the prop's new look goes into the game: the preview and every copy you've placed
-    const p = pmCur(); if (!p) return;
-    changed("props");
+function pmApply(rerender, now) { // the new look goes into the game: the preview, and every copy of a prop you've placed
+    const p = pmCur(), M = mk(); if (!p) return;
+    changed(M.kind);
     clearTimeout(pmT);
-    const go = () => { T.defineCustomProp(p); pmShowPreview(); for (const rec of T.placed.slice()) if (rec.o.prop === p.key && rec.o.id !== "__pm") T.placedRebuild(rec.o); };
+    const go = () => { M.define(p); pmShowPreview(); if (M === MK.props) for (const rec of T.placed.slice()) if (rec.o.prop === p.key && rec.o.id !== "__pm") T.placedRebuild(rec.o); };
     if (now) go(); else pmT = setTimeout(go, 160);
-    if (rerender) renderPropMaker();
+    if (rerender) renderMaker();
 }
 function pmFromGizmo() { // you dragged a part: its numbers follow
     const p = pmCur(); if (!p || partSel < 0 || !pmPreview) return;
@@ -1014,10 +1238,20 @@ function pmFromGizmo() { // you dragged a part: its numbers follow
     q.sx = r3(Math.max(0.02, m.scale.x)); q.sy = r3(Math.max(0.02, m.scale.y)); q.sz = r3(Math.max(0.02, m.scale.z));
 }
 function pmPickPart(mx, my) { if (!pmPreview) return -1; setRay(mx, my); const hits = ray.intersectObjects(pmPreview.body.children, false); return hits.length ? pmPreview.body.children.indexOf(hits[0].object) : -1; }
-function pmSelectPart(i) { partSel = i; renderPropMaker(); pmShowPreview(); }
+function pmSelectPart(i) { partSel = i; renderMaker(); pmShowPreview(); }
+// a little four-legged starter: every animal begins as this, then you (or Claude) change it
+function starterAnimal() {
+    const P = (shape, role, x, y, z, sx, sy, sz, color, more = {}) => ({ shape, role, x, y, z, sx, sy, sz, color, ...more });
+    return { name: "New Animal", way: "wander", size: 1, speed: 1.2, run: 6, flee: 9, herd: 1, pitch: 500, parts: [
+        P("box", "body", 0, 0.55, 0, 0.5, 0.4, 0.9, "#b08a5a"), P("box", "head", 0, 0.82, 0.56, 0.38, 0.34, 0.38, "#b08a5a"), P("box", "head", 0, 0.74, 0.8, 0.2, 0.16, 0.16, "#e8d8b8"),
+        P("sphere", "eye", -0.1, 0.88, 0.75, 0.07, 0.07, 0.05, "#120c08"), P("sphere", "eye", 0.1, 0.88, 0.75, 0.07, 0.07, 0.05, "#120c08"),
+        P("cone", "ear", -0.12, 1.04, 0.5, 0.1, 0.18, 0.08, "#8a6a40"), P("cone", "ear", 0.12, 1.04, 0.5, 0.1, 0.18, 0.08, "#8a6a40"),
+        P("box", "leg", -0.17, 0.2, 0.3, 0.12, 0.4, 0.12, "#8a6a40"), P("box", "leg", 0.17, 0.2, 0.3, 0.12, 0.4, 0.12, "#8a6a40"), P("box", "leg", -0.17, 0.2, -0.3, 0.12, 0.4, 0.12, "#8a6a40"), P("box", "leg", 0.17, 0.2, -0.3, 0.12, 0.4, 0.12, "#8a6a40"),
+        P("cyl", "tail", 0, 0.66, -0.52, 0.08, 0.3, 0.08, "#8a6a40", { rx: -50 })] };
+}
 function pmNew(base) {
-    const p = base || { name: "New prop", r: 0.5, light: null, parts: [{ shape: "box", x: 0, y: 0.5, z: 0, sx: 1, sy: 1, sz: 1, color: "#9a7a5a", tint: true }] };
-    p.key = pmKey(p.name); myProps.push(p); pmSel = p.key; partSel = -1; pmAt = null; T.defineCustomProp(p); changed("props"); renderPropMaker(); pmShowPreview(true); pmFrame(); renderPlaceIfOpen();
+    const M = mk(), p = base || (M === MK.animals ? starterAnimal() : { name: "New prop", r: 0.5, light: null, parts: [{ shape: "box", x: 0, y: 0.5, z: 0, sx: 1, sy: 1, sz: 1, color: "#9a7a5a", tint: true }] });
+    p.key = pmKeyFor(M, p.name); M.list().push(p); M.sel = p.key; partSel = -1; pmAt = null; M.define(p); changed(M.kind); renderMaker(); pmShowPreview(true); pmFrame(); renderPlaceIfOpen();
 }
 function pmFrame() { // the camera steps back to see the whole preview (F)
     if (!pmPreview) return;
@@ -1027,104 +1261,164 @@ function pmFrame() { // the camera steps back to see the whole preview (F)
     lookAtPoint(c);
 }
 function renderPlaceIfOpen() { if (tab === "place") renderPlace(); }
-// ---- Ask Claude for a prop ----
+function addAnimalToIsland(i, key) { const d = islands[i]; if (!d) return; d.animals = d.animals || []; const a = d.animals.find(q => q.kind === key); if (a) a.n = Math.min(30, a.n + 4); else d.animals.push({ kind: key, n: 6 }); changed("islands"); rebuildIsle(i); }
+// ---- Ask Claude: one short request, a JSON prop or animal back, every field checked ----
+const SHAPES_TXT = "box (a 1 m cube), sphere (1 m across), cyl (cylinder 1 m across, 1 m tall), cone (point up), pyramid (square base), torus (a ring 1 m across standing upright in the x-y plane: rx 90 lays it flat), dome (half a ball, flat side down, its base at the part's y), wedge (a ramp, high at the back), rock (a chunky lump), gem (a diamond), hex (a hexagonal prism), tube (an open pipe), panel (a flat square facing +z)";
+function cleanParts(list, roles) {
+    const num = (v, a, b, dflt) => { v = +v; return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : dflt; }, hex = v => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : "#9a9aa4");
+    return list.filter(q => q && PART_LABEL[q.shape]).slice(0, 60).map(q => {
+        const o = { shape: q.shape, x: r3(num(q.x, -20, 20, 0)), y: r3(num(q.y, -5, 30, 0.5)), z: r3(num(q.z, -20, 20, 0)), sx: r3(num(q.sx, 0.02, 20, 1)), sy: r3(num(q.sy, 0.02, 20, 1)), sz: r3(num(q.sz, 0.02, 20, 1)), color: hex(q.color) };
+        if (roles) o.role = ROLE_LABEL[q.role] ? q.role : "body";
+        for (const k of ["rx", "ry", "rz"]) if (q[k]) o[k] = Math.round(num(q[k], -720, 720, 0));
+        if (q.glow) o.glow = true; if (!roles && q.tint) o.tint = true; if (q.opacity !== undefined && +q.opacity < 1) o.opacity = r3(num(q.opacity, 0.1, 1, 1));
+        return o;
+    });
+}
 function cleanProp(src, into) {
     const num = (v, a, b, dflt) => { v = +v; return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : dflt; }, hex = v => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : "#9a9aa4");
     const p = { ...into };
     if (typeof src.name === "string" && src.name.trim()) p.name = src.name.trim().slice(0, 32);
     if (src.r !== undefined) p.r = r3(num(src.r, 0, 6, 0.5));
     p.light = src.light && src.light.on ? { on: true, color: hex(src.light.color), power: r3(num(src.light.power, 1, 40, 8)), range: r3(num(src.light.range, 3, 40, 12)), y: r3(num(src.light.y, -1, 15, 1.5)) } : null;
-    if (Array.isArray(src.parts)) {
-        const parts = src.parts.filter(q => q && PART_LABEL[q.shape]).slice(0, 60).map(q => {
-            const o = { shape: q.shape, x: r3(num(q.x, -20, 20, 0)), y: r3(num(q.y, -5, 30, 0.5)), z: r3(num(q.z, -20, 20, 0)), sx: r3(num(q.sx, 0.02, 20, 1)), sy: r3(num(q.sy, 0.02, 20, 1)), sz: r3(num(q.sz, 0.02, 20, 1)), color: hex(q.color) };
-            for (const k of ["rx", "ry", "rz"]) if (q[k]) o[k] = Math.round(num(q[k], -720, 720, 0));
-            if (q.glow) o.glow = true; if (q.tint) o.tint = true; if (q.opacity !== undefined && +q.opacity < 1) o.opacity = r3(num(q.opacity, 0.1, 1, 1));
-            return o;
-        });
-        if (parts.length) p.parts = parts;
-    }
+    if (Array.isArray(src.parts)) { const parts = cleanParts(src.parts, false); if (parts.length) p.parts = parts; }
     return p;
 }
-async function askClaudeProp(p) {
-    const desc = ($("pmAsk").value || "").trim(), msg = $("pmAskMsg"), btn = $("pmAskGo");
-    if (!desc) { msg.className = "stMsg bad"; msg.textContent = "Describe the prop first."; return; }
-    const model = $("pmModel").value; pref("model", model);
-    btn.disabled = true; btn.textContent = "Claude is building it…"; msg.className = "stMsg"; msg.textContent = `Asking ${model}…`;
-    const prompt = `Build a 3D prop from this description: "${desc}"
+function cleanAnimal(src, into) {
+    const num = (v, a, b, dflt) => { v = +v; return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : dflt; };
+    const a = { ...into };
+    if (typeof src.name === "string" && src.name.trim()) a.name = src.name.trim().slice(0, 32);
+    if (T.ANIMAL_WAYS[src.way]) a.way = src.way;
+    for (const [k, lo, hi] of [["speed", 0.1, 4], ["run", 0.5, 12], ["flee", 0, 25], ["herd", 1, 8], ["alt", 4, 50], ["pitch", 60, 2000]]) if (src[k] !== undefined) a[k] = r3(num(src[k], lo, hi, a[k]));
+    if (src.size !== undefined) a.size = r3(num(src.size, 0.2, 4, 1));
+    a.herd = Math.round(a.herd || 1); a.night = !!src.night;
+    if (Array.isArray(src.parts)) { const parts = cleanParts(src.parts, true); if (parts.length) a.parts = parts; }
+    return a;
+}
+function makerPrompt(kind, desc) {
+    if (kind === "animals") return `Build a low-poly animal from this description: "${desc}"
+
+Build it out of simple parts. Each part has a role that says how it moves: body (stays still), head (looks around: put the snout, mouth, beak and horns on it too), eye (blinks), ear (twitches), leg (swings from its top when it walks: one tall part per leg, reaching the ground), tail (wags), wing (flaps from the end nearest the body).
+Units are metres, y is up, the ground is y = 0 (the feet touch it), and the animal faces +z. Each part is centred on its x, y, z, turned by rx, ry, rz in degrees, and sized by sx (width), sy (height), sz (depth).
+Shapes at size 1: ${SHAPES_TXT}.
+Style: chunky, cute-spooky low-poly, like a cheerful tree-chopping game where the trees are alive. Build it at its natural size (a rabbit about 0.4 m tall, a deer about 1.5 m) and leave size at 1. Use 8 to 40 parts. Most animals have a head with 2 eyes, and legs. Put glow: true on glowing eyes, spots or flames, and opacity 0.3 to 0.8 on ghostly bits.
+Behaviour ("way"): wander (a shy grazer that runs off), bold (never runs off), hop (hops about), slow (creeps along), fly (circles high in the sky: give it wings).
+Return JSON: {"name": "1-3 words", "way": "...", "speed": walking speed in m/s (0.3-2), "run": running speed (2-9), "flee": how close you can get before it runs, in metres (3-14), "herd": how many come together (1-6), "alt": flying height in metres (8-40, flyers only), "night": true if a flyer only comes out at night, "pitch": its voice, 80 (deep) to 1600 (squeaky),
+ "parts": [{"shape": "...", "role": "body|head|eye|ear|leg|tail|wing", "x": 0, "y": 0.5, "z": 0, "rx": 0, "ry": 0, "rz": 0, "sx": 1, "sy": 1, "sz": 1, "color": "#rrggbb", "glow": false, "opacity": 1}]}
+Example, a little pig: {"name":"Piglet","way":"wander","speed":0.9,"run":5,"flee":7,"herd":3,"pitch":700,"parts":[{"shape":"sphere","role":"body","x":0,"y":0.4,"z":0,"sx":0.5,"sy":0.42,"sz":0.7,"color":"#f0a0a8"},{"shape":"sphere","role":"head","x":0,"y":0.5,"z":0.38,"sx":0.34,"sy":0.32,"sz":0.3,"color":"#f0a0a8"},{"shape":"cyl","role":"head","x":0,"y":0.46,"z":0.55,"sx":0.14,"sy":0.08,"sz":0.14,"rx":90,"color":"#e07a88"},{"shape":"sphere","role":"eye","x":-0.08,"y":0.56,"z":0.5,"sx":0.05,"sy":0.05,"sz":0.04,"color":"#120c08"},{"shape":"sphere","role":"eye","x":0.08,"y":0.56,"z":0.5,"sx":0.05,"sy":0.05,"sz":0.04,"color":"#120c08"},{"shape":"cone","role":"ear","x":-0.1,"y":0.68,"z":0.36,"sx":0.08,"sy":0.12,"sz":0.05,"color":"#e07a88"},{"shape":"cone","role":"ear","x":0.1,"y":0.68,"z":0.36,"sx":0.08,"sy":0.12,"sz":0.05,"color":"#e07a88"},{"shape":"cyl","role":"leg","x":-0.14,"y":0.11,"z":0.18,"sx":0.1,"sy":0.22,"sz":0.1,"color":"#e07a88"},{"shape":"cyl","role":"leg","x":0.14,"y":0.11,"z":0.18,"sx":0.1,"sy":0.22,"sz":0.1,"color":"#e07a88"},{"shape":"cyl","role":"leg","x":-0.14,"y":0.11,"z":-0.2,"sx":0.1,"sy":0.22,"sz":0.1,"color":"#e07a88"},{"shape":"cyl","role":"leg","x":0.14,"y":0.11,"z":-0.2,"sx":0.1,"sy":0.22,"sz":0.1,"color":"#e07a88"},{"shape":"torus","role":"tail","x":0,"y":0.45,"z":-0.36,"sx":0.12,"sy":0.12,"sz":0.12,"ry":90,"color":"#e07a88"}]}`;
+    return `Build a 3D prop from this description: "${desc}"
 
 Build it out of simple parts. Units are metres, y is up, the ground is y = 0 and the prop's front faces +z. Each part is centred on its x, y, z, turned by rx, ry, rz in degrees, and sized by sx (width), sy (height), sz (depth).
-Shapes at size 1: box (a 1 m cube), sphere (1 m across), cyl (cylinder 1 m across, 1 m tall), cone (point up), pyramid (square base), torus (a ring 1 m across standing upright in the x-y plane: rx 90 lays it flat), dome (half a ball, flat side down, its base at the part's y), wedge (a ramp, high at the back), rock (a chunky lump), gem (a diamond), hex (a hexagonal prism), tube (an open pipe), panel (a flat square facing +z).
+Shapes at size 1: ${SHAPES_TXT}.
 Style: chunky low-poly, like a spooky but cheerful tree-chopping game. Most props are 0.5 to 4 m tall. Use 3 to 40 parts. Put glow: true on parts that give off light (flames, windows, crystals, eyes), tint: true on the main-colour parts so players can recolour them, and opacity 0.2 to 0.9 for glass, water or ghostly bits.
 Return JSON: {"name": "1-3 words", "r": how wide it is to bump into in metres (0 for flat or thin things, up to 3), "light": {"on": true, "color": "#rrggbb", "power": 4-20, "range": 6-20, "y": height} or null,
  "parts": [{"shape": "...", "x": 0, "y": 0.5, "z": 0, "rx": 0, "ry": 0, "rz": 0, "sx": 1, "sy": 1, "sz": 1, "color": "#rrggbb", "glow": false, "tint": false, "opacity": 1}]}
 Example, a barrel: {"name":"Barrel","r":0.5,"light":null,"parts":[{"shape":"cyl","x":0,"y":0.55,"z":0,"sx":0.9,"sy":1.1,"sz":0.9,"color":"#8a5a30","tint":true},{"shape":"cyl","x":0,"y":0.2,"z":0,"sx":0.94,"sy":0.08,"sz":0.94,"color":"#3a3a40"},{"shape":"cyl","x":0,"y":0.9,"z":0,"sx":0.94,"sy":0.08,"sz":0.94,"color":"#3a3a40"}]}`;
-    const r = await S.askClaude({ prompt, system: "You build low-poly 3D props out of simple shapes for Hypergamous Tree Chopping Simulator 4. Reply with ONLY one JSON object: no prose, no code fences.", model });
-    btn.disabled = false; btn.textContent = "Build it with Claude";
-    if (!r.ok) { msg.className = "stMsg bad"; msg.textContent = r.error; return; }
+}
+async function claudeBuild(kind, desc, model, into) { // → { ok, data, tokens, ms, model } or { ok: false, error }
+    const r = await S.askClaude({ prompt: makerPrompt(kind, desc), system: `You build low-poly 3D ${kind === "animals" ? "animals" : "props"} out of simple shapes for Hypergamous Tree Chopping Simulator 4. Reply with ONLY one JSON object: no prose, no code fences.`, model });
+    if (!r.ok) return { ok: false, error: r.error };
     let j = null; try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
-    if (!j || !Array.isArray(j.parts)) { msg.className = "stMsg bad"; msg.textContent = "Claude's answer wasn't a prop. Try again or reword it."; return; }
-    const cur = pmCur(); if (!cur) return;
-    Object.assign(cur, cleanProp(j, cur)); partSel = -1;
-    T.defineCustomProp(cur); pmApply(true, true);
-    const m2 = $("pmAskMsg"); if (m2) { m2.className = "stMsg good"; m2.textContent = `${cur.name}: ${cur.parts.length} parts, built by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens`; }
+    if (!j || !Array.isArray(j.parts) || !j.parts.length) return { ok: false, error: `Claude's answer wasn't ${kind === "animals" ? "an animal" : "a prop"}. Try again or reword it.` };
+    return { ok: true, data: kind === "animals" ? cleanAnimal(j, into) : cleanProp(j, into), tokens: r.tokens, ms: r.ms, model: r.model };
+}
+async function askClaudeMaker(p) {
+    const M = mk(), desc = ($("pmAsk").value || "").trim(), msg = $("pmAskMsg"), btn = $("pmAskGo");
+    if (!desc) { msg.className = "stMsg bad"; msg.textContent = `Describe the ${M.noun} first.`; return; }
+    const model = $("pmModel").value; pref("model", model);
+    btn.disabled = true; btn.textContent = "Claude is building it…"; msg.className = "stMsg"; msg.textContent = `Asking ${model}…`;
+    const res = await claudeBuild(M.kind, desc, model, p);
+    btn.disabled = false; btn.textContent = "Build it with Claude";
+    if (!res.ok) { const m = $("pmAskMsg"); if (m) { m.className = "stMsg bad"; m.textContent = res.error; } return; }
+    if (!M.list().includes(p)) return;
+    Object.assign(p, res.data);
+    M.define(p); changed(M.kind); // saved as the kind it is, whichever tab you're on now
+    if (M === MK.props) for (const rec of T.placed.slice()) if (rec.o.prop === p.key && rec.o.id !== "__pm") T.placedRebuild(rec.o);
+    if (mk() === M && makerTab() && M.sel === p.key) { partSel = -1; pmApply(true, true); } // and redrawn only if you're still looking at it
+    const m2 = $("pmAskMsg"); if (m2) { m2.className = "stMsg good"; m2.textContent = `${p.name}: ${p.parts.length} parts, built by ${res.model} in ${(res.ms / 1000).toFixed(1)}s · ~${(res.tokens / 1000).toFixed(1)}k tokens`; }
     $("pmAsk") && ($("pmAsk").value = desc);
 }
-function renderPropMaker() {
-    const p = pmCur(), model = pref("model") || "haiku";
-    let h = `<div class="stH">MY PROPS <small>${myProps.length ? myProps.length + " made" : ""}</small></div>
-      <div class="stList">${myProps.map(q => `<div class="stItem${q.key === pmSel ? " on" : ""}" data-pm="${esc(q.key)}"><span>${esc(q.name)}</span><small>${(q.parts || []).length} parts</small></div>`).join("") || `<div class="stHint">No props yet. Make one, or describe it and let Claude build it.</div>`}</div>
-      <div class="stBtns"><button class="stB go" id="pmNew">+ New prop</button>${p ? `<button class="stB" id="pmDup">Duplicate</button><button class="stB warn" id="pmDel">Delete</button>` : ""}</div>`;
-    if (!p) { $("stLeftBody").innerHTML = h; bindPropMaker(); return; }
-    const L = p.light || {}, q = p.parts[partSel];
+function renderMaker() {
+    const M = mk(), A = M === MK.animals, p = pmCur(), model = pref("model") || "haiku", list = M.list();
+    let h = `<div class="stH">MY ${M.Noun.toUpperCase()}S <small>${list.length ? list.length + " made" : ""}</small></div>
+      <div class="stList">${list.map(q => `<div class="stItem${q.key === M.sel ? " on" : ""}" data-pm="${esc(q.key)}"><span>${esc(q.name)}</span><small>${A ? esc((T.ANIMAL_WAYS[q.way] || "").split(",")[0]) + " · " : ""}${(q.parts || []).length} parts</small></div>`).join("") || `<div class="stHint">No ${M.noun}s yet. Make one, or describe it and let Claude build it.</div>`}</div>
+      <div class="stBtns"><button class="stB go" id="pmNew">+ New ${M.noun}</button>${p ? `<button class="stB" id="pmDup">Duplicate</button><button class="stB warn" id="pmDel">Delete</button>` : ""}</div>`;
+    if (!p) { $("stLeftBody").innerHTML = h; bindMaker(); return; }
+    const L = p.light || {}, q = p.parts[partSel], fly = p.way === "fly";
     h += `<div class="stClaude" style="margin-top:12px"><div class="stH">✦ ASK CLAUDE <select class="stSel" id="pmModel">${opt("haiku", model, "Haiku (cheapest)")}${opt("sonnet", model, "Sonnet (better shapes)")}${opt("opus", model, "Opus")}</select></div>
-        <textarea class="stTa" id="pmAsk" placeholder="Describe a prop, e.g. a haunted wishing well with green glowing water"></textarea>
+        <textarea class="stTa" id="pmAsk" placeholder="${A ? "Describe an animal, e.g. a little lantern-eyed owl that only flies at night" : "Describe a prop, e.g. a haunted wishing well with green glowing water"}"></textarea>
         <div class="stBtns"><button class="stB" id="pmAskGo" style="flex:1">Build it with Claude</button></div><div class="stMsg" id="pmAskMsg"></div></div>
-      <div class="stH">NAME</div><div class="stRow"><input class="stIn" type="text" id="pmName" value="${esc(p.name)}" style="flex:1"><small style="opacity:.5">${esc(p.key)}</small></div>
-      ${num("pmR", "Bump size (0 = walk through)", p.r || 0, 0.1)}
+      <div class="stH">NAME</div><div class="stRow"><input class="stIn" type="text" id="pmName" value="${esc(p.name)}" style="flex:1"><small style="opacity:.5">${esc(p.key)}</small></div>`;
+    if (A) h += `<div class="stH">HOW IT ACTS</div>
+      <div class="stRow"><label>Behaviour</label><select class="stSel" id="anWay" style="max-width:190px">${Object.entries(T.ANIMAL_WAYS).map(([k, l]) => opt(k, p.way || "wander", l)).join("")}</select></div>
+      ${num("anSize", "Size (×)", p.size || 1, 0.1)}${num("anSpeed", fly ? "Flying speed" : "Walking speed (m/s)", p.speed || 1.2, 0.1)}
+      ${!fly && p.way !== "bold" && p.way !== "slow" ? num("anRun", "Running speed", p.run || 6, 0.5) + num("anFlee", "Runs off within (m)", p.flee ?? 9, 1) : ""}
+      ${fly ? num("anAlt", "Flies at (m)", p.alt || 18, 1) + `<div class="stChecks"><label><input type="checkbox" id="anNight"${p.night ? " checked" : ""}> Only at night (otherwise only by day)</label></div>` : num("anHerd", "Comes in groups of", p.herd || 1, 1)}
+      ${num("anPitch", "Voice (80 deep – 1600 squeaky)", p.pitch || 500, 20)}`;
+    else h += `${num("pmR", "Bump size (0 = walk through)", p.r || 0, 0.1)}
       <div class="stChecks"><label><input type="checkbox" id="pmLight"${L.on ? " checked" : ""}> Gives off real light</label></div>
-      ${L.on ? `<div class="stRow"><label>Light colour</label><input class="stIn" type="color" id="pmLightCol" value="${L.color || "#ffc070"}"></div>${num("pmLightP", "Brightness", L.power || 8, 1)}${num("pmLightR", "Reach (m)", L.range || 12, 1)}${num("pmLightY", "Height", L.y || 1.5, 0.1)}` : ""}
-      <div class="stH">PARTS <small>${p.parts.length} · click one, or click it on the preview</small></div>
-      <div class="stList">${p.parts.map((pt, i) => `<div class="stItem${i === partSel ? " on" : ""}" data-part="${i}"><span><span style="color:${esc(pt.color || "#9a9aa4")}">■</span> ${esc(PART_LABEL[pt.shape] || pt.shape)}${pt.glow ? " ✦" : ""}${pt.tint ? " 🎨" : ""}</span><span><button class="stB" data-pdup="${i}" style="padding:1px 6px" title="Copy">⧉</button> <button class="stB" data-pdel="${i}" style="padding:1px 6px" title="Delete">✕</button></span></div>`).join("")}</div>
+      ${L.on ? `<div class="stRow"><label>Light colour</label><input class="stIn" type="color" id="pmLightCol" value="${L.color || "#ffc070"}"></div>${num("pmLightP", "Brightness", L.power || 8, 1)}${num("pmLightR", "Reach (m)", L.range || 12, 1)}${num("pmLightY", "Height", L.y || 1.5, 0.1)}` : ""}`;
+    h += `<div class="stH">PARTS <small>${p.parts.length} · click one, or click it on the preview</small></div>
+      <div class="stList">${p.parts.map((pt, i) => `<div class="stItem${i === partSel ? " on" : ""}" data-part="${i}"><span><span style="color:${esc(pt.color || "#9a9aa4")}">■</span> ${A ? `<small style="color:#9fe8ff">${esc(ROLE_LABEL[pt.role] || "Body")}</small> ` : ""}${esc(PART_LABEL[pt.shape] || pt.shape)}${pt.glow ? " ✦" : ""}${pt.tint ? " 🎨" : ""}</span><span><button class="stB" data-pdup="${i}" style="padding:1px 6px" title="Copy">⧉</button> <button class="stB" data-pdel="${i}" style="padding:1px 6px" title="Delete">✕</button></span></div>`).join("")}</div>
       <div class="stH">ADD A PART</div><div class="stGrid">${T.PART_SHAPES.map(s => `<button class="stB" data-padd="${s}">${esc(PART_LABEL[s] || s)}</button>`).join("")}</div>`;
     if (q) h += `<div class="stH">PART ${partSel + 1}: ${esc((PART_LABEL[q.shape] || q.shape).toUpperCase())}</div>
+      ${A ? `<div class="stRow"><label>Moves as</label><select class="stSel" id="ptRole">${T.ANIMAL_ROLES.map(r => opt(r, q.role || "body", ROLE_LABEL[r])).join("")}</select></div>` : ""}
       <div class="stRow"><label>Shape</label><select class="stSel" id="ptShape">${T.PART_SHAPES.map(s => opt(s, q.shape, PART_LABEL[s] || s)).join("")}</select></div>
       <div class="stRow"><label>Colour</label><input class="stIn" type="color" id="ptCol" value="${q.color || "#9a9aa4"}"></div>
-      <div class="stChecks"><label><input type="checkbox" id="ptGlow"${q.glow ? " checked" : ""}> Glows</label><label title="Players can recolour these parts"><input type="checkbox" id="ptTint"${q.tint ? " checked" : ""}> Main colour</label></div>
+      <div class="stChecks"><label><input type="checkbox" id="ptGlow"${q.glow ? " checked" : ""}> Glows</label>${A ? "" : `<label title="Players can recolour these parts"><input type="checkbox" id="ptTint"${q.tint ? " checked" : ""}> Main colour</label>`}</div>
       ${num("ptX", "X", q.x || 0)}${num("ptY", "Height", q.y || 0)}${num("ptZ", "Z", q.z || 0)}${num("ptRx", "Turn X °", q.rx || 0, 5)}${num("ptRy", "Turn Y °", q.ry || 0, 5)}${num("ptRz", "Turn Z °", q.rz || 0, 5)}
       ${num("ptSx", "Width", q.sx || 1, 0.05)}${num("ptSy", "Height (size)", q.sy || 1, 0.05)}${num("ptSz", "Depth", q.sz || 1, 0.05)}${num("ptOp", "See-through (0.1-1)", q.opacity ?? 1, 0.05)}
-      <div class="stHint">Or drag the arrows on the preview: W move, E turn, R size.</div>`;
-    h += `<div class="stH">PREVIEW</div><div class="stBtns"><button class="stB" id="pmHere">Move preview here</button><button class="stB go" id="pmPlace">Place one in the world</button></div>
+      <div class="stHint">Or drag the arrows on the preview: W move, E turn, R size.${A ? " Legs swing from their top, so make each leg reach the ground (y = 0)." : ""}</div>`;
+    if (A) h += `<div class="stH">PREVIEW</div><div class="stBtns"><button class="stB" id="pmHere">Move preview here</button><button class="stB go" id="anLoose">Let 3 loose here</button></div>
+      <div class="stBtns"><select class="stSel" id="anIsle" style="flex:1"><option value="">Add to an island…</option>${islands.map((d, i) => `<option value="${i}">${esc(d.name)}${(d.animals || []).some(a => a.kind === p.key) ? " ✔" : ""}</option>`).join("")}</select></div>
+      <div class="stHint">The preview stands still so you can edit it; let some loose to watch them move. Islands get animals in the Islands tab too. Saved in <b>content/animals.js</b>.</div>`;
+    else h += `<div class="stH">PREVIEW</div><div class="stBtns"><button class="stB" id="pmHere">Move preview here</button><button class="stB go" id="pmPlace">Place one in the world</button></div>
       <div class="stHint">Your props are in the Place tab under <b>My props</b>, with every option (colour, glow, light, animation, what F does). Saved in <b>content/props.js</b>.</div>`;
     $("stLeftBody").innerHTML = h;
-    bindPropMaker();
+    bindMaker();
 }
-function bindPropMaker() {
-    const body = $("stLeftBody"), on = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); };
-    body.querySelectorAll("[data-pm]").forEach(it => it.addEventListener("click", () => { pmSel = it.dataset.pm; partSel = -1; pmAt = null; renderPropMaker(); pmShowPreview(true); pmFrame(); }));
+function bindMaker() {
+    const M = mk(), A = M === MK.animals, body = $("stLeftBody"), on = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); };
+    body.querySelectorAll("[data-pm]").forEach(it => it.addEventListener("click", () => { M.sel = it.dataset.pm; partSel = -1; pmAt = null; renderMaker(); pmShowPreview(true); pmFrame(); }));
     on("pmNew", "click", () => pmNew());
     const p = pmCur(); if (!p) return;
     on("pmDup", "click", () => pmNew({ ...JSON.parse(JSON.stringify(p)), name: p.name + " 2" }));
     on("pmDel", "click", () => {
-        const uses = world.objects.filter(o => o.prop === p.key);
-        if (!confirm(`Delete ${p.name}?${uses.length ? ` The ${uses.length} you placed in the world go too.` : ""}`)) return;
+        if (A) {
+            const used = islands.filter(d => (d.animals || []).some(a => a.kind === p.key));
+            if (!confirm(`Delete ${p.name}?${used.length ? ` It leaves ${used.map(d => d.name).join(", ")} too.` : ""}`)) return;
+            for (const d of used) { d.animals = d.animals.filter(a => a.kind !== p.key); rebuildIsle(islands.indexOf(d)); changed("islands"); }
+        } else {
+            const uses = world.objects.filter(o => o.prop === p.key);
+            if (!confirm(`Delete ${p.name}?${uses.length ? ` The ${uses.length} you placed in the world go too.` : ""}`)) return;
+            if (uses.length) { pushUndo(""); for (const o of uses) { T.placedRemove(o); world.objects.splice(world.objects.indexOf(o), 1); } changed("world"); }
+        }
         pmClearPreview();
-        if (uses.length) { pushUndo(""); for (const o of uses) { T.placedRemove(o); world.objects.splice(world.objects.indexOf(o), 1); } changed("world"); }
-        T.dropCustomProp(p.key); myProps = myProps.filter(q => q !== p); pmSel = myProps[0] ? myProps[0].key : null; partSel = -1; changed("props"); renderPropMaker(); pmShowPreview(true);
+        M.drop(p.key); M.set(M.list().filter(q => q !== p)); M.sel = M.list()[0] ? M.list()[0].key : null; partSel = -1; changed(M.kind); renderMaker(); pmShowPreview(true);
     });
-    on("pmAskGo", "click", () => askClaudeProp(p));
-    on("pmName", "input", e => { p.name = e.target.value.slice(0, 32) || "Prop"; pmApply(); }); on("pmName", "change", () => renderPropMaker());
+    on("pmAskGo", "click", () => askClaudeMaker(p));
+    on("pmName", "input", e => { p.name = e.target.value.slice(0, 32) || M.Noun; pmApply(); }); on("pmName", "change", () => renderMaker());
+    // a prop's bump size and light
     on("pmR", "input", e => { p.r = Math.min(6, Math.max(0, +e.target.value || 0)); pmApply(); });
     on("pmLight", "change", e => { p.light = e.target.checked ? { on: true, color: "#ffc070", power: 8, range: 12, y: 1.5 } : null; pmApply(true); });
     on("pmLightCol", "input", e => { p.light.color = e.target.value; pmApply(); });
     const lnum = (id, k, a, b) => on(id, "input", e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) { p.light[k] = Math.min(b, Math.max(a, v)); pmApply(); } });
     lnum("pmLightP", "power", 0, 60); lnum("pmLightR", "range", 2, 60); lnum("pmLightY", "y", -2, 20);
+    // how an animal acts
+    on("anWay", "change", e => { p.way = e.target.value; pmApply(true); });
+    const anum = (id, k, a, b, round) => on(id, "input", e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) { p[k] = round ? Math.round(Math.min(b, Math.max(a, v))) : r3(Math.min(b, Math.max(a, v))); pmApply(); } });
+    anum("anSize", "size", 0.1, 6); anum("anSpeed", "speed", 0.1, 6); anum("anRun", "run", 0.5, 14); anum("anFlee", "flee", 0, 30); anum("anAlt", "alt", 4, 60); anum("anHerd", "herd", 1, 8, true); anum("anPitch", "pitch", 60, 2000, true);
+    on("anNight", "change", e => { p.night = e.target.checked; pmApply(); });
+    on("anLoose", "click", () => { M.define(p); const at = pmAt || previewSpot(); const k = T.releaseAnimals(p.key, 3, at.x, at.z), night = T.getClock() < 6 || T.getClock() > 19.5; say(!k ? "Couldn't let them loose here" : p.way === "fly" ? (!!p.night !== night ? `${k} ${p.name}s let loose: they only fly ${p.night ? "at night" : "by day"}, so drag the clock to see them` : `${k} ${p.name}s let loose: look up!`) : `${k} ${p.name}s let loose. Watch them, or press F5 to walk up to them`, 4000); });
+    on("anIsle", "change", e => { if (e.target.value === "") return; const i = +e.target.value; addAnimalToIsland(i, p.key); say(`${p.name} lives on ${islands[i].name} now`); renderMaker(); });
+    // parts
     body.querySelectorAll("[data-part]").forEach(it => it.addEventListener("click", e => { if (e.target.closest("[data-pdup], [data-pdel]")) return; pmSelectPart(+it.dataset.part); }));
-    body.querySelectorAll("[data-pdup]").forEach(b => b.addEventListener("click", () => { const i = +b.dataset.pdup, c = { ...p.parts[i], x: r3((p.parts[i].x || 0) + 0.3) }; p.parts.splice(i + 1, 0, c); partSel = i + 1; pmApply(true, true); }));
-    body.querySelectorAll("[data-pdel]").forEach(b => b.addEventListener("click", () => { if (p.parts.length <= 1) { say("A prop needs at least one part"); return; } p.parts.splice(+b.dataset.pdel, 1); partSel = -1; pmApply(true, true); }));
+    body.querySelectorAll("[data-pdup]").forEach(b => b.addEventListener("click", () => { const i = +b.dataset.pdup, o = p.parts[i], c = { ...o, x: r3(A && o.x ? -o.x : (o.x || 0) + 0.3) }; p.parts.splice(i + 1, 0, c); partSel = i + 1; pmApply(true, true); })); // an animal's copy goes on the other side: a second leg, eye or ear
+    body.querySelectorAll("[data-pdel]").forEach(b => b.addEventListener("click", () => { if (p.parts.length <= 1) { say(`A ${M.noun} needs at least one part`); return; } p.parts.splice(+b.dataset.pdel, 1); partSel = -1; pmApply(true, true); }));
     on("pmHere", "click", () => { pmShowPreview(true); pmFrame(); });
     on("pmPlace", "click", () => { pmClearPreview(); tab = "place"; pref("tab", tab); propCat = "mine"; pref("propCat", propCat); renderLeft(); startPlacing({ kind: "prop", prop: p.key }); say(`Click the ground to place ${p.name}`); });
-    body.querySelectorAll("[data-padd]").forEach(b => b.addEventListener("click", () => { if (p.parts.length >= 80) { say("80 parts is the most"); return; } p.parts.push({ shape: b.dataset.padd, x: 0, y: 0.5 + p.parts.length * 0.05, z: 0, sx: 0.6, sy: 0.6, sz: 0.6, color: "#c8c8d0" }); partSel = p.parts.length - 1; pmApply(true, true); }));
+    body.querySelectorAll("[data-padd]").forEach(b => b.addEventListener("click", () => { if (p.parts.length >= 60) { say("60 parts is the most"); return; } p.parts.push({ shape: b.dataset.padd, ...(A ? { role: "body" } : {}), x: 0, y: 0.5 + p.parts.length * 0.05, z: 0, sx: A ? 0.3 : 0.6, sy: A ? 0.3 : 0.6, sz: A ? 0.3 : 0.6, color: "#c8c8d0" }); partSel = p.parts.length - 1; pmApply(true, true); }));
     const q = p.parts[partSel]; if (!q) return;
+    on("ptRole", "change", e => { q.role = e.target.value; pmApply(true); });
     on("ptShape", "change", e => { q.shape = e.target.value; pmApply(true, true); });
     on("ptCol", "input", e => { q.color = e.target.value; pmApply(); });
     on("ptGlow", "change", e => { q.glow = e.target.checked; pmApply(true); });
@@ -1139,6 +1433,7 @@ let camSaved = null;
 function play() {
     if (mode !== "edit") return;
     cancelPlacing(); tc.detach(); clearPreview(); pmClearPreview();
+    T.setSeeAll(false); // new trees grow the way players see them
     camSaved = { pos: cam.pos.clone(), yaw: cam.yaw, pitch: cam.pitch };
     mode = "play";
     document.body.classList.remove("studio-edit"); document.body.classList.add("studio-play");
@@ -1151,14 +1446,14 @@ function play() {
 function stop() {
     if (mode !== "play") return;
     mode = "edit";
-    T.setState("studio");
+    T.setState("studio"); T.setSeeAll(true);
     try { document.exitPointerLock(); } catch (e) { /* not locked */ }
     for (const k in T.keys) T.keys[k] = false;
     document.body.classList.add("studio-edit"); document.body.classList.remove("studio-play");
     if (camSaved) { cam.pos.copy(camSaved.pos); cam.yaw = camSaved.yaw; cam.pitch = camSaved.pitch; }
     if (sel) select(sel);
     if (tab === "trees") showPreview();
-    if (tab === "props") pmShowPreview();
+    if (makerTab()) pmShowPreview();
     syncBar();
 }
 
@@ -1189,6 +1484,8 @@ function draftNotes() {
     }
     const newProps = (S.content.props || []).filter(p => p.placed).map(p => p.name);
     if (newProps.length) L.push(`- NEW PROP${newProps.length === 1 ? "" : "S"}: ${newProps.slice(0, 4).join(", ")}${newProps.length > 4 ? " and more" : ""}. Look around!`);
+    const newAnimals = (S.content.animals || []).filter(a => a.used).map(a => a.name);
+    if (newAnimals.length) L.push(`- NEW ANIMAL${newAnimals.length === 1 ? "" : "S"}: ${newAnimals.slice(0, 4).join(", ")}${newAnimals.length > 4 ? " and more" : ""}. Keep an eye out!`);
     for (const p of S.content.placed) {
         if (p.added) L.push(`- ${capFirst(p.where)}: ${p.added} new sign${p.added === 1 ? "" : "s"} and props${p.signs.length ? ` (look for "${p.signs.slice(0, 2).join("\", \"")}")` : ""}.`);
         if (p.moved || p.removed) L.push(`- ${capFirst(p.where)}: some signs and props have moved.`);
@@ -1348,7 +1645,7 @@ function goIsle(id) {
     T.setState("studio");
     overview(e);
     renderLeft(); syncBar();
-    if (tab === "props") pmShowPreview(true);
+    if (makerTab()) pmShowPreview(true);
     say("Now editing " + e.name);
 }
 function syncBar() {
@@ -1370,7 +1667,7 @@ $("stFog").value = fogMode;
 $("stFog").addEventListener("change", e => { fogMode = e.target.value; pref("fog", fogMode); e.target.blur(); });
 $("stUndo").addEventListener("click", doUndo); $("stRedo").addEventListener("click", doRedo);
 $("stAuto").checked = pref("auto") !== "0";
-$("stAuto").addEventListener("change", e => { pref("auto", e.target.checked ? "1" : "0"); if (e.target.checked && (worldDirty || treesDirty || islandsDirty || propsDirty)) saveAll(true); });
+$("stAuto").addEventListener("change", e => { pref("auto", e.target.checked ? "1" : "0"); if (e.target.checked && (worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty)) saveAll(true); });
 $("stSave").addEventListener("click", () => saveAll(false));
 $("stPlay").addEventListener("click", play);
 $("stRelBtn").addEventListener("click", openRelease);
@@ -1385,7 +1682,7 @@ canvas.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
     if (placing) { commitPlacing(e.shiftKey); return; }
     if (tc.axis || tc.dragging) return; // the gizmo has it
-    if (tab === "props" && pmPreview) { const i = pmPickPart(e.clientX, e.clientY); if (i >= 0) { pmSelectPart(i); return; } }
+    if (makerTab() && pmPreview) { const i = pmPickPart(e.clientX, e.clientY); if (i >= 0) { pmSelectPart(i); return; } }
     const o = pickPlaced(e.clientX, e.clientY);
     if (o) select(o); else deselect();
 });
@@ -1429,7 +1726,7 @@ addEventListener("keydown", e => {
     if (ctrl && e.code === "KeyV") { e.preventDefault(); pasteClip(); return; }
     if (e.code === "Delete" || e.code === "Backspace") { removeSel(); return; }
     if (e.code === "Escape") { if (placing) { cancelPlacing(); say("Cancelled"); } else deselect(); return; }
-    if (e.code === "KeyF") { if (!sel && tab === "props" && pmPreview) pmFrame(); else focusSel(); return; }
+    if (e.code === "KeyF") { if (!sel && makerTab() && pmPreview) pmFrame(); else focusSel(); return; }
     if (e.code === "KeyW") setGizmo("translate");
     else if (e.code === "KeyE") setGizmo("rotate");
     else if (e.code === "KeyR") setGizmo("scale");
@@ -1440,17 +1737,19 @@ addEventListener("blur", () => { for (const k in held) held[k] = false; looking 
 // ---------- start ----------
 document.title = "Tree Sim 4 Studio";
 T.setState("studio");
+T.setSeeAll(true); // the editor shows every tree an island can grow; play-testing (F5) shows what players see
 document.body.classList.add("studio-edit");
 cam.pos.copy(T.player.pos).add(new THREE.Vector3(0, 3, 0)); cam.yaw = T.player.yaw || 0; cam.pitch = -0.2;
 if (curIsle() === 1 && Math.hypot(cam.pos.x, cam.pos.z) < 2) overview(ISLES()[0]);
 applySnap(); setGizmo("translate"); renderLeft(); renderInspector(); syncBar();
 for (const tr of trees) T.defineCustomTree(tr);
+regrowHere(); // the game grew this forest before the Studio started, with only the trees your axe allows
 if (tab === "trees") showPreview(true);
-if (tab === "props") pmShowPreview(true);
+if (makerTab()) pmShowPreview(true);
 S.info().then(i => {
     if (i.version) { $("stVer").textContent = i.version; document.title = "Tree Sim 4 Studio " + i.version; }
     if (!i.claude) say("Claude Code wasn't found, so Ask Claude is off. Everything else works.", 6000);
 });
 S.themes().then(r => { if (r && r.ok && r.themes) { myThemes = r.themes; if (tab === "islands") renderIslands(); } });
 say("Tree Sim 4 Studio · right-drag to look around, F5 to play", 3500);
-window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get partSel() { return partSel; }, pmNew, pmSelectPart, cleanProp, cleanIsland, migrateIsland, newIsland, islandChanged, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };
+window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get animals() { return myAnimals; }, get partSel() { return partSel; }, get treeGroup() { return treeGroup; }, pmNew, pmSelectPart, cleanProp, cleanAnimal, cleanIsland, migrateIsland, newIsland, islandChanged, claudeBuild, regrowHere, addAnimalToIsland, renderIslands, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };

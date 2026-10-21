@@ -1,4 +1,4 @@
 {
-  "version": "1.1",
-  "notes": "1.1: the Prop Maker (build props from parts, or ask Claude), island features (mountains, spires, craters, ridges, valleys, lakes, islets, bays), Ask Claude for islands, your own island themes"
+  "version": "1.2",
+  "notes": "1.2: your trees grow (the Studio shows every tree an island can grow; an island can let every tree grow from the start), Unused and On islands tree lists, trees in the Islands tab with how common each one is, the ecosystem (animals, ground cover, fireflies), the Animal Maker (parts with legs, wings and tails that move, or ask Claude), each island's own materials and axes, and Ask Claude invents all of it with the island. 1.1: the Prop Maker, island features, Ask Claude for islands, your own themes"
 }

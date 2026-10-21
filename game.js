@@ -5,6 +5,7 @@ import CONTENT_TREES from "./content/trees.js";
 import CONTENT_WORLD from "./content/world.js";
 import CONTENT_ISLANDS from "./content/islands.js";
 import CONTENT_PROPS from "./content/props.js";
+import CONTENT_ANIMALS from "./content/animals.js";
 
 // =====================================================================
 //  TS4 test 3: day/night, rare trees, shop, landmarks, chests, contracts
@@ -237,6 +238,7 @@ let isle = 1; // 1 = Pine Island, 2 = the Highland Isle, 3 = Mooncap Isle
 const CI_BASE = 7, ciList = [];
 const customIsle = n => ciList[n - CI_BASE] || null;
 const CI = () => (isle >= CI_BASE ? customIsle(isle) : null);
+let studioSeeAll = false; // Tree Sim 4 Studio's editor shows every tree an island can grow, whatever axe you hold
 let groundFn = null;
 const groundY = (x, z) => (x > 4500 ? 0 : groundFn ? groundFn(x, z) : 0); // x > 4500 is the casino's hall
 const curShoreAt = (x, z) => (CI() ? CI().shoreAt(x, z) : isle === 6 ? shoreAt6(x, z) : isle === 5 ? shoreAt5(x, z) : isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
@@ -320,7 +322,7 @@ const enchLv = (k, i = save.equipped) => (save.ench[i] && save.ench[i][k]) || 0;
 let savesFrozen = STUDIO; // the dev panel sets this right before it swaps the save and reloads; the Studio never writes your save
 function writeSave() { if (savesFrozen) return; save.clock = hourNow(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* ignore */ } }
 // difficulty follows your best axe, so a strong axe never one-shots everything
-const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o) b = i; }); return b; };
+const bestIdx = () => { let b = 0; save.owned.forEach((o, i) => { if (o && AXES[i]) b = i; }); return b; };
 const gunPow = () => { let p = 0; (save.gunOwned || []).forEach((o, i) => { if (o) p = Math.max(p, GUNS[i].pow); }); return p; };
 const gunTier = () => (save.gunOwned || []).filter(Boolean).length * 2;
 const bestDmg = () => Math.max(AXES[bestIdx()].dmg, gunPow());
@@ -1657,7 +1659,7 @@ const isCustomKey = k => typeof k === "string" && /^c_[a-z0-9_]+$/.test(k);
 function customType(c) {
     const T = { name: c.name || "Custom Tree", leaf: (Array.isArray(c.leaf) && c.leaf.length ? c.leaf : ["#3a7a3a"]).map(hexN), trunk: hexN(c.trunk || "#4a3024"),
         hp: +c.hp || 1, logs: +c.logs || 1, dmg: +c.dmg || 0, speed: +c.speed || 1, bonus: +c.bonus || 0, wd: +c.wd || 0, wn: +c.wn || 0,
-        col: c.col || "#a0d060", isl: Array.isArray(c.isl) && c.isl.length ? c.isl.map(Number) : [1], minTier: +c.minTier || 0, custom: true };
+        col: c.col || "#a0d060", isl: Array.isArray(c.isl) ? c.isl.map(Number) : [1], minTier: +c.minTier || 0, custom: true }; // no islands: it waits in the Studio's Unused list
     if (c.glow) T.glow = hexN(c.glow);
     if (c.arch) T.arch = c.arch;
     if (c.mat) T.mat = c.mat;
@@ -1967,13 +1969,14 @@ function makeTree(x, z, h, key = "pine") {
 }
 
 function pickType(px = 0, pz = 0) {
-    const night = isNight(), here = isle >= 2 ? groundY(px, pz) : 0;
+    const night = isNight(), here = isle >= 2 ? groundY(px, pz) : 0, C = CI();
     let total = 0;
-    const tier = Math.max(bestIdx(), gunTier()), blood = isBlood(), tw = T => (night ? T.wn : T.wd) * (blood && T.rare ? 2.2 : 1);
-    const ok = T => (T.isl || [1]).includes(isle) && (!T.arch || T.arch === arch5) && (T.minTier || 0) <= tier && (!T.alt || (here >= T.alt[0] && here <= T.alt[1]));
-    for (const T of Object.values(TYPES)) if (ok(T)) total += tw(T);
+    // a Studio island can make a tree more or less common (treeW), or let every tree grow from the start (allTiers)
+    const tier = Math.max(bestIdx(), gunTier()), blood = isBlood(), tw = (k, T) => (night ? T.wn : T.wd) * (blood && T.rare ? 2.2 : 1) * (C && C.treeW[k] !== undefined ? C.treeW[k] : 1);
+    const ok = T => (T.isl || [1]).includes(isle) && (!T.arch || T.arch === arch5) && (studioSeeAll || (C && C.allTiers) || (T.minTier || 0) <= tier) && (!T.alt || (here >= T.alt[0] && here <= T.alt[1]));
+    for (const [k, T] of Object.entries(TYPES)) if (ok(T)) total += tw(k, T);
     let r = Math.random() * total;
-    for (const [k, T] of Object.entries(TYPES)) { if (!ok(T)) continue; r -= tw(T); if (r <= 0) return k; }
+    for (const [k, T] of Object.entries(TYPES)) { if (!ok(T)) continue; r -= tw(k, T); if (r <= 0) return k; }
     return CI() ? CI().fallbackTree : isle === 6 ? "icepine" : isle === 5 ? ({ haven: "palm", coral: "coralwood", skull: "tarpine", frost: "frostpine", storm: "stormoak" })[arch5] : isle === 4 ? "ashwood" : isle === 3 ? "glowcap" : isle === 2 ? "larch" : "pine";
 }
 let lastRareToast = -99;
@@ -2071,6 +2074,33 @@ const AXES = [
     { name: "Frostbite",      dmg: 1700, cost: 0, steel: 0x9ad8ff, edge: 0xffffff, glow: 0x3a8ad8, scale: 2.0, rarity: "#bff4ff", isle3: true },
     { name: "Yeti's Fang",    dmg: 2600, cost: 0, steel: 0xe8f0f8, edge: 0x7af0ff, glow: 0x2a6aa8, scale: 2.1, rarity: "#7af0ff", isle3: true }
 ];
+// a Studio island's own axes (content/islands.js) come straight after the game's, island by island. They're added here, before
+// anything looks at the equipped axe, and ciAxes (STUDIO ISLANDS) gives them recipes and abilities. A save remembers its axes
+// by key, so an axe added or removed in the Studio later never hands a player the wrong one
+const BASE_AXES = AXES.length;
+AXES.forEach((a, i) => (a.key = "b" + i));
+const axeHex = (c, d) => (/^#[0-9a-f]{6}$/i.test(String(c)) ? hexN(c) : d);
+const islandAxeDefs = d => (d && Array.isArray(d.axes) ? d.axes : []).filter(a => a && /^x_[a-z0-9_]+$/.test(String(a.key))).slice(0, 4);
+function pushIslandAxes(isles) { // isles: [{ n, defs }], in island order
+    AXES.length = BASE_AXES;
+    for (const { n, defs } of isles) defs.forEach((a, j) => {
+        const edge = axeHex(a.edge, 0xe8f0ff);
+        AXES.push({ key: a.key, name: String(a.name || "Island Axe").slice(0, 28), dmg: +a.dmg > 0 ? Math.round(+a.dmg) : Math.round(2600 * Math.pow(1.3, n - 6) * (1 + 0.7 * (j + 1))), cost: 0, steel: axeHex(a.steel, 0x4a4a5a), edge, glow: axeHex(a.glow, 0x2a2a4a),
+            scale: Math.min(2.6, 2.12 + 0.07 * (j + 1)), rarity: "#" + edge.toString(16).padStart(6, "0"), isle3: true, custom: true, isle: n, j, ab: a.ability, recipe: a.recipe });
+    });
+}
+pushIslandAxes((Array.isArray(CONTENT_ISLANDS) ? CONTENT_ISLANDS : []).filter(d => d && typeof d === "object").map((d, i) => ({ n: CI_BASE + i, defs: islandAxeDefs(d) })));
+if (Array.isArray(save.axeKeys) && save.axeKeys.join() !== AXES.map(a => a.key).join()) { // owned axes, enchantments and the hotbar follow their axes to their new places
+    const old = save.axeKeys, at = j => AXES.findIndex(a => a.key === old[j]), owned = new Array(Math.max(N_AXES, AXES.length)).fill(0), ench = {};
+    save.owned.forEach((o, j) => { const i = at(j); if (o && i >= 0) owned[i] = 1; });
+    for (const [j, v] of Object.entries(save.ench || {})) { const i = at(+j); if (i >= 0) ench[i] = v; }
+    const eq = at(save.equipped);
+    owned[0] = 1; save.owned = owned; save.ench = ench; save.equipped = eq >= 0 && owned[eq] ? eq : 0;
+    if (Array.isArray(save.hotbar)) save.hotbar = save.hotbar.map(s => (typeof s === "string" && /^a\d+$/.test(s) ? (i => (i >= 0 && owned[i] ? "a" + i : null))(at(+s.slice(1))) : s));
+}
+save.axeKeys = AXES.map(a => a.key);
+if (!AXES[save.equipped] || !save.owned[save.equipped]) save.equipped = 0;
+if (Array.isArray(save.hotbar)) save.hotbar = save.hotbar.map(s => (typeof s === "string" && /^a\d+$/.test(s) && !AXES[+s.slice(1)] ? null : s));
 const axeDmg = () => axeDmgFor(save.equipped);
 const ownedList = () => AXES.map((a, i) => i).filter(i => save.owned[i]);
 function applyAxeLook() {
@@ -2119,11 +2149,13 @@ function burst(pos, n, speed = 4, mats = chipMats) {
     }
 }
 const logs = [];
+// what a tree drops here (a Studio island turns any tree's material into one of its own)
+const treeMat = T => (CI() ? CI().matOf(T) : T.mat || (isle >= 6 ? isleMats()[0] : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood"));
 function dropLogs(x, z, n, back, key = "pine") {
     const T = TYPES[key];
     const meshes = Math.min(n, 14), base = Math.floor(n / meshes), extra = n % meshes; // big drops are stacks of logs, not hundreds of meshes
     for (let i = 0; i < meshes; i++) {
-        const mk = isle >= 2 ? (T.mat || (isle >= 6 ? isleMats()[0] : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood")) : null;
+        const mk = isle >= 2 ? treeMat(T) : null;
         const m = mk ? new THREE.Mesh(matGeo, matMeshMat[mk]) : new THREE.Mesh(logGeo, logMats[key] || logMat);
         const d = Math.random() * 2.5;
         m.position.set(x + back.x * d, groundY(x + back.x * d, z + back.z * d) + 0.4, z + back.z * d);
@@ -2369,7 +2401,7 @@ function openChest(c) {
     const m = (1 + 0.15 * (save.day - 1)) * (isBlood() ? 2 : 1), r = Math.random();
     let msg;
     if (isle >= 3) { // Mooncap and Ashfall chests: real money and a handful of materials
-        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle >= 6 ? 60 * Math.pow(2, isle - 6) : isle === 5 ? 25 : isle === 4 ? 10 : 1)), ks = CI() ? (c.special ? isleMats().slice(3, 6) : isleMats().slice(0, 3)) : isle === 6 ? (c.special ? ["frostbloom", "aurora", "permafrost"] : ["icicle", "frostwood", "glacite"]) : isle === 5 ? (c.special ? ["pearl", "iceshard", "stormglass"] : ["driftwood", "salt", "coral", "tar"]) : isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
+        const cash = Math.round(rand(1500, 3200) * m * (c.special ? 2.5 : 1) * (isle >= 6 ? 60 * Math.pow(2, isle - 6) : isle === 5 ? 25 : isle === 4 ? 10 : 1)), ks = CI() ? (c.special ? (isleMats().length > 3 ? isleMats().slice(3, 6) : isleMats().slice(-1)) : isleMats().slice(0, 3)) : isle === 6 ? (c.special ? ["frostbloom", "aurora", "permafrost"] : ["icicle", "frostwood", "glacite"]) : isle === 5 ? (c.special ? ["pearl", "iceshard", "stormglass"] : ["driftwood", "salt", "coral", "tar"]) : isle === 4 ? (c.special ? ["obsidian", "ember", "sulfur"] : ["ash", "cinder", "sulfur"]) : c.special ? ["moonstone", "void", "amber"] : ["spore", "silver", "amber"], k = ks[Math.floor(Math.random() * ks.length)], n = Math.round(rand(4, 9) * (c.special ? 1.6 : 1));
         save.money += cash; save.mats[k] = (save.mats[k] || 0) + n; if (c.special) save.bandages++;
         msg = `${c.special ? (isle === 6 ? "Frozen chest" : isle === 5 ? "Pirate chest" : isle === 4 ? "Scorched chest" : "Moonlit chest") : "Chest"}: +${money(cash)} and ${n} ${MATS[k].name}${c.special ? " and a bandage" : ""}`;
     } else if (c.special) { const cash = Math.round(rand(120, 260) * m); save.money += cash; save.bandages++; msg = `Cursed chest: +${money(cash)} and a bandage`; }
@@ -2459,7 +2491,7 @@ function shopItems() {
     if (shopTab === "race") return raceItems();
     if (shopTab === "pirate") return pirateItems();
     if (shopTab === "hermit") return hermitItems();
-    if (shopTab === "brew") { const e = CI() ? CI().econ : isle; return e === 6 ? brewItems6() : e === 5 ? brewItems5() : brewItems(); }
+    if (shopTab === "brew") { const C = CI(), e = C ? C.econ : isle, list = e === 6 ? brewItems6() : e === 5 ? brewItems5() : brewItems(); return C ? list.map(it => (it.craft ? Object.assign(it, { craft: C.subMats(it.craft) }) : it)) : list; } // a Studio island brews with its own materials
     if (shopTab === "ench") return enchItems();
     if (shopTab === "sellaxe") return sellAxeItems();
     if (shopTab === "sell") return sellItems();
@@ -2766,7 +2798,7 @@ function updateNameplates() {
         if (!(nowMs - (t._occT || 0) < 120)) { t._occT = nowMs; t._occ = isOccluded(V3(t.x, t.gy + Math.min(t.h * 1.3, 9.5) + 1.5, t.z), t.solid); }
         if (t._occ || behindAxe(px, py)) { e.style.display = "none"; continue; }
         const T = t.type, dmg = treeDmg(t);
-        const tm = T.mat || (isle >= 6 ? isleMats()[0] : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood");
+        const tm = treeMat(T);
         const mutHtml = t.mut ? '<i class="mut' + (t.mut === "rainbow" ? ' rbtxt' : '') + '" style="color:' + MUTS[t.mut].col + '">✦ ' + MUTS[t.mut].name + ' ×' + MUTS[t.mut].mult + ' ✦</i>' : '';
         const html = mutHtml + '<b style="color:' + T.col + '">' + T.name + '</b><span>' + (dmg ? '⚔ ' + dmg + ' dmg' : '⚔ harmless') + (isle >= 2 ? ' · <em style="color:' + MATS[tm].col + '">' + treeLogs(t) + ' ' + MATS[tm].name + '</em>' : ' · 🪵 ' + treeLogs(t) + (T.bonus ? ' <em>+$' + T.bonus + '/log</em>' : '')) + '</span>';
         if (e.dataset.h !== html) { e.innerHTML = html; e.dataset.h = html; e.style.borderColor = t.mut ? MUTS[t.mut].col : T.col; e.className = "np" + (t.mut ? " mutd" + (t.mut === "rainbow" ? " rbw" : "") : ""); e.style.setProperty("--mc", t.mut ? MUTS[t.mut].col : T.col); }
@@ -3874,7 +3906,7 @@ function updateGhosts(dt) {
                     t.dying = true; t.t = 0; t.byGhost = true;
                     save.ghostFelled = (save.ghostFelled || 0) + 1;
                     if (isle >= 2) { // past Pine Island they haul the tree's materials back to you
-                        const k = t.type.mat || isleMats()[0], n = Math.max(1, Math.round(treeLogs(t) * 0.8));
+                        const k = treeMat(t.type), n = Math.max(1, Math.round(treeLogs(t) * 0.8)); // the same material the tree would drop for you
                         save.mats[k] = (save.mats[k] || 0) + n;
                         floatWorld(V3(t.x, (t.gy || 0) + Math.min(t.h * 0.7, 4), t.z), "+" + n + " " + MATS[k].name, "cash");
                     } else {
@@ -4460,6 +4492,8 @@ const MATS = {
 };
 const MATS_BY_ISLE = { 2: ["wood", "stone", "copper", "iron", "gunpowder", "gold", "crystal", "magma"], 3: ["spore", "silver", "amber", "moonstone", "void", "star", "heartwood"], 4: ["ash", "cinder", "sulfur", "obsidian", "ember", "phoenixf", "molten"] };
 const isleMats = () => MATS_BY_ISLE[isle] || MATS_BY_ISLE[2];
+// a Studio island's own materials exist from the start, so a save holding some never trips anything (makeCI sets their real look and price)
+for (const d of Array.isArray(CONTENT_ISLANDS) ? CONTENT_ISLANDS : []) for (const m of d && Array.isArray(d.mats) ? d.mats : []) if (m && /^m_[a-z0-9_]+$/.test(String(m.key)) && !MATS[m.key]) MATS[m.key] = { name: String(m.name || "Material").slice(0, 24), col: "#9a9aa4", price: 1, hex: 0x9a9aa4, custom: true };
 const GLOW_MATS = ["gold", "crystal", "magma", "moonstone", "void", "star", "heartwood", "ember", "phoenixf", "molten"];
 const matPrice = k => Math.round(MATS[k].price * rebirthMult() * (1 + 0.15 * (save.priceLvl || 0)));
 const hasMats = r => Object.entries(r).every(([k, n]) => (save.mats[k] || 0) >= n);
@@ -7807,6 +7841,20 @@ function decorate(n) {
         S(18, (x, y, z) => stump(x, y, z, b("char", lamb(0x1a1412)), b("charTop", glowB(0xff5a1a))));
         S(9, (x, y, z) => bones(x, y, z, b("bone", lamb(0xe8e0cc)), b("boneDk", glowB(0x100808))));
         S(90, (x, y, z) => tufts(x, y, z, b("ash", lamb(0x6a625c)), 4, 0.5));
+    } else if (customIsle(n)) { // a Studio island: the ground cover its maker asked for, in its own colours
+        const C = customIsle(n), v = C.cover, cc = C.coverCol, cl = C.cols;
+        if (v.mush) S(v.mush, (x, y, z) => mush(x, y, z, b("cap", lamb(cc.mush)), b("stem", lamb(0xf0e8d8)), b("spot", glowB(0xffffff))));
+        if (v.glowshroom) S(v.glowshroom, (x, y, z) => mush(x, y, z, b("gcap", glowB(cc.glowshroom)), b("stem", lamb(0xe0d4c0)), null, 1.4));
+        if (v.rings) S(v.rings, (x, y, z) => ring(x, y, z, b("rcap", glowB(cc.glowshroom)), b("stem", lamb(0xe0d4c0)), b("rglow", new THREE.MeshBasicMaterial({ color: cc.glowshroom, transparent: true, opacity: 0.25, depthWrite: false }))));
+        if (v.logs) S(v.logs, (x, y, z) => log(x, y, z, b("bark", lamb(0x5a3a24)), b("ring", lamb(0xc8a070)), b("moss", lamb(cl.bush))));
+        if (v.stumps) S(v.stumps, (x, y, z) => stump(x, y, z, b("bark", lamb(0x5a3a24)), b("ring", lamb(0xc8a070))));
+        if (v.berries) S(v.berries, (x, y, z) => bush(x, y, z, b("bush", lamb(cl.bush)), b("berry", glowB(cc.berries))));
+        if (v.flowers) { const heads = [cc.flowers, 0xf4f4ff, 0xffe060, 0xff8ab0].map((c, i) => b("fl" + i, lamb(c))); S(v.flowers, (x, y, z) => flowers(x, y, z, heads, b("fstem", lamb(0x4a7a3a)))); }
+        if (v.grass) S(v.grass, (x, y, z) => tufts(x, y, z, b("grass", lamb(cl.grass2))));
+        if (v.crystals) S(v.crystals, (x, y, z) => crystals(x, y, z, b("cry", glowL(cc.crystals, (cc.crystals >> 2) & 0x3f3f3f))));
+        if (v.cracks) S(v.cracks, (x, y, z) => cracks(x, y, z, b("crack", glowB(cc.cracks))));
+        if (v.bones) S(v.bones, (x, y, z) => bones(x, y, z, b("bone", lamb(0xe8e0cc)), b("boneDk", glowB(0x100808))));
+        if (v.cairns) S(v.cairns, (x, y, z) => cairn(x, y, z, b("stone", lamb(cl.rock))));
     }
     for (const k in B) B[k].build();
 }
@@ -8365,6 +8413,7 @@ function crowAI(c, dt, dp, px, pz, live, panic) {
 }
 // circling flyers: bats by night, crows by day
 function skyAI(c, dt, px, pz, night) {
+    if (c.cx === undefined) { c.cx = c.x; c.cz = c.z; c.rad = 12; c.spd = 0.1; c.alt = groundY(c.x, c.z) + 10; } // a Studio animal that learned to fly after it was let loose
     const R = c.g.userData.rig, show = c.night ? night : !night;
     c.g.visible = show && Math.hypot(c.g.position.x - px, c.g.position.z - pz) < 140;
     if (!show) return;
@@ -8411,6 +8460,7 @@ function populate(n) {
         P(6, (x, z) => addWild(n, "pbear", makePolarBear(), x, z, { tilt: 0.5 }));
         P(8, (x, z) => addWild(n, "afox", arcticFox(), x, z, { tilt: 0.3 }));
     } else if (n === 5) populate5(); // every island has its own animals now
+    else if (customIsle(n)) populateCI(customIsle(n));
 }
 function buildWild(n) {
     wildDone[n] = true;
@@ -8475,8 +8525,8 @@ const flyMat = new THREE.MeshBasicMaterial({ color: 0xd8ff6a, transparent: true,
 const fireflies = [];
 for (let i = 0; i < 40; i++) { const m = new THREE.Mesh(BOX, flyMat); m.scale.setScalar(0.1); m.visible = false; scene.add(m); fireflies.push({ m, x: 0, z: 0, y: 0, ph: Math.random() * 6, life: 0 }); }
 function updateFireflies(dt, night) {
-    const embers = isle === 4, on = embers || isle === 3 || night;
-    flyMat.color.setHex(embers ? 0xff8a2a : isle === 3 ? 0x9ffff0 : 0xd8ff6a);
+    const C = CI(), fm = C ? C.flies : "", embers = isle === 4 || fm === "embers", on = fm !== "none" && (embers || isle === 3 || fm === "spores" || night); // a Studio island picks fireflies, embers, glowing spores or none
+    flyMat.color.setHex(C && C.fliesCol !== null ? C.fliesCol : embers ? 0xff8a2a : isle === 3 ? 0x9ffff0 : 0xd8ff6a);
     flyMat.opacity = 0.55 + 0.4 * Math.sin(time * 4);
     for (const f of fireflies) {
         if (!on || insideBuilding()) { f.m.visible = false; f.life = 0; continue; }
@@ -12933,7 +12983,7 @@ function useAbility() {
     const fl = Math.hypot(fwd.x, fwd.z) || 1, dx = fwd.x / fl, dz = fwd.z / fl, px = player.pos.x, pz = player.pos.z, all = abAlive();
     let n = 0;
     const hitWhere = (test, o) => { for (const t of all) if (test(t)) { abHit(t, A.mult, o); n++; } };
-    switch (i) {
+    switch (A.k ?? i) { // a Studio axe borrows one of the game's abilities
         case 0: { // Heavy Chop
             let best = null, bd = 1e9; for (const t of all) { if (!abIn.cone(t, px, pz, dx, dz, 4.5, 0.6)) continue; const d = Math.hypot(t.x - px, t.z - pz); if (d < bd) { bd = d; best = t; } }
             if (best) { abHit(best, A.mult); n = 1; abRing(best.x, best.z, A.col, 4, 0.45); }
@@ -13158,17 +13208,46 @@ function makeCI(d, n) {
     const col = d.colors || {};
     C.cols = { grass: ciHex(col.grass, 0x4a8a3a), grass2: ciHex(col.grass2, 0x3a7a30), sand: ciHex(col.sand, 0xe0d0a0), rock: ciHex(col.rock, 0x7a7a84), snow: ciHex(col.snow, 0xf4f8ff), camp: ciHex(col.camp, 0x8a7458), shallow: ciHex(col.shallow, 0x5ac8d8), deep: ciHex(col.deep, 0x0e2a4a), bush: ciHex(col.bush, 0x2f6a3a) };
     C.snowline = d.snowline === undefined || d.snowline === "" ? 9999 : +d.snowline;
-    // the economy (materials, recipes, brews) comes from one of the game's islands; the numbers grow every island
+    // the economy: recipes, brews and prices follow one of the game's islands. A Studio island can bring its own materials
+    // (cheapest first); then every recipe, brew and tree swaps the other islands' materials for these, rank for rank
     C.econ = [2, 3, 4, 5, 6].includes(+d.economy) ? +d.economy : 6;
-    MATS_BY_ISLE[n] = MATS_BY_ISLE[C.econ]; if (RECIPES[C.econ]) RECIPES[n] = RECIPES[C.econ];
-    ENCH_AT[n] = { x: 0, z: -10.5 }; wildBy[n] = []; wildDone[n] = true;
+    const econMats = MATS_BY_ISLE[C.econ] || MATS_BY_ISLE[6];
+    const rankOf = (i, a, b) => Math.min(b - 1, Math.round((i / Math.max(1, a - 1)) * (b - 1))); // the i-th of a things, as one of b things
+    C.mats = (Array.isArray(d.mats) ? d.mats : []).filter(m => m && /^m_[a-z0-9_]+$/.test(String(m.key))).slice(0, 8);
+    const econTree = econMats.filter(k => !["heartwood", "molten", "yetiheart"].includes(k)); // prices follow what trees drop there, not the bosses' trophies
+    C.mats.forEach((m, i) => {
+        const src = MATS[econTree[rankOf(i, C.mats.length, econTree.length)]] || { price: 50 }, hex = ciHex(m.color, 0x9a9aa4);
+        MATS[m.key] = { name: String(m.name || "Material").slice(0, 24), col: "#" + hex.toString(16).padStart(6, "0"), price: Math.max(1, Math.round(src.price * clamp(+m.value || 1, 0.2, 5))), hex, custom: true };
+        if (m.glow && !GLOW_MATS.includes(m.key)) GLOW_MATS.push(m.key); else if (!m.glow && GLOW_MATS.includes(m.key)) GLOW_MATS.splice(GLOW_MATS.indexOf(m.key), 1);
+        matMeshMat[m.key] = new THREE.MeshLambertMaterial({ color: hex, flatShading: true, emissive: m.glow ? hex : 0x000000, emissiveIntensity: 0.35 });
+        delete iconCache["m:" + m.key];
+    });
+    const L = (MATS_BY_ISLE[n] = C.mats.length ? C.mats.map(m => m.key) : econMats);
+    const local = k => { if (L.includes(k)) return k; const home = Object.values(MATS_BY_ISLE).find(ls => ls !== L && ls.includes(k)); return home ? L[rankOf(home.indexOf(k), home.length, L.length)] : MATS[k] && matMeshMat[k] ? k : L[0]; };
+    C.subMats = r => { if (!r) return r; const o = {}; for (const [k, v] of Object.entries(r)) { const s = local(k); o[s] = (o[s] || 0) + v; } return o; };
+    C.matOf = T => (T.mat ? local(T.mat) : L[0]); // borrowed trees drop this island's materials: a common tree a common one, a rare tree a rare one
+    const R0 = RECIPES[C.econ] || [AXE_RECIPES, GUN_RECIPES, AMMO_RECIPES];
+    RECIPES[n] = [R0[0].map(C.subMats), R0[1].map(C.subMats), R0[2].map(C.subMats)]; // the island's own axes join the first list (ciAxes)
+    C.axeDefs = islandAxeDefs(d);
+    ENCH_AT[n] = { x: 0, z: -10.5 }; wildBy[n] = []; wildDone[n] = false;
+    // the ecosystem: how common each tree is, animals, ground cover and fireflies
+    C.treeW = {}; for (const [k, v] of Object.entries(d.treeW || {})) if (Number.isFinite(+v)) C.treeW[k] = clamp(+v, 0, 5);
+    C.allTiers = !!d.allTiers;
+    C.animals = (Array.isArray(d.animals) ? d.animals : []).filter(a => a && typeof a.kind === "string").map(a => ({ kind: a.kind, n: clamp(Math.round(+a.n || 0), 0, 40) })).filter(a => a.n > 0).slice(0, 24);
+    C.cover = {}; for (const k of ["mush", "glowshroom", "rings", "logs", "stumps", "berries", "flowers", "grass", "crystals", "cracks", "bones", "cairns"]) C.cover[k] = clamp(Math.round(+(d.cover || {})[k] || 0), 0, k === "grass" ? 300 : 80);
+    const cc = d.coverCol || {};
+    C.coverCol = { mush: ciHex(cc.mush, 0x9a1a12), glowshroom: ciHex(cc.glowshroom, 0x7affef), berries: ciHex(cc.berries, 0xd02a4a), flowers: ciHex(cc.flowers, 0xb07aff), crystals: ciHex(cc.crystals, 0x9a7aff), cracks: ciHex(cc.cracks, 0xff6a1a) };
+    C.flies = ["fireflies", "embers", "spores", "none"].includes(d.flies) ? d.flies : "fireflies";
+    C.fliesCol = /^#[0-9a-f]{6}$/i.test(String(d.fliesCol)) ? hexN(d.fliesCol) : null;
     C.trees = (Array.isArray(d.trees) ? d.trees : []).filter(k => TYPES[k] && !TYPES[k].custom && !TYPES[k].rush);
     for (const k of C.trees) { const T = TYPES[k]; T.isl = [...(T.isl || [1]).filter(i => i !== n), n]; } // borrowed trees grow here too
     C.fallbackTree = C.trees[0] || Object.keys(TYPES).find(k => TYPES[k].custom && (TYPES[k].isl || []).includes(n)) || "pine";
     C.lines = [String(d.rideLine1 || "The sea goes quiet. Something new waits ahead..."), String(d.rideLine2 || `${C.name} rises out of the sea.`)];
     const rb = d.rebirth || {};
     C.cost = Math.max(0, Math.round(rb.cost === undefined ? 25000000 * Math.pow(2, n - CI_BASE) : +rb.cost));
-    C.items = {}; for (const [k, v] of Object.entries(rb.items || {})) if (MATS[k] && +v > 0) C.items[k] = Math.round(+v);
+    // the ticket asks for materials from the island before. If that's a Studio island with its own, they're swapped for its (rank for rank)
+    const prevC = customIsle(n - 1), tk = k => (prevC && prevC.subMats ? Object.keys(prevC.subMats({ [k]: 1 }))[0] : k);
+    C.items = {}; for (const [k, v] of Object.entries(rb.items || {})) { const k2 = tk(k); if (MATS[k2] && +v > 0) C.items[k2] = (C.items[k2] || 0) + Math.round(+v); }
     C.ready = () => save.money >= C.cost && Object.entries(C.items).every(([k, v]) => (save.mats[k] || 0) >= v);
     C.nearest = () => {
         const px = player.pos.x, pz = player.pos.z, near = (p, r) => Math.hypot(px - p.x, pz - p.z) < r;
@@ -13389,7 +13468,7 @@ function ciSet(i, d) {
     const n = CI_BASE + i, old = ciList[i], here = isle === n;
     for (const T of Object.values(TYPES)) if (!T.custom && T.isl && T.isl.includes(n)) T.isl = T.isl.filter(q => q !== n);
     if (old) { scene.remove(old.G); ciRemoveLabels(n); delete worldSnap[n]; terrainMesh[n] = null; }
-    ciList[i] = makeCI(d, n);
+    ciList[i] = makeCI(d, n); ciAxes();
     if (here) { ciList[i].G.visible = true; enterCI(ciList[i]); }
     return ciList[i];
 }
@@ -13397,10 +13476,32 @@ function ciDropLast() {
     const i = ciList.length - 1; if (i < 0 || isle === CI_BASE + i) return false;
     const n = CI_BASE + i, old = ciList[i];
     for (const T of Object.values(TYPES)) if (!T.custom && T.isl && T.isl.includes(n)) T.isl = T.isl.filter(q => q !== n);
-    scene.remove(old.G); ciRemoveLabels(n); delete worldSnap[n]; terrainMesh[n] = null; ciList.pop();
+    scene.remove(old.G); ciRemoveLabels(n); delete worldSnap[n]; terrainMesh[n] = null; ciList.pop(); ciAxes();
     return true;
 }
 for (const d of Array.isArray(CONTENT_ISLANDS) ? CONTENT_ISLANDS : []) if (d && typeof d === "object") ciList.push(makeCI(d, CI_BASE + ciList.length));
+// ---- the Studio islands' own axes (added right after the game's, see pushIslandAxes) get their recipes and borrowed abilities.
+// The Studio calls this again whenever it rebuilds an island ----
+function ciAxes() {
+    pushIslandAxes(ciList.map(C => ({ n: C.n, defs: C.axeDefs })));
+    ABIL.length = BASE_AXES;
+    for (const C of ciList) { C.axeIdx = []; const a = RECIPES[C.n][0]; if (a.length > BASE_AXES) a.length = BASE_AXES; } // no recipe left at an old place
+    for (let i = BASE_AXES; i < AXES.length; i++) {
+        const A = AXES[i], C = customIsle(A.isle), L0 = MATS_BY_ISLE[A.isle], j = A.j;
+        const Lt = L0.filter(k => !["heartwood", "molten", "yetiheart"].includes(k)), L = Lt.length ? Lt : L0; // a Studio island has no boss, so no boss trophies
+        const ab = clamp(Math.round(A.ab === undefined || A.ab === "" || !Number.isFinite(+A.ab) ? 14 + (j % 4) : +A.ab), 0, BASE_AXES - 1);
+        ABIL.push(Object.assign({}, ABIL[ab], { k: ab }));
+        let rc = null;
+        if (A.recipe && typeof A.recipe === "object") { rc = {}; for (const [k, v] of Object.entries(A.recipe)) if (MATS[k] && +v > 0) rc[k] = Math.round(+v); if (!Object.keys(rc).length) rc = null; }
+        if (!rc) { const t = L.length, add = (k, v) => (rc[k] = (rc[k] || 0) + v); rc = {}; add(L[Math.max(0, t - 3)], 40 + 30 * j); add(L[Math.max(0, t - 2)], 30 + 25 * j); add(L[t - 1], 8 + 8 * j); }
+        RECIPES[A.isle][0][i] = rc;
+        C.axeIdx.push(i);
+        delete iconCache["a" + i];
+    }
+    if (!AXES[save.equipped]) { save.equipped = 0; applyAxeLook(); }
+}
+ciAxes();
+for (const k of Object.keys(save.mats)) if (!MATS[k]) delete save.mats[k]; // a material the Studio took away
 
 // a save that's already on another island starts there (this must run after everything above is defined)
 if (save.isle >= CI_BASE) { if (customIsle(save.isle)) enterCI(customIsle(save.isle)); else enterIsle6(); } else if (save.isle === 6) enterIsle6(); else if (save.isle === 5) enterIsle5(); else if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
@@ -13634,6 +13735,79 @@ function defineCustomProp(d) {
 }
 function dropCustomProp(k) { if (/^u_/.test(String(k))) delete PROPS[k]; }
 for (const d of Array.isArray(CONTENT_PROPS) ? CONTENT_PROPS : []) defineCustomProp(d);
+// ---- animals for Studio islands: the game's own (WILD_KINDS), plus the ones made in the Studio's Animal Maker (content/animals.js, keys a_) ----
+// fly: circles in the sky at that height; herd: comes in little groups; extra: what addWild needs to know
+const WILD_KINDS = {
+    deer: { name: "Deer", home: 1, make: makeDeer, extra: { tilt: 0.5 } }, rabbit: { name: "Rabbit", home: 1, make: makeRabbit }, squirrel: { name: "Squirrel", home: 1, make: makeSquirrel },
+    goat: { name: "Mountain goat", home: 2, make: makeGoat, extra: { tilt: 0.4 } }, marmot: { name: "Marmot", home: 2, make: makeMarmot }, butterfly: { name: "Butterfly", home: 2, make: makeButterfly }, eagle: { name: "Eagle", home: 2, make: makeEagle, fly: [34, 46] },
+    fox: { name: "Moon fox", home: 3, make: makeFox, extra: { tilt: 0.3 } }, shroom: { name: "Shroomling", home: 3, make: makeShroomling }, snail: { name: "Snail", home: 3, make: makeSnail }, moth: { name: "Moth", home: 3, make: makeMoth },
+    bat: { name: "Bat (night)", home: 3, make: () => makeBat(0xc87aff), fly: [10, 20], extra: { night: true } },
+    salamander: { name: "Salamander", home: 4, make: makeSalamander }, beetle: { name: "Beetle", home: 4, make: makeBeetle }, crow: { name: "Crow", home: 4, make: makeCrow }, skycrow: { name: "Crow (flying)", home: 4, make: makeCrow, fly: [20, 32], extra: { day: true } },
+    monkey: { name: "Monkey", home: 5, make: makeMonkey, extra: { tilt: 0.3 } }, pig: { name: "Wild pig", home: 5, make: makePig, extra: { tilt: 0.3 } }, parrot: { name: "Parrot", home: 5, make: makeParrot }, skyparrot: { name: "Parrot (flying)", home: 5, make: makeParrot, fly: [14, 26], extra: { day: true } },
+    crab5: { name: "Crab", home: 5, make: makeCrab }, gull5: { name: "Gull", home: 5, make: makeGull, fly: [10, 18] }, lizard: { name: "Lizard", home: 5, make: skullLizard }, seal: { name: "Seal", home: 5, make: makeSeal },
+    hare: { name: "Snow hare", home: 5, make: snowHare }, pony: { name: "Wild pony", home: 5, make: makePony, extra: { tilt: 0.5 } }, msheep: { name: "Moor sheep", home: 5, make: makeMoorSheep, extra: { tilt: 0.4 } }, petrel: { name: "Petrel", home: 5, make: makeBird, fly: [10, 22], extra: { day: true } },
+    penguin: { name: "Penguin", home: 6, make: makePenguin, herd: 5 }, pbear: { name: "Polar bear", home: 6, make: makePolarBear, extra: { tilt: 0.5 } }, afox: { name: "Arctic fox", home: 6, make: arcticFox, extra: { tilt: 0.3 } }
+};
+const ANIMAL_ROLES = ["body", "head", "leg", "tail", "wing", "ear", "eye"];
+const ANIMAL_WAYS = { wander: "Wanders, runs off if you come close", bold: "Wanders, never runs off", hop: "Hops about", slow: "Creeps along slowly", fly: "Circles in the sky" };
+// a made animal is its parts on pivots: legs swing from the hip, wings flap from the shoulder, the head looks about, tails wag, eyes blink
+function makeCustomAnimal(d) {
+    const g = new THREE.Group(), body = pv(g, 0, 0, 0), D = Math.PI / 180, R = { body, legs: [], tail: [], ears: [], eyes: [], wings2: [], stride: 4, swing: 0.55, bob: 0.04, wag: 4, wagA: 0.35 };
+    const parts = (Array.isArray(d.parts) ? d.parts : []).filter(p => p && PART_GEO[p.shape]).slice(0, 60);
+    const heads = parts.filter(p => p.role === "head"), hp = heads.length ? [0, 1, 2].map(a => heads.reduce((s, p) => s + (+[p.x, p.y, p.z][a] || 0), 0) / heads.length) : null;
+    const head = hp ? (R.head = pv(body, hp[0], hp[1], hp[2])) : null;
+    const put = (parent, p, x, y, z) => pm(parent, PART_GEO[p.shape], partMat(p), x, y, z, clamp(+p.sx || 1, 0.01, 40), clamp(+p.sy || 1, 0.01, 40), clamp(+p.sz || 1, 0.01, 40), (+p.rx || 0) * D, (+p.ry || 0) * D, (+p.rz || 0) * D);
+    for (const p of parts) {
+        const x = +p.x || 0, y = +p.y || 0, z = +p.z || 0, sy = clamp(+p.sy || 1, 0.01, 40), sx = clamp(+p.sx || 1, 0.01, 40);
+        if (p.role === "leg") { const piv = pv(body, x, y + sy / 2, z); put(piv, p, 0, -sy / 2, 0); R.legs.push({ p: piv, ph: (x < 0) === (z > 0) ? 0 : Math.PI }); }
+        else if (p.role === "wing") { const s = x < 0 ? -1 : 1, sh = pv(body, x - (s * sx) / 2, y, z); put(sh, p, (s * sx) / 2, 0, 0); R.wings2.push({ sh, s }); }
+        else if (p.role === "tail") { const t = pv(body, x, y, z); put(t, p, 0, 0, 0); R.tail.push(t); }
+        else if (head && ["head", "ear", "eye"].includes(p.role)) {
+            const lx = x - hp[0], ly = y - hp[1], lz = z - hp[2];
+            if (p.role === "head") put(head, p, lx, ly, lz);
+            else { const e = pv(head, lx, ly, lz); e.userData.rz0 = 0; e.userData.rx0 = 0; put(e, p, 0, 0, 0); (p.role === "ear" ? R.ears : R.eyes).push(e); }
+        } else put(body, p, x, y, z);
+    }
+    for (const k of ["legs", "tail", "ears", "eyes"]) if (!R[k].length) delete R[k];
+    g.userData.rig = R;
+    g.scale.setScalar(clamp(+d.size || 1, 0.1, 6));
+    return g;
+}
+function defineCustomAnimal(d) {
+    if (!d || !/^a_[a-z0-9_]+$/.test(String(d.key))) return null;
+    const k = d.key, way = ANIMAL_WAYS[d.way] ? d.way : "wander", size = clamp(+d.size || 1, 0.1, 6), walk = clamp(+d.speed || 1.2, 0.1, 6), run = clamp(+d.run || walk * 5, 0.5, 14), flee = clamp(d.flee === undefined ? 9 : +d.flee, 0, 30), alt = clamp(+d.alt || 18, 4, 60);
+    const P = { alert: way === "bold" ? 5 : flee * 1.8, flee: way === "bold" ? 0 : flee, walk: way === "slow" ? Math.min(walk, 0.5) : walk, run: way === "slow" ? Math.min(run, 2) : run, roam: 16, sit: true, snort: clamp(+d.pitch || 400, 60, 2000) };
+    delete WILD5[k]; delete WILD5_FLY[k]; delete SMALL_WILD[k];
+    if (way === "fly") WILD5_FLY[k] = (c, dt, px, pz, night) => skyAI(c, dt, px, pz, night);
+    else if (way === "hop") WILD5[k] = (c, dt, dp, px, pz, live) => hopperAI(c, dt, dp, px, pz, live, false, { flee: P.flee, run });
+    else WILD5[k] = (c, dt, dp, px, pz, live, night) => grazerAI(c, dt, dp, px, pz, live, false, night, P);
+    if (size < 0.6) SMALL_WILD[k] = 1;
+    return (WILD_KINDS[k] = { name: String(d.name || "Animal").slice(0, 32), home: 0, custom: true, make: () => makeCustomAnimal(d), fly: way === "fly" ? [alt * 0.8, alt * 1.2] : null, extra: way === "fly" ? { night: !!d.night } : { tilt: 0.3 * size }, herd: clamp(Math.round(+d.herd || 1), 1, 8) });
+}
+// the Studio's Animal Maker edits a flat copy: every part straight in one group, in order
+function makePartsGroup(parts) { const g = new THREE.Group(), D = Math.PI / 180; for (const p of (Array.isArray(parts) ? parts : []).filter(q => q && PART_GEO[q.shape])) pm(g, PART_GEO[p.shape], partMat(p), +p.x || 0, +p.y || 0, +p.z || 0, clamp(+p.sx || 1, 0.01, 40), clamp(+p.sy || 1, 0.01, 40), clamp(+p.sz || 1, 0.01, 40), (+p.rx || 0) * D, (+p.ry || 0) * D, (+p.rz || 0) * D); return g; }
+function dropCustomAnimal(k) { if (/^a_/.test(String(k))) { delete WILD_KINDS[k]; delete WILD5[k]; delete WILD5_FLY[k]; delete SMALL_WILD[k]; } }
+for (const d of Array.isArray(CONTENT_ANIMALS) ? CONTENT_ANIMALS : []) defineCustomAnimal(d);
+// the wildlife a Studio island asked for
+function populateCI(C) {
+    const n = C.n, R = C.R;
+    for (const a of C.animals) {
+        const W = WILD_KINDS[a.kind]; if (!W) continue;
+        if (W.fly) { for (let i = 0; i < a.n; i++) { const cx = rand(-R * 0.5, R * 0.5), cz = rand(-R * 0.5, R * 0.5); addWild(n, a.kind, W.make(), cx, cz, Object.assign({ cx, cz, rad: rand(20, R * 0.6), spd: rand(0.05, 0.11) * (Math.random() < 0.5 ? 1 : -1), alt: C.P + rand(W.fly[0], W.fly[1]) }, W.extra || {})); } continue; }
+        const herd = W.herd || 1;
+        for (let made = 0, guard = 0; made < a.n && guard++ < a.n * 3;) {
+            const p = wildSpot(); if (!p) continue;
+            for (let i = 0; i < herd && made < a.n; i++) { const x = herd > 1 ? p.x + rand(-3, 3) : p.x, z = herd > 1 ? p.z + rand(-3, 3) : p.z; if (herd > 1 && !wildOk(x, z, true)) continue; addWild(n, a.kind, W.make(), x, z, Object.assign({}, W.extra || {})); made++; }
+        }
+    }
+}
+// the Studio lets a few loose right in front of you to watch them move
+function releaseAnimals(kind, count, x, z) {
+    const W = WILD_KINDS[kind]; if (!W || !wildBy[isle]) return 0;
+    const prev = addTgt; addTgt = isleGroup(isle) || null;
+    for (let i = 0; i < count; i++) { const px = x + rand(-3, 3), pz = z + rand(-3, 3); addWild(isle, kind, W.make(), px, pz, Object.assign(W.fly ? { cx: px, cz: pz, rad: rand(8, 18), spd: rand(0.08, 0.14), alt: groundY(px, pz) + rand(6, 12) } : {}, W.extra || {})); }
+    addTgt = prev; return count;
+}
 // the people you can place: a face, colours, and something to say
 const NPC_LOOKS = { villager: { face: "clerk", skin: 0xf0c8a0, shirt: 0x3a6a9a, pants: 0x2a2a3a, hair: 0x6a4a2a }, smith: { face: "smith", skin: 0xe8b890, shirt: 0x5a3a2a, pants: 0x2a2a3a, apron: 0x3a2a1a, beard: 0x6a4a2a, hat: "cap", hatCol: 0x2a2a30, wide: 1.3, belly: true },
     witch: { face: "witch", skin: 0xc8e0b0, shirt: 0x3a2a5a, pants: 0x1a1a2a, hair: 0x2a1a3a, hat: "witch", hatCol: 0x2a1a3a }, sailor: { face: "clerk", skin: 0xe8c0a0, shirt: 0xf2f2f2, vest: 0x1a3a6a, pants: 0x1a2a4a, hat: "cap", hatCol: 0x1a3a6a, beard: 0xd8d0c8 },
@@ -13839,6 +14013,7 @@ function frameBody(now) {
         if (studioHook) studioHook.frame(real);
         placedTick(real);
         updateWorldAnim(real); updateIsle2Anim(real); updateIsle3(real, true); updateIsle4(real, true); updateIsle5(real, true); updateIsle6(real, true); updateCustomIsles(real); updateWeather(real); updateEcosystem(real);
+        updateWild(real); // the animals carry on too (they don't run from the editor's camera)
         applySky();
         if (studioHook && studioHook.afterSky) studioHook.afterSky(); // the editor can thin the fog out to see a whole island
     }
@@ -13891,7 +14066,9 @@ if (DEBUG) import("./dev.js").catch(e => console.warn("dev panel failed to load:
 if (STUDIO) {
     Object.assign(window.__ts4, {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
-        CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, defineCustomProp, dropCustomProp, PART_SHAPES, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
+        CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, CONTENT_ANIMALS, defineCustomProp, dropCustomProp, PART_SHAPES,
+        WILD_KINDS, ANIMAL_ROLES, ANIMAL_WAYS, defineCustomAnimal, dropCustomAnimal, makeCustomAnimal, makePartsGroup, releaseAnimals, wildBy, ABIL, BASE_AXES, ciAxes, RECIPES, GLOW_MATS, resetIsleTrees,
+        setSeeAll(v) { studioSeeAll = !!v; }, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,
         setStudioHook(h) { studioHook = h; }, get wx() { return wx; }
     });
