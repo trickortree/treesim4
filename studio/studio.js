@@ -975,7 +975,7 @@ Return JSON with exactly these fields:
  "features": up to 12 of {"type": "mountain|hill|spire|crater|plateau|ridge|valley|lake|islet|isle|bay" (islet = a rock in the sea you can't reach; isle = a real walkable island out at sea, joined to the main one by a bridge), "dir": 0-359 (direction from the centre), "dist": 0.35-0.9 (fraction of the radius; islets 1.2-2; isles 1.4-2.6), "bridge": true or false (isles only), "r": size in metres (5-60), "h": height in metres (spires up to 70, hills 5-20), "len": length for ridges and valleys (30-150), "rot": angle of a ridge or valley in degrees, "width": bay width 0.1-1, "depth": bay depth 0.1-0.5, "lava": true for a lava crater, "name": "THE SOMETHING" or ""},
  "props": up to 14 groups of the game's own props to put around the island: [{"prop": a key from this list, "dir": 0-359, "dist": 0.3-0.85, "isle": -1 for the main island, or which "isle" feature (0 for the first isle, 1 for the second...), "count": 1-8}]: ${propChoices()},
  "campName": "1-2 words", "rideLine1": "what you see on the ferry ride", "rideLine2": "the island coming into view", "ferryLine": "what the Ferryman says before you sail", "arrive": "a welcome message",
- "casino": the casino tower moves to the newest island and is re-skinned for it, outside and in: {"name": "THE SOMETHING (2-4 words, its name)", "tagline": "a short sign line, like OPEN 24/7", "dir": 0-359 (which side of the island it stands on), "roofKind": "spire|dome|crown|flat", "wall": "#rrggbb", "base": "#rrggbb (the plinth)", "trim": "#rrggbb (bands round each tier)", "roof": "#rrggbb", "glow": "#rrggbb (lit windows)", "dim": "#rrggbb (dark windows)", "rock": "#rrggbb (the giant dice and stones round it)", "sign": "#rrggbb (bright neon)", "hall": {"walls": "#rrggbb (the wallpaper's colour inside)", "carpet": "#rrggbb (the carpet's colour)", "trim": "#rrggbb (the trim, usually a metal)", "light": "#rrggbb (the chandeliers' light)"}} (make it belong to this island),
+ "casino": the casino tower moves to the newest island and is re-skinned for it, outside and in: ${CASINO_SPEC} (make it belong to this island),
  "ui": the game's menus while you're on this island: {"accent": "#rrggbb (titles and highlights)", "panel": "#rrggbb (a dark menu background)", "ink": "#rrggbb (light, readable text)", "font": one of ${T.ISLE_FONTS.map(f => `"${f}"`).join(", ")} (for headings), "corner": 0-24 (how round the menus are)}${invent ? `,
  "architecture": "one or two sentences: how everything here is built (what from, shapes, roofs, colours, details), so every building matches",
  "camp": {"bed": "one sentence: the hut the player sleeps in", "forge": "one sentence: the forge where axes are made", "post": "one sentence: the trading post where materials are sold", "witch": "one sentence: the hut where potions are brewed"} (all in that architecture),
@@ -1133,6 +1133,27 @@ function cleanIsland(src, d) { // every field checked before it reaches the game
     }
     if (src.casino && typeof src.casino === "object") d.casino = cleanCasino(src.casino);
 }
+const CASINO_SPEC = `{"name": "THE SOMETHING (2-4 words, its name)", "tagline": "a short sign line, like OPEN 24/7", "dir": 0-359 (which side of the island it stands on), "roofKind": "spire|dome|crown|flat", "wall": "#rrggbb", "base": "#rrggbb (the plinth)", "trim": "#rrggbb (bands round each tier)", "roof": "#rrggbb", "glow": "#rrggbb (lit windows)", "dim": "#rrggbb (dark windows)", "rock": "#rrggbb (the giant dice and stones round it)", "sign": "#rrggbb (bright neon)", "hall": {"walls": "#rrggbb (the wallpaper's colour inside)", "carpet": "#rrggbb (the carpet's colour)", "trim": "#rrggbb (the trim, usually a metal)", "light": "#rrggbb (the chandeliers' light)"}}`;
+// ✦ Restyle with Claude (the Islands tab's casino section): a new look for the casino, from the island and anything you ask for. It stays where it stands
+let casNote = null;
+async function restyleCasino(d) {
+    if (casNote && casNote.busy) return;
+    const ask = ($("iCasAsk").value || "").trim().slice(0, 300), model = ($("iModel") && $("iModel").value) || pref("model") || "haiku";
+    const show = (cls, text, busy) => { casNote = { d, cls, text, busy, ask }; const m = $("iCasMsg"), b = $("iCasClaude"); if (m && islands[islandSel] === d) { m.className = "stMsg" + (cls ? " " + cls : ""); m.textContent = text; } if (b) { b.disabled = !!busy; b.textContent = busy ? "Claude is restyling it…" : "✦ Restyle with Claude"; } };
+    show("", `Asking ${model}…`, true);
+    const prompt = `Re-skin the casino for an island in a spooky, cheerful low-poly tree-chopping game.
+The island: "${d.name}"${d.sub ? `, "${d.sub}"` : ""}. Its colours: ${JSON.stringify(d.colors || {})}. Its menus: ${JSON.stringify(d.ui || {})}.${d.casino && d.casino.name ? ` The casino is called ${d.casino.name} now.` : ""}
+${ask ? `What's wanted: "${ask}"` : "Make it belong to this island, and feel new."}
+The casino is a stepped hexagonal tower: tiers with bands, lit and dark windows, a big neon CASINO sign, a banner over the door, giant dice and stones round it, and a roof. Inside is a hall with wallpaper, carpet, trim and chandeliers.
+Return JSON: ${CASINO_SPEC}`;
+    const r = await askQ({ prompt, system: "You design casinos for Hypergamous Tree Chopping Simulator 4, a spooky, cheerful first-person tree-chopping game. Reply with ONLY one JSON object: no prose, no code fences.", model });
+    let j = null; if (r.ok) try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
+    if (!j) { show("bad", r.ok ? "Claude's answer wasn't a casino. Try again." : r.error, false); return; }
+    const c = cleanCasino(j); delete c.dir; if (d.casino && d.casino.dir !== undefined) c.dir = d.casino.dir; // a new look, same place
+    d.casino = c;
+    show("good", `${c.name || "The casino"}: restyled by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens.${T.casinoHome() === T.CI_BASE + islands.indexOf(d) ? " Press Go to it to see it." : ""}`, false);
+    islandChanged(true, islands.indexOf(d));
+}
 // a casino look: colours, its name and sign line, the roof, which side it stands on, and tints for the hall inside (kept light, so the hall never goes dark)
 function cleanCasino(c) {
     const hex = v => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : null), str = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : ""), cs = {};
@@ -1159,14 +1180,15 @@ function shade(h, target, up) { // mix toward black (or white) until the luminan
 }
 // ---- an island's architecture (its camp buildings), its menu look and its shops ----
 const CAMP = { bed: ["Bed hut", "the hut where the player sleeps"], forge: ["The forge", "the forge where axes are made"], post: ["Trading post", "the trading post where materials are sold"], witch: ["Witch's hut", "the hut where potions are brewed"] };
+const CAMP_SLOTS = { bedModel: "Bed (you sleep in it)", bed: "Bed hut (around the bed)", forge: "The forge", post: "Trading post", witch: "Witch's hut" }; // what the Islands tab lets you swap
 const shopsOn = n => world.objects.filter(o => +o.isle === n && o.act && o.act.type === "shop");
 function archRows(d, n) {
     const camp = d.camp || {}, ui = d.ui || {}, sh = shopsOn(n);
     const sel = (k, label) => `<div class="stRow"><label>${label}</label><select class="stSel" data-camp="${k}" style="max-width:170px">${opt("", camp[k] || "", "The usual")}${myProps.map(p => opt(p.key, camp[k], p.name)).join("")}</select></div>`;
     const col = (k, label, dflt) => `<label style="display:flex;align-items:center;gap:5px"><input class="stIn" type="color" data-ui="${k}" value="${ui[k] || dflt}"> ${label}</label>`;
     return `<div class="stH" id="iSecArch">ARCHITECTURE <small>the camp's own buildings</small></div>
-      ${Object.entries(CAMP).map(([k, [label]]) => sel(k, label)).join("")}
-      <div class="stHint">Any of your props can be one: build them in the Props tab, or let Ask Claude (with invent on) build them all in one style. Each stands just behind its spot, facing the fire.</div>
+      ${Object.entries(CAMP_SLOTS).map(([k, label]) => sel(k, label)).join("")}
+      <div class="stHint">Any of your props can be one: build them in the Props tab, or let Ask Claude (with invent on) build them all in one style. The bed takes the old bed's place; the buildings stand just behind their spots, facing the fire.</div>
       <div class="stH">MENU LOOK <small>the game's menus while you're here</small></div>
       <div class="stChecks">${col("accent", "Titles", "#ffd040")}${col("panel", "Background", "#0e081c")}${col("ink", "Text", "#e8dcff")}</div>
       <div class="stRow"><label>Heading font</label><select class="stSel" id="iUiFont">${opt("", ui.font || "", "The usual")}${T.ISLE_FONTS.map(f => opt(f, ui.font, f)).join("")}</select></div>
@@ -1194,7 +1216,9 @@ function casinoRows(d, n) {
       <div class="stHint">The hall inside:</div>
       <div class="stChecks">${col("walls", "Wallpaper", h.walls, "#c42f4a", 1)}${col("carpet", "Carpet", h.carpet, "#d71d39", 1)}${col("trim", "Gold trim", h.trim, "#d8a840", 1)}${col("light", "Chandeliers", h.light, "#ffd8a0", 1)}</div>
       <div class="stBtns"><button class="stB" id="iCasGo"${home ? "" : " disabled"}>Go to it</button><button class="stB" id="iCasIn"${home ? "" : " disabled"}>Walk inside</button><button class="stB" id="iCasReset">The island's colours</button></div>
-      <div class="stHint">Ask Claude designs a casino for every island it makes. ${C0 && home && !C0.CAS ? "There's no flat spot for it on this side: try another direction." : ""}</div>`;
+      <div class="stClaude" style="margin-top:8px"><textarea class="stTa" id="iCasAsk" rows="2" placeholder="Describe it, e.g. a haunted ship's-wheel casino with rotting gold, or leave this empty to match the island">${esc(casNote && casNote.d === d ? casNote.ask || "" : "")}</textarea>
+        <div class="stBtns"><button class="stB" id="iCasClaude" style="flex:1"${casNote && casNote.busy ? " disabled" : ""}>${casNote && casNote.busy ? "Claude is restyling it…" : "✦ Restyle with Claude"}</button></div><div class="stMsg${casNote && casNote.d === d && casNote.cls ? " " + casNote.cls : ""}" id="iCasMsg">${casNote && casNote.d === d ? esc(casNote.text) : ""}</div></div>
+      <div class="stHint">Ask Claude designs a casino for every island it makes, and Restyle gives it a new look any time (it uses the model picked in Ask Claude above). ${C0 && home && !C0.CAS ? "There's no flat spot for it on this side: try another direction." : ""}</div>`;
 }
 // somewhere near the camp to stand: clear of the camp's buildings, facing the fire
 function campSpot(n) {
@@ -1356,6 +1380,7 @@ function bindIslands() {
     on("iCasDir", "input", e => { e.target.nextElementSibling.textContent = e.target.value + "°"; setCas(c => (c.dir = +e.target.value)); });
     all("[data-cas]", "input", el => setCas(c => (c[el.dataset.cas] = el.value)));
     all("[data-chall]", "input", el => setCas(c => { c.hall = c.hall || {}; c.hall[el.dataset.chall] = el.value; }));
+    on("iCasClaude", "click", () => restyleCasino(d));
     on("iCasReset", "click", () => setCas(c => { for (const k of ["wall", "base", "trim", "roof", "glow", "dim", "rock", "sign", "hall"]) delete c[k]; }, true));
     const toCasino = () => { const C = T.customIsle(n); if (!C || !C.CAS) { say("It's still being built: try again in a moment"); return null; } return C.CAS; };
     on("iCasGo", "click", () => {
