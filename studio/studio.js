@@ -210,7 +210,7 @@ const islandRecs = () => T.placed.filter(p => +p.o.isle === curIsle() && !String
 function pickPlaced(mx, my) {
     setRay(mx, my);
     const recs = islandRecs(), hits = ray.intersectObjects(recs.map(p => p.g), true);
-    for (const h of hits) { let o = h.object; while (o && !o.userData.placed) o = o.parent; if (o) return o.userData.placed; }
+    for (const h of hits) { let o = h.object; while (o && !o.userData.placed) o = o.parent; if (o) { pickPlaced.dist = h.distance; return o.userData.placed; } }
     return null;
 }
 
@@ -437,7 +437,9 @@ function renderInspector() {
           ${o.anim ? num("iAnimSp", "Speed", o.animSpeed || 1, 0.1) : ""}
           <div class="stRow"><label>Shows</label><select class="stSel" id="iShow">${opt("", o.show || "", "Always")}${opt("night", o.show, "Only at night")}${opt("day", o.show, "Only by day")}</select></div>
           <div class="stRow"><label>Floating name</label><input class="stIn" type="text" id="iLabel" value="${esc(o.label || "")}" placeholder="none"></div>
-          ${o.label ? `<div class="stRow"><label>Name colour</label><input class="stIn" type="color" id="iLabelCol" value="${o.labelCol || "#ffd040"}"></div>` : ""}
+          ${o.label ? `<div class="stRow"><label>Name colour</label><input class="stIn" type="color" id="iLabelCol" value="${o.labelCol || "#ffd040"}"></div>
+          <div class="stRow"><label>Name size</label><span style="display:flex;align-items:center;gap:6px"><input type="range" id="iLabelSize" min="0.4" max="3" step="0.1" value="${o.labelSize || 1}" style="width:110px"><small>${o.labelSize || 1}×</small></span></div>
+          <div class="stRow"><label>Name height</label><input class="stIn" type="number" id="iLabelY" step="0.1" value="${o.labelY ?? ""}" placeholder="auto" style="width:70px"></div>` : ""}
           <div class="stH">LIGHT</div>
           <div class="stChecks"><label><input type="checkbox" id="iLight"${lit ? " checked" : ""}> Gives off real light</label></div>
           ${lit ? `<div class="stRow"><label>Light colour</label><input class="stIn" type="color" id="iLightCol" value="${L.color || (dl ? hexOf(dl[0]) : "#ffc070")}"></div>${num("iLightP", "Brightness", L.power || (dl ? dl[1] : 10), 1)}${num("iLightR", "Reach (m)", L.range || (dl ? dl[2] : 14), 1)}${num("iLightY", "Height", L.y || (dl ? dl[3] : 1.5), 0.1)}` : ""}`;
@@ -480,6 +482,8 @@ function bindInspector(o) {
     on("iShow", "change", e => edit(q => (e.target.value ? (q.show = e.target.value) : delete q.show), ""));
     on("iLabel", "change", e => { edit(q => (e.target.value.trim() ? (q.label = e.target.value.trim().slice(0, 40)) : delete q.label), "", true); re(); });
     on("iLabelCol", "input", e => edit(q => (q.labelCol = e.target.value), "labelcol", true));
+    on("iLabelSize", "input", e => { e.target.nextElementSibling.textContent = e.target.value + "×"; edit(q => { const v = Math.min(3, Math.max(0.4, +e.target.value || 1)); if (v === 1) delete q.labelSize; else q.labelSize = v; }, "labelsize", true); });
+    on("iLabelY", "input", e => edit(q => { const v = e.target.value.trim(); if (v === "" || !Number.isFinite(+v)) delete q.labelY; else q.labelY = r3(Math.min(60, Math.max(-5, +v))); }, "labely"));
     const P = o.kind === "prop" ? T.PROPS[o.prop] : null, dl = P && P.light;
     const lightOf = q => q.light && q.light.on !== false ? q.light : (q.light = { on: true, color: dl ? hexOf(dl[0]) : "#ffc070", power: dl ? dl[1] : 10, range: dl ? dl[2] : 14, y: dl ? dl[3] : 1.5 });
     on("iLight", "change", e => { edit(q => { if (e.target.checked) lightOf(q); else q.light = { on: false }; }, "", true); re(); });
@@ -1180,15 +1184,15 @@ function shade(h, target, up) { // mix toward black (or white) until the luminan
 }
 // ---- an island's architecture (its camp buildings), its menu look and its shops ----
 const CAMP = { bed: ["Bed hut", "the hut where the player sleeps"], forge: ["The forge", "the forge where axes are made"], post: ["Trading post", "the trading post where materials are sold"], witch: ["Witch's hut", "the hut where potions are brewed"] };
-const CAMP_SLOTS = { bedModel: "Bed (you sleep in it)", bed: "Bed hut (around the bed)", forge: "The forge", post: "Trading post", witch: "Witch's hut" }; // what the Islands tab lets you swap
+const CAMP_SLOTS = { bedModel: "Bed", forge: "The forge", post: "Trading post", witch: "Witch's hut" }; // what the Islands tab lets you swap (a bed hut Claude built shows too, so it can be taken away)
 const shopsOn = n => world.objects.filter(o => +o.isle === n && o.act && o.act.type === "shop");
 function archRows(d, n) {
     const camp = d.camp || {}, ui = d.ui || {}, sh = shopsOn(n);
     const sel = (k, label) => `<div class="stRow"><label>${label}</label><select class="stSel" data-camp="${k}" style="max-width:170px">${opt("", camp[k] || "", "The usual")}${myProps.map(p => opt(p.key, camp[k], p.name)).join("")}</select></div>`;
     const col = (k, label, dflt) => `<label style="display:flex;align-items:center;gap:5px"><input class="stIn" type="color" data-ui="${k}" value="${ui[k] || dflt}"> ${label}</label>`;
     return `<div class="stH" id="iSecArch">ARCHITECTURE <small>the camp's own buildings</small></div>
-      ${Object.entries(CAMP_SLOTS).map(([k, label]) => sel(k, label)).join("")}
-      <div class="stHint">Any of your props can be one: build them in the Props tab, or let Ask Claude (with invent on) build them all in one style. The bed takes the old bed's place; the buildings stand just behind their spots, facing the fire.</div>
+      ${Object.entries(CAMP_SLOTS).map(([k, label]) => sel(k, label)).join("")}${camp.bed && !camp.bedModel ? sel("bed", "Bed hut") : ""}
+      <div class="stHint">Any of your props can be one: build them in the Props tab, or let Ask Claude (with invent on) build them all in one style. Your bed takes the old bed's place, with no tent round it; the buildings stand just behind their spots, facing the fire.</div>
       <div class="stH">MENU LOOK <small>the game's menus while you're here</small></div>
       <div class="stChecks">${col("accent", "Titles", "#ffd040")}${col("panel", "Background", "#0e081c")}${col("ink", "Text", "#e8dcff")}</div>
       <div class="stRow"><label>Heading font</label><select class="stSel" id="iUiFont">${opt("", ui.font || "", "The usual")}${T.ISLE_FONTS.map(f => opt(f, ui.font, f)).join("")}</select></div>
@@ -1934,8 +1938,9 @@ function setBuiltMode(on) { builtMode = on; $("stBuilt").classList.toggle("on", 
 function pickBuiltin(mx, my) {
     const n = curIsle(), G = T.isleGroup(n); if (!G) return null;
     setRay(mx, my);
-    for (const h of ray.intersectObjects(G.children, true)) { if (!h.object.visible) continue; const i = T.builtinIndexOf(n, h.object); if (i >= 0) return { n, i }; }
-    return null;
+    const E = T.enchTable, eh = E && E.g.visible ? ray.intersectObject(E.g, true)[0] : null; // the enchanting table isn't part of the island, but moves like it
+    for (const h of ray.intersectObjects(G.children, true)) { if (!h.object.visible) continue; if (eh && eh.distance < h.distance) break; const i = T.builtinIndexOf(n, h.object); if (i >= 0) return { n, i, dist: h.distance }; }
+    return eh ? { n, i: "ench", dist: eh.distance } : null;
 }
 function selectBuiltin(b) {
     if (sel || pmGizmo) deselect();
@@ -1956,13 +1961,50 @@ function bFromGizmo(final) { // you dragged it: its move follows (it turns round
 function renderBuiltinInspector() {
     const box = $("stInsp"), m = moveOf(bsel.n, bsel.i) || {};
     right.classList.remove("empty");
-    box.innerHTML = `<div class="stH">BUILT-IN THING <small>#${bsel.i} · ${esc(isleName(bsel.n))}</small></div>
-      <div class="stHint" style="margin-top:0">Part of the island the game builds. Drag the arrows: <b>W</b> move, <b>E</b> turn, <b>R</b> size. Its collisions, its floating label and its "press F" spot (a bed, a stall, the Ferryman) go with it.</div>
+    const ench = bsel.i === "ench";
+    box.innerHTML = `<div class="stH">${ench ? "THE ENCHANTING TABLE" : "BUILT-IN THING"} <small>${ench ? "" : "#" + bsel.i + " · "}${esc(isleName(bsel.n))}</small></div>
+      <div class="stHint" style="margin-top:0">${ench ? "Every island has one. Drag the arrows: <b>W</b> move, <b>E</b> turn, <b>R</b> size. It always stands on the ground, and its label and \"press F\" spot go with it." : "Part of the island the game builds. Drag the arrows: <b>W</b> move, <b>E</b> turn, <b>R</b> size. Its collisions, its floating label and its \"press F\" spot (a bed, a stall, the Ferryman) go with it."}</div>
       <div class="stBtns"><button class="stB" id="bHide">${m.hide ? "Show it again" : "Hide it"}</button><button class="stB warn" id="bReset">Put it back</button><button class="stB" id="bDone">Done</button></div>
-      <div class="stHint">Saved in <b>content/world.js</b> and ships on your next release.</div>`;
+      ${builtinLabelRows(m)}
+      <div class="stHint">Saved in <b>content/world.js</b> and ships on your next release. Put it back undoes its names too.</div>`;
+    bindBuiltinLabels();
     $("bHide").addEventListener("click", () => { let mm = moveOf(bsel.n, bsel.i); if (!mm) { mm = { isle: bsel.n, i: bsel.i }; T.MOVES.push(mm); } if (mm.hide) delete mm.hide; else mm.hide = true; T.placeBuiltin(bsel.n, mm); changed("world"); renderInspector(); });
     $("bReset").addEventListener("click", () => { const { n, i } = bsel, at = T.MOVES.findIndex(q => +q.isle === n && q.i === i); if (at >= 0) T.MOVES.splice(at, 1); T.placeBuiltin(n, { isle: n, i }); changed("world"); renderInspector(); say("Back where the game put it"); });
     $("bDone").addEventListener("click", () => deselect());
+}
+// its floating names (the forge's sign name, the Ferryman, BED, the casino...): text, colour, size, height, or hidden. Something with none can be given one
+const rgbHex = s => { const m = String(s || "").match(/\d+/g); return m && m.length >= 3 ? "#" + m.slice(0, 3).map(v => (+v).toString(16).padStart(2, "0")).join("") : /^#[0-9a-f]{6}$/i.test(s) ? s : "#ffd040"; };
+function builtinLabelRows(m) {
+    const labs = T.builtinLabels(bsel.n, bsel.i), Ls = m.labels || [], rows = labs.length ? labs : [null];
+    let h = `<div class="stH">FLOATING NAME${labs.length > 1 ? "S" : ""} <small>${labs.length ? "change or hide" : "it has none: type one to give it one"}</small></div>`;
+    rows.forEach((l, k) => {
+        const L = Ls[k] || {}, orig = l ? (l.orig ? l.orig.text : l.el.textContent) : "", col = L.col || (l ? rgbHex(l.orig ? l.orig.col : l.el.style.color) : "#ffd040");
+        h += `<div class="stItem" style="display:block" data-bl="${k}">
+          <div class="stRow"><label>Text</label><input class="stIn" type="text" data-blf="text" value="${esc(L.text || "")}" placeholder="${esc(orig || "a name…")}"></div>
+          <div class="stRow"><label>Colour</label><input class="stIn" type="color" data-blf="col" value="${col}"></div>
+          <div class="stRow"><label>Size</label><span style="display:flex;align-items:center;gap:6px"><input type="range" data-blf="size" min="0.4" max="3" step="0.1" value="${L.size || 1}" style="width:110px"><small>${L.size || 1}×</small></span></div>
+          <div class="stRow"><label>Higher by</label><input class="stIn" type="number" data-blf="dy" step="0.2" value="${L.dy || 0}" style="width:70px"></div>
+          <div class="stChecks"><label><input type="checkbox" data-blf="hide"${L.hide ? " checked" : ""}> Hide it</label></div></div>`;
+    });
+    return h;
+}
+function bindBuiltinLabels() {
+    right.querySelectorAll("[data-bl]").forEach(row => {
+        const k = +row.dataset.bl;
+        row.querySelectorAll("[data-blf]").forEach(f => f.addEventListener(f.type === "checkbox" ? "change" : "input", () => {
+            if (!bsel) return;
+            let mm = moveOf(bsel.n, bsel.i); if (!mm) { mm = { isle: bsel.n, i: bsel.i }; T.MOVES.push(mm); }
+            const ls = (mm.labels = mm.labels || []), L = (ls[k] = ls[k] || {}), key = f.dataset.blf;
+            if (key === "text") { const v = f.value.trim().slice(0, 40); if (v) L.text = v; else delete L.text; }
+            else if (key === "col") L.col = f.value;
+            else if (key === "size") { f.nextElementSibling.textContent = f.value + "×"; if (+f.value === 1) delete L.size; else L.size = +f.value; }
+            else if (key === "dy") { const v = parseFloat(f.value); if (!v) delete L.dy; else L.dy = r3(Math.min(40, Math.max(-20, v))); }
+            else if (key === "hide") { if (f.checked) L.hide = true; else delete L.hide; }
+            for (let j = 0; j < ls.length; j++) if (!ls[j]) ls[j] = {}; // no holes
+            if (ls.every(q => !Object.keys(q).length)) delete mm.labels;
+            T.placeBuiltin(bsel.n, mm); changed("world");
+        }));
+    });
 }
 // ---------- the terrain tool: paint a Studio island's ground higher, lower or flat (saved with the island as brush dabs) ----------
 const sculpt = { mode: "", r: +pref("brushR") || 8, k: +pref("brushK") || 0.6 };
@@ -2281,7 +2323,11 @@ canvas.addEventListener("pointerdown", e => {
     if (tc.axis || tc.dragging) return; // the gizmo has it
     if (sculptOn()) { startStroke(e.clientX, e.clientY); return; } // painting the ground
     if (makerTab() && pmPreview) { const i = pmPickPart(e.clientX, e.clientY); if (i >= 0) { pmSelectPart(i); return; } }
-    if (builtMode) { const b = pickBuiltin(e.clientX, e.clientY); if (b) selectBuiltin(b); else deselect(); return; }
+    if (builtMode) { // what the game built, or what you placed: whichever is nearer
+        const b = pickBuiltin(e.clientX, e.clientY), p = pickPlaced(e.clientX, e.clientY);
+        if (p && (!b || pickPlaced.dist <= b.dist)) { if (bsel) deselect(); select(p); } else if (b) selectBuiltin(b); else deselect();
+        return;
+    }
     const o = pickPlaced(e.clientX, e.clientY);
     if (o) select(o); else deselect();
 });

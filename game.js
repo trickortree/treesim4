@@ -698,6 +698,14 @@ function label(text, color = "#ffd040", w = 3, h = 0.75) {
     labelList.push(l);
     return l;
 }
+// a floating name changed in the Studio (L: { text, col, size }); without L it goes back to how the game made it
+function styleLabel(l, L) {
+    if (!l.orig) l.orig = { text: l.el.textContent, col: l.el.style.color, fs: l.el.style.fontSize };
+    const c = L && /^#[0-9a-f]{6}$/i.test(String(L.col)) ? L.col : l.orig.col;
+    l.el.textContent = L && L.text ? String(L.text).slice(0, 40) : l.orig.text;
+    l.el.style.color = c; l.el.style.borderColor = c;
+    l.el.style.fontSize = L && +L.size ? Math.round(parseFloat(l.orig.fs) * clamp(+L.size, 0.4, 3)) + "px" : l.orig.fs;
+}
 const lblV = new THREE.Vector3(), occRay = new THREE.Raycaster(), occDir = new THREE.Vector3();
 let occAll = occluders, occAllT = 0;
 function refreshOccluders() {
@@ -3977,15 +3985,25 @@ const enchTable = (() => {
     const runes = [];
     for (let k = 0; k < 10; k++) { const m = new THREE.Mesh(BOX, runeE); m.scale.set(0.09, 0.12, 0.02); g.add(m); runes.push({ m, a: k * 0.628, r: 1.0 + (k % 3) * 0.25, y: 0.9 + (k % 4) * 0.25, sp: 0.5 + (k % 5) * 0.12 }); }
     g.visible = false; scene.add(g);
-    const lb = label("ENCHANTING TABLE", "#c8a0ff", 3.4, 0.8);
+    const lb = label("ENCHANTING TABLE", "#c8a0ff", 3.4, 0.8); lb.keep = true; // it goes from island to island, so rebuilding one never takes it
     return { g, book, runes, runeE, lb, x: 0, z: 0, pulse: 0 };
 })();
+// it stands on whichever island you're on, on the ground. The Studio can move, turn, size or hide it per island (a "moves" entry with i: "ench")
 function placeEnchTable() {
     const p = ENCH_AT[isle]; if (!p) return;
-    enchTable.x = p.x; enchTable.z = p.z;
-    const y = groundY(p.x, p.z);
-    enchTable.g.position.set(p.x, y, p.z); enchTable.g.rotation.y = Math.atan2(-p.x, -p.z); enchTable.g.visible = true;
-    enchTable.lb.isle = isle; enchTable.lb.position.set(p.x, y + 2.6, p.z);
+    let m = null; try { m = MOVES.find(q => +q.isle === isle && q.i === "ench"); } catch (e) { /* the moves aren't loaded yet while the game starts */ }
+    m = m || {}; const x = m.x ?? p.x, z = m.z ?? p.z, k = clamp(+m.s || 1, 0.3, 4);
+    enchTable.x = x; enchTable.z = z;
+    const y = groundY(x, z);
+    enchTable.g.position.set(x, y, z); enchTable.g.rotation.y = m.ry ?? Math.atan2(-p.x, -p.z); enchTable.g.scale.setScalar(k); enchTable.g.visible = !m.hide;
+    const L = Array.isArray(m.labels) ? m.labels[0] || null : null; styleLabel(enchTable.lb, L);
+    enchTable.lb.isle = isle; enchTable.lb.position.set(x, m.hide || (L && L.hide) ? -1e4 : y + 2.6 * k + (L ? +L.dy || 0 : 0), z);
+}
+// the floating names that belong to a built-in thing, for the Studio to change
+function builtinLabels(n, i) {
+    if (i === "ench") return isle === n ? [enchTable.lb] : [];
+    const o = builtinAt(n, i); if (!o) return [];
+    const H = moveHome(o, n); return H.labels.length ? H.labels.map(q => q.l) : o.userData.myLabel ? [o.userData.myLabel] : [];
 }
 function enchFx() {
     enchTable.pulse = 1; flash = Math.max(flash, 0.35);
@@ -13540,8 +13558,14 @@ function buildCI(C) {
         };
         // the bed itself (d.camp.bedModel) and the hut around it (d.camp.bed). A small prop picked as the hut is a bed, so it takes the bed's place
         let hut = own("bed"), bedM = own("bedModel"); if (hut && !bedM && (hut.r || 0) <= 1.6) { bedM = hut; hut = null; }
+        if (bedM) hut = null; // a bed of your own stands on its own: no hut or tent round it
         if (hut) ownBuilding(C.BED, hut);
-        else { const tent = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.6, 4), lamb(ciHex(d.colors && d.colors.tent, 0xc89a5a))); tent.position.set(C.BED.x - 1.5, P + 1.3, C.BED.z + 1.6); tent.rotation.y = Math.PI / 4; scene.add(tent); circles.push({ x: C.BED.x - 1.5, z: C.BED.z + 1.6, r: 1.8 }); }
+        else if (!bedM) { // the usual: an A-frame canvas tent over the bed, open at both ends so you can walk in to sleep
+            const tentM = lamb(ciHex(d.colors && d.colors.tent, 0xc89a5a)), tg = new THREE.Group(), th = Math.atan(1.25 / 1.9); tg.position.set(C.BED.x, P, C.BED.z - 0.15); scene.add(tg);
+            for (const s of [-1, 1]) part(tg, BOX, tentM, s * 0.64, 0.95, 0, 0.07, 2.27, 2.9, 0, 0, s * th);
+            part(tg, CYL6, woodDark, 0, 1.93, 0, 0.06, 3.2, 0.06, Math.PI / 2);
+            for (const z of [-1.5, 1.5]) part(tg, CYL6, woodDark, 0, 0.97, z, 0.06, 1.94, 0.06);
+        }
         const bed = new THREE.Group(); bed.position.set(C.BED.x, P, C.BED.z); scene.add(bed);
         if (bedM) { bed.rotation.y = Math.atan2(-C.BED.x, -C.BED.z); bedM.make(bed); } // you walk up to it to sleep, so it stays walk-through
         else { part(bed, BOX, wood, 0, 0.3, 0, 1.4, 0.3, 2.3); part(bed, BOX, lamb(0x8a2a3a), 0, 0.52, -0.3, 1.3, 0.14, 1.5); }
@@ -13622,8 +13646,8 @@ function enterCI(C) {
     leaveWorld();
     if (!C.built) { buildCI(C); snapWorld(C.n); } else loadWorld(C.n);
     isle = C.n; save.isle = C.n;
+    groundFn = C.groundY; // before showWorld: it stands the enchanting table on this island's ground
     showWorld(C.n);
-    groundFn = C.groundY;
     waterMesh.geometry = C.waterGeo; waterMesh.material.needsUpdate = true;
     smokeEmit.length = 0; C.emit.forEach(e => smokeEmit.push(e));
     RESPAWN.x = 2; RESPAWN.z = 4;
@@ -13775,7 +13799,7 @@ function drawMapC(C) {
     g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw); g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke(); g.restore();
 }
 // the Studio swaps an island's data and rebuilds it live (or adds a new one at the end)
-function ciRemoveLabels(n) { for (let i = labelList.length - 1; i >= 0; i--) if (labelList[i].isle === n) { labelList[i].el.remove(); labelList.splice(i, 1); } }
+function ciRemoveLabels(n) { for (let i = labelList.length - 1; i >= 0; i--) if (labelList[i].isle === n && !labelList[i].keep) { labelList[i].el.remove(); labelList.splice(i, 1); } } // the island's own; placed things' names and the enchanting table's stay
 function ciSet(i, d) {
     const n = CI_BASE + i, old = ciList[i], here = isle === n;
     for (const T of Object.values(TYPES)) if (!T.custom && T.isl && T.isl.includes(n)) T.isl = T.isl.filter(q => q !== n);
@@ -13816,6 +13840,7 @@ function ciReshape(C, x0, z0, r) {
 }
 function ciSettle(C, x0, z0, r) { // trees and the map catch up with the new ground
     if (isle === C.n) for (const t of trees) if (!t.gone && (r === undefined || Math.hypot(t.x - x0, t.z - z0) < r + 2)) { t.gy = groundY(t.x, t.z); t.g.position.y = t.gy - 0.25; }
+    if (isle === C.n) placeEnchTable(); // the table stays on the ground you just sculpted
     C.mapBg = null;
 }
 // ---- built-in things moved in the Studio (content/world.js "moves"): any part of an island the game builds, by its place in the
@@ -13823,6 +13848,7 @@ function ciSettle(C, x0, z0, r) { // trees and the map catch up with the new gro
 const MOVES = CONTENT_WORLD && Array.isArray(CONTENT_WORLD.moves) ? CONTENT_WORLD.moves : [];
 const movedNow = [];
 function builtinAt(n, i) {
+    if (i === "ench") return isle === n ? enchTable.g : null; // the enchanting table: one table that goes wherever you are
     const G = isleGroup(n); if (!G) return null;
     if (G.userData.builtN === undefined) G.userData.builtN = G.children.length; // what the game built, before animals and placed things join
     return i >= 0 && i < G.userData.builtN ? G.children[i] : null;
@@ -13837,6 +13863,7 @@ function builtinIndexOf(n, obj) { // the movable built-in thing a picked mesh be
     return s.radius > 30 ? -1 : i; // not the ground, the sea, or a whole island's worth of rocks
 }
 function moveHome(o, n) { // where the game put it, and the collisions and labels that belong to it
+    if (o === enchTable.g) { const p = ENCH_AT[n] || { x: 0, z: 0 }; return { pos: V3(p.x, groundY(p.x, p.z), p.z), rot: new THREE.Euler(0, Math.atan2(-p.x, -p.z), 0), scale: V3(1, 1, 1), cols: [], circs: [], labels: [] }; } // its home differs on every island
     if (o.userData.home) return o.userData.home;
     const box = new THREE.Box3().setFromObject(o), inBox = (x, z) => x > box.min.x - 0.6 && x < box.max.x + 0.6 && z > box.min.z - 0.6 && z < box.max.z + 0.6;
     return (o.userData.home = { pos: o.position.clone(), rot: o.rotation.clone(), scale: o.scale.clone(),
@@ -13845,6 +13872,7 @@ function moveHome(o, n) { // where the game put it, and the collisions and label
         labels: labelList.filter(l => l.isle === n && inBox(l.position.x, l.position.z)).map(l => ({ l, h: l.position.clone() })) });
 }
 function placeBuiltin(n, m) {
+    if (m.i === "ench") { if (isle === n) placeEnchTable(); return isle === n ? enchTable.g : null; } // it reads its move itself, and always stands on the ground
     const o = builtinAt(n, m.i); if (!o) return null;
     const H = moveHome(o, n), dx = (m.x ?? H.pos.x) - H.pos.x, dy = (m.y ?? H.pos.y) - H.pos.y, dz = (m.z ?? H.pos.z) - H.pos.z, dr = (m.ry ?? H.rot.y) - H.rot.y, k = clamp(+m.s || 1, 0.1, 10);
     o.position.set(H.pos.x + dx, H.pos.y + dy, H.pos.z + dz); o.rotation.set(H.rot.x, H.rot.y + dr, H.rot.z); o.scale.copy(H.scale).multiplyScalar(k);
@@ -13856,7 +13884,13 @@ function placeBuiltin(n, m) {
         b[0] = Math.min(...p.map(q => q[0])); b[1] = Math.max(...p.map(q => q[0])); b[2] = Math.min(...p.map(q => q[1])); b[3] = Math.max(...p.map(q => q[1]));
     }
     for (const { q, h } of H.circs) { const [x, z] = tr(h.x, h.z); q.x = m.hide ? 1e6 : x; q.z = z; }
-    for (const { l, h } of H.labels) { const [x, z] = tr(h.x, h.z); l.position.set(x, m.hide ? -1e4 : h.y + dy, z); }
+    const Ls = Array.isArray(m.labels) ? m.labels : []; // its floating names, as changed in the Studio
+    H.labels.forEach(({ l, h }, k) => { const L = Ls[k] || null, [x, z] = tr(h.x, h.z); styleLabel(l, L); l.position.set(x, m.hide || (L && L.hide) ? -1e4 : h.y + dy + (L ? +L.dy || 0 : 0), z); });
+    if (!H.labels.length) { // one given to something that had none
+        const L = Ls[0] && Ls[0].text ? Ls[0] : null; let my = o.userData.myLabel;
+        if (L && !my) { my = o.userData.myLabel = label(String(L.text), "#ffd040", 2.8, 0.7); my.isle = n; }
+        if (my) { styleLabel(my, L); const top = new THREE.Box3().setFromObject(o).max.y; my.position.set(o.position.x, m.hide || !L || L.hide ? -1e4 : top + 0.8 + (+L.dy || 0), o.position.z); }
+    }
     const at = movedNow.findIndex(q => q.o === o); if (at >= 0) movedNow.splice(at, 1);
     if (m.x !== undefined || m.hide || m.ry !== undefined || m.s !== undefined) movedNow.push({ n, o, H, m });
     return o;
@@ -14271,7 +14305,7 @@ function placedBuild(o) {
     g.userData.placed = o;
     G.add(g);
     const rec = { o, g, body, r, tex, npc, light, box: P && P.box ? P.box : null, tree: null, regrowAt: 0, label: null, paused: false };
-    if (o.label) { const l = label(String(o.label).slice(0, 40), o.labelCol || "#ffd040", 2.8, 0.7); l.isle = +o.isle; l.maxD = 60; rec.label = l; }
+    if (o.label) { const l = label(String(o.label).slice(0, 40), o.labelCol || "#ffd040", 2.8, 0.7); l.isle = +o.isle; l.maxD = 60; l.keep = true; if (+o.labelSize) styleLabel(l, { size: o.labelSize, col: o.labelCol }); rec.label = l; }
     placed.push(rec);
     placedPose(rec);
     return rec;
@@ -14282,7 +14316,7 @@ function placedPose(rec) { // where it stands, how it's turned, its size, and th
     g.position.set(+o.x || 0, +o.y || 0, +o.z || 0); g.rotation.set(+o.rx || 0, +o.ry || 0, +o.rz || 0); g.scale.set(sx, sy, sz);
     rec.body.rotation.set(0, 0, 0); rec.body.scale.set(1, 1, 1); rec.body.position.set(0, 0, 0);
     if (rec.npc) rec.npc.yaw = +o.ry || 0;
-    if (rec.label) rec.label.position.set(g.position.x, g.position.y + (o.kind === "sign" ? 3 : o.kind === "npc" ? 2.7 : 2.4) * sy, g.position.z);
+    if (rec.label) rec.label.position.set(g.position.x, g.position.y + (o.labelY !== undefined && o.labelY !== "" ? +o.labelY : (o.kind === "sign" ? 3 : o.kind === "npc" ? 2.7 : 2.4) * sy), g.position.z);
     for (let i = placedSolids.length - 1; i >= 0; i--) if (placedSolids[i].o === o) placedSolids.splice(i, 1);
     if (!o.solid) return;
     if (rec.box) { const cs = Math.cos(+o.ry || 0), sn = Math.sin(+o.ry || 0); for (const [bx, bz, hx, hz] of rec.box) placedSolids.push({ box: true, x: g.position.x + (bx * sx) * cs + (bz * sz) * sn, z: g.position.z - (bx * sx) * sn + (bz * sz) * cs, hx: hx * sx, hz: hz * sz, cs, sn, isle: +o.isle, o }); }
@@ -14477,7 +14511,7 @@ if (STUDIO) {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
         CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, CONTENT_ANIMALS, defineCustomProp, dropCustomProp, PART_SHAPES,
         WILD_KINDS, ANIMAL_ROLES, ANIMAL_WAYS, defineCustomAnimal, dropCustomAnimal, makeCustomAnimal, makePartsGroup, releaseAnimals,
-        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson, ISLE_FONTS, openCShop, casinoHome, ROOF_KINDS, getCasino: () => casino, enterCasino,
+        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson, ISLE_FONTS, openCShop, casinoHome, ROOF_KINDS, getCasino: () => casino, enterCasino, enchTable, builtinLabels,
         MOVES, builtinAt, builtinIndexOf, moveHome, placeBuiltin, ciReshape, ciSettle, terrainMesh, wildBy, ABIL, BASE_AXES, ciAxes, RECIPES, GLOW_MATS, resetIsleTrees,
         setSeeAll(v) { studioSeeAll = !!v; }, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,
