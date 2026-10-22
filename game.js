@@ -1982,7 +1982,7 @@ function pickType(px = 0, pz = 0) {
 let lastRareToast = -99;
 function spawnTree(announce = true) {
     for (let tries = 0; tries < 40; tries++) {
-        const a = Math.random() * Math.PI * 2, d = SAFE_R + 4 + Math.random() * (curShoreR(a) - 10 - SAFE_R - 4), sp5 = isle === 5 ? arch5Spot() : null;
+        const a = Math.random() * Math.PI * 2, d = SAFE_R + 4 + Math.random() * (curShoreR(a) - 10 - SAFE_R - 4), sp5 = isle === 5 ? arch5Spot() : CI() ? CI().landSpot() : null; // a Studio island's walkable islands grow trees too
         if (isle === 5 && !sp5) continue;
         const x = sp5 ? sp5.x : Math.cos(a) * d, z = sp5 ? sp5.z : Math.sin(a) * d;
         if (Math.hypot(x - player.pos.x, z - player.pos.z) < 18) continue;
@@ -13160,21 +13160,30 @@ function makeCI(d, n) {
     const R = C.R = clamp(+d.radius || 130, 70, 220), wob = clamp(d.wobble === undefined ? 0.1 : +d.wobble, 0, 0.35), sd = +d.seed || 1.3;
     const ph = [sd * 1.7, sd * 2.3 + 1, sd * 3.1 + 2, sd * 0.7 + 3];
     // features: any number of mountains, hills, spires, craters, plateaus, ridges, valleys, lakes, islets and bays (the old single mountain and lake still load)
-    const FDEF = { mountain: { r: 40, h: 35 }, hill: { r: 30, h: 10 }, spire: { r: 12, h: 45 }, crater: { r: 26, h: 16 }, plateau: { r: 28, h: 12 }, ridge: { r: 14, h: 22, len: 80 }, valley: { r: 10, len: 70 }, lake: { r: 14 }, islet: { r: 16, h: 6, dist: 1.4 }, bay: { width: 0.35, depth: 0.25 } };
+    const FDEF = { mountain: { r: 40, h: 35 }, hill: { r: 30, h: 10 }, spire: { r: 12, h: 45 }, crater: { r: 26, h: 16 }, plateau: { r: 28, h: 12 }, ridge: { r: 14, h: 22, len: 80 }, valley: { r: 10, len: 70 }, lake: { r: 14 }, islet: { r: 16, h: 6, dist: 1.4 }, isle: { r: 28, h: 4, dist: 1.7 }, bay: { width: 0.35, depth: 0.25 } };
+    // the island's outline: round, long (stretched one way) or lobed (a clover of 2-7 lobes)
+    const shp = d.shape || {}, sk = ["long", "lobed"].includes(shp.kind) ? shp.kind : "round", sAng = (+shp.angle || 0) * Math.PI / 180, sStr = clamp(+shp.stretch || 1.6, 1, 2.4), sLobes = clamp(Math.round(+shp.lobes || 3), 2, 7), sAmp = clamp(shp.amount === undefined ? 0.3 : +shp.amount, 0, 0.45);
+    const shapeK = th => (sk === "long" ? 1 / Math.sqrt(Math.cos(th - sAng) ** 2 / sStr + Math.sin(th - sAng) ** 2 * sStr) : sk === "lobed" ? 1 + sAmp * Math.cos(sLobes * (th - sAng)) : 1);
+    const maxK = sk === "long" ? Math.sqrt(sStr) : sk === "lobed" ? 1 + sAmp : 1;
     const feats = (Array.isArray(d.features) ? d.features : []).slice(0, 30).map(q => ({ ...q }));
     if (d.mountain && d.mountain.on) feats.push({ ...d.mountain, type: "mountain" });
     if (d.lake && d.lake.on) feats.push({ ...d.lake, type: "lake" });
     C.F = feats.filter(q => q && FDEF[q.type]).map(q => {
-        const D = FDEF[q.type], th = (+q.dir || 0) * Math.PI / 180, dist = clamp(q.dist === undefined ? (D.dist || 0.5) : +q.dist, 0, q.type === "islet" ? 2.2 : 0.95);
-        return { type: q.type, name: String(q.name || ""), th, x: Math.cos(th) * R * dist, z: Math.sin(th) * R * dist, r: clamp(+q.r || D.r || 20, 4, 120), h: clamp(q.h === undefined ? D.h || 10 : +q.h, 0, 120), len: clamp(+q.len || D.len || 60, 10, 400),
-            rot: (q.rot === undefined ? (+q.dir || 0) + 90 : +q.rot) * Math.PI / 180, width: clamp(+q.width || D.width || 0.35, 0.08, 1.2), depth: clamp(+q.depth || D.depth || 0.25, 0.05, 0.6), lava: !!q.lava };
+        const D = FDEF[q.type], th = (+q.dir || 0) * Math.PI / 180, dist = clamp(q.dist === undefined ? (D.dist || 0.5) : +q.dist, 0, q.type === "islet" ? 2.2 : q.type === "isle" ? 3 : 0.95), Rk = R * shapeK(th);
+        const o = { type: q.type, name: String(q.name || ""), th, x: Math.cos(th) * Rk * dist, z: Math.sin(th) * Rk * dist, r: clamp(+q.r || D.r || 20, 4, 120), h: clamp(q.h === undefined ? D.h || 10 : +q.h, 0, 120), len: clamp(+q.len || D.len || 60, 10, 400),
+            rot: (q.rot === undefined ? (+q.dir || 0) + 90 : +q.rot) * Math.PI / 180, width: clamp(+q.width || D.width || 0.35, 0.08, 1.2), depth: clamp(+q.depth || D.depth || 0.25, 0.05, 0.6), lava: !!q.lava, bridge: q.bridge !== false };
+        if (o.type === "isle") { o.r = clamp(o.r, 12, 70); o.h = clamp(o.h, 1, 20); const far = Rk * (1 + wob * 1.2) + o.r + 10; if (Math.hypot(o.x, o.z) < far) { o.x = Math.cos(th) * far; o.z = Math.sin(th) * far; } const lim = 400 - o.r, d0 = Math.hypot(o.x, o.z); if (d0 > lim) { o.x *= lim / d0; o.z *= lim / d0; } } // ...and stays on the sea // a walkable island never runs into the main one
+        return o;
     });
-    const bays = C.F.filter(q => q.type === "bay"), islets = C.F.filter(q => q.type === "islet"), land = C.F.filter(q => !["bay", "islet", "lake"].includes(q.type)), lakes = C.lakes = C.F.filter(q => q.type === "lake");
+    const bays = C.F.filter(q => q.type === "bay"), islets = C.F.filter(q => q.type === "islet"), land = C.F.filter(q => !["bay", "islet", "lake", "isle"].includes(q.type)), lakes = C.lakes = C.F.filter(q => q.type === "lake");
+    const isles = C.isles = C.F.filter(q => q.type === "isle"); // walkable islands out at sea, each joined to the main one by a bridge (unless bridge: false)
+    const isleR = (q, x, z) => { const a = Math.atan2(z - q.z, x - q.x); return q.r * (1 + 0.12 * Math.sin(3 * a + q.th * 5) + 0.06 * Math.sin(5 * a + q.th * 3)); };
+    C.isleR = isleR;
     for (const q of C.F) if (q.type === "ridge" || q.type === "valley") { const hl = q.len / 2, dx = Math.cos(q.rot) * hl, dz = Math.sin(q.rot) * hl; q.ax = q.x - dx; q.az = q.z - dz; q.bx = q.x + dx; q.bz = q.z + dz; }
-    C.shoreR = th => { let r = R * (1 + wob * (0.55 * Math.sin(2 * th + ph[0]) + 0.3 * Math.sin(3 * th + ph[1]) + 0.18 * Math.sin(5 * th + ph[2]) + 0.07 * Math.sin(11 * th + ph[3]))); for (const b of bays) { const a = angDiff(th, b.th); r -= b.depth * R * Math.exp(-(a * a) / (b.width * b.width)); } return r; };
+    C.shoreR = th => { let r = R * shapeK(th) * (1 + wob * (0.55 * Math.sin(2 * th + ph[0]) + 0.3 * Math.sin(3 * th + ph[1]) + 0.18 * Math.sin(5 * th + ph[2]) + 0.07 * Math.sin(11 * th + ph[3]))); for (const b of bays) { const a = angDiff(th, b.th); r -= b.depth * R * Math.exp(-(a * a) / (b.width * b.width)); } return r; };
     C.shoreAt = (x, z) => C.shoreR(Math.atan2(z, x));
-    C.extent = Math.max(R * (1 + wob * 1.2) + 14, ...islets.map(q => Math.hypot(q.x, q.z) + q.r + 12));
-    C.seaDist = (x, z) => { let k = Math.hypot(x, z) - C.shoreAt(x, z); for (const q of islets) k = Math.min(k, Math.hypot(x - q.x, z - q.z) - q.r); return k; }; // how far out to sea (islets count as land)
+    C.extent = Math.max(R * maxK * (1 + wob * 1.2) + 14, ...[...islets, ...isles].map(q => Math.hypot(q.x, q.z) + q.r * 1.2 + 12));
+    C.seaDist = (x, z) => { let k = Math.hypot(x, z) - C.shoreAt(x, z); for (const q of [...islets, ...isles]) k = Math.min(k, Math.hypot(x - q.x, z - q.z) - q.r); return k; }; // how far out to sea (islets and isles count as land)
     const P = C.P = clamp(d.plateau === undefined ? 2 : +d.plateau, 0.6, 14);
     const hills = clamp(d.hills === undefined ? 8 : +d.hills, 0, 40), hs = clamp(+d.hillSize || 1, 0.3, 3), cliffs = clamp(+d.cliffs || 0, 0, 1);
     C.beach = clamp(d.beach === undefined ? 6 : +d.beach, 2, 24);
@@ -13187,15 +13196,16 @@ function makeCI(d, n) {
     C.SMITH_AT = standPt(C.SMITH); C.DEPOT_AT = standPt(C.DEPOT); C.WITCH_AT = standPt(C.WITCH);
     C.name = String(d.name || "New Island").slice(0, 40);
     C.LM = [{ name: String(d.campName || "CAMP").toUpperCase(), x: 0, z: 0, r: 24, col: "#ffd890", camp: true }];
-    const FNAME = { mountain: "THE PEAK", spire: "THE SPIRE", crater: "THE CRATER", plateau: "THE MESA", lake: "THE LAKE", islet: "THE ISLET", ridge: "", hill: "", valley: "" };
-    for (const q of C.F) if (q.name || FNAME[q.type]) C.LM.push({ name: String(q.name || FNAME[q.type]).toUpperCase().slice(0, 30), x: q.x, z: q.z, r: q.type === "lake" ? q.r + 2 : Math.min(18, q.r * 0.5), col: q.type === "lake" ? "#9fe8ff" : q.type === "crater" && q.lava ? "#ff9a4a" : "#e8f0ff", f: q });
+    const FNAME = { mountain: "THE PEAK", spire: "THE SPIRE", crater: "THE CRATER", plateau: "THE MESA", lake: "THE LAKE", islet: "THE ISLET", isle: "", ridge: "", hill: "", valley: "" };
+    for (const q of C.F) if (q.name || FNAME[q.type]) C.LM.push({ name: String(q.name || FNAME[q.type]).toUpperCase().slice(0, 30), x: q.x, z: q.z, r: q.type === "lake" ? q.r + 2 : q.type === "isle" ? 3 : Math.min(18, q.r * 0.5), col: q.type === "lake" ? "#9fe8ff" : q.type === "crater" && q.lava ? "#ff9a4a" : "#e8f0ff", f: q });
     const ramp = (x, z, h) => { if (P <= 1) return h; for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along < -36 || along > 6 || Math.abs(side) > 7) continue; h = lerp(lerp(0.35, P, clamp(-along / 32, 0, 1)), h, sstep(3.6, 7, Math.abs(side))); } return h; };
     C.terrain = (x, z) => {
         const dd = Math.hypot(x, z), inside = C.shoreAt(x, z) - dd;
         if (inside < 2.5) { // the sea, and any islets standing in it
             let w = Math.max(-3.4, -(2.5 - inside) * 0.7);
             for (const q of islets) { const ins = q.r - Math.hypot(x - q.x, z - q.z); if (ins > -8) w = Math.max(w, ins < 0 ? -0.3 + ins * 0.45 : Math.min(q.h, -0.3 + ins * 0.7) + fbm2(x * 0.1, z * 0.1, 2) * 0.5 * sstep(0, 4, ins)); }
-            return w;
+            for (const q of isles) { const ins = isleR(q, x, z) - Math.hypot(x - q.x, z - q.z); if (ins > -10) w = Math.max(w, ins < 0 ? -0.3 + ins * 0.45 : 0.3 + q.h * sstep(0, 9, ins) + Math.max(0, fbm2(x * 0.04 + q.th, z * 0.04, 3) - 0.35) * q.h * 0.8 * sstep(8, 20, ins)); } // a walkable island: a beach, then its own little hills
+            return sculptAt(x, z, w);
         }
         let h = P * sstep(2.5, 2.5 + lerp(C.beach, 2.5, cliffs), inside);                              // the beach, or a sea cliff
         h += Math.max(0, fbm2(x * 0.02 / hs + sd * 3, z * 0.02 / hs - sd * 2, 4) - 0.4) * hills * 2 * sstep(26, 52, dd) * sstep(6, 26, inside); // rolling hills
@@ -13221,12 +13231,37 @@ function makeCI(d, n) {
     C.setSculpt = list => { C.sculpt = []; C.sgrid = new Map(); for (const op of (Array.isArray(list) ? list : []).slice(0, 4000)) if (Array.isArray(op) && op.length >= 5 && op.slice(0, 4).every(v => Number.isFinite(+v))) C.addSculpt([+op[0], +op[1], clamp(+op[2], 1, 40), clamp(+op[3], -60, 80), op[4] ? 1 : 0]); };
     const sculptAt = (x, z, h) => { const a = C.sgrid.get(Math.floor(x / 16) * 4096 + Math.floor(z / 16)); if (!a) return h; for (const [ox, oz, r, v, t] of a) { const dx = x - ox, dz = z - oz, d2 = dx * dx + dz * dz, r2 = r * r; if (d2 >= r2) continue; const w = (1 - d2 / r2) ** 2; h = t ? h + (v - h) * w * 0.35 : h + v * w; } return h; };
     C.setSculpt(d.sculpt);
-    C.groundY = (x, z) => { for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 3 && along < D.LEN + 3 && Math.abs(side) < 3) return 0; } return Math.max(-0.4, C.terrain(x, z)); };
+    // bridges: from 7 m inside the main island's shore to 7 m inside each walkable island's, a plank deck that arches a little
+    C.bridges = isles.filter(q => q.bridge).map(q => {
+        const ux = Math.cos(q.th), uz = Math.sin(q.th), ra = C.shoreR(q.th) - 7, ax = ux * ra, az = uz * ra, dq = Math.hypot(q.x, q.z), rb = isleR(q, q.x - ux * q.r, q.z - uz * q.r) - 7, bx = q.x - (q.x / dq) * rb, bz = q.z - (q.z / dq) * rb, len = Math.hypot(bx - ax, bz - az);
+        return { ax, az, bx, bz, len, ha: Math.max(1, C.terrain(ax, az)), hb: Math.max(1, C.terrain(bx, bz)), arch: Math.min(1.6, len * 0.03), q };
+    });
+    C.deckY = (b, t) => lerp(b.ha, b.hb, t) + Math.sin(Math.PI * t) * b.arch;
+    C.groundY = (x, z) => {
+        for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 3 && along < D.LEN + 3 && Math.abs(side) < 3) return 0; }
+        const base = Math.max(-0.4, C.terrain(x, z));
+        for (const b of C.bridges) { const [sd, t] = segDist(x, z, b.ax, b.az, b.bx, b.bz); if (sd < 2) return Math.max(base, C.deckY(b, t)); }
+        return base;
+    };
+    C.onLand = (x, z) => Math.hypot(x, z) < C.shoreAt(x, z) - 3 || isles.some(q => Math.hypot(x - q.x, z - q.z) < isleR(q, x, z) - 2.5) || C.bridges.some(b => segDist(x, z, b.ax, b.az, b.bx, b.bz)[0] < 1.5);
     C.clamp = p => {
         for (const D of C.DOCKS) { const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP); if (along > 3.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; } }
-        const lim = C.shoreAt(p.x, p.z) - 3, dd = Math.hypot(p.x, p.z); if (dd > lim) { p.x *= lim / dd; p.z *= lim / dd; }
+        if (C.onLand(p.x, p.z)) return;
+        // off the land: back to the nearest place you can stand (the main shore, an island's shore, or a bridge, between its rails)
+        let best = null, bd = 1e9; const tryP = (x, z) => { const k = (x - p.x) ** 2 + (z - p.z) ** 2; if (k < bd) { bd = k; best = [x, z]; } };
+        { const lim = C.shoreAt(p.x, p.z) - 3, dd = Math.hypot(p.x, p.z) || 1; tryP(p.x * lim / dd, p.z * lim / dd); }
+        for (const q of isles) { const dx = p.x - q.x, dz = p.z - q.z, dd = Math.hypot(dx, dz) || 1, lim = isleR(q, p.x, p.z) - 2.5; tryP(q.x + (dx / dd) * lim, q.z + (dz / dd) * lim); }
+        for (const b of C.bridges) { const [sd, t] = segDist(p.x, p.z, b.ax, b.az, b.bx, b.bz), cx = lerp(b.ax, b.bx, t), cz = lerp(b.az, b.bz, t), k = Math.min(1, 1.45 / (sd || 1)); tryP(cx + (p.x - cx) * k, cz + (p.z - cz) * k); }
+        p.x = best[0]; p.z = best[1];
     };
-    C.treeOk = (x, z) => C.DOCKS.every(D => Math.hypot(x - D.B.x, z - D.B.z) > 16) && C.F.every(q => { const dm = Math.hypot(x - q.x, z - q.z); return q.type === "lake" ? dm > q.r + 4 : q.type === "crater" ? dm > q.r * 0.9 : q.type === "mountain" || q.type === "spire" ? dm > 8 : true; });
+    const isleArea = isles.reduce((s, q) => s + q.r * q.r, 0), isleShare = Math.min(0.45, (2 * isleArea) / (isleArea + R * R)); // a little more than their share, so they're never bare
+    C.landSpot = () => { // where a new tree may grow: usually the main island, sometimes one of the walkable ones
+        if (!isles.length || Math.random() > isleShare) return null;
+        let k = Math.random() * isleArea, q = isles[0]; for (const s of isles) { k -= s.r * s.r; if (k <= 0) { q = s; break; } }
+        const a = Math.random() * 6.283, rr = Math.sqrt(Math.random()) * (q.r - 6);
+        return { x: q.x + Math.cos(a) * rr, z: q.z + Math.sin(a) * rr };
+    };
+    C.treeOk = (x, z) => C.bridges.every(b => segDist(x, z, b.ax, b.az, b.bx, b.bz)[0] > 4) && C.DOCKS.every(D => Math.hypot(x - D.B.x, z - D.B.z) > 16) && C.F.every(q => { const dm = Math.hypot(x - q.x, z - q.z); return q.type === "lake" ? dm > q.r + 4 : q.type === "crater" ? dm > q.r * 0.9 : q.type === "mountain" || q.type === "spire" ? dm > 8 : true; });
     const col = d.colors || {};
     C.cols = { grass: ciHex(col.grass, 0x4a8a3a), grass2: ciHex(col.grass2, 0x3a7a30), sand: ciHex(col.sand, 0xe0d0a0), rock: ciHex(col.rock, 0x7a7a84), snow: ciHex(col.snow, 0xf4f8ff), camp: ciHex(col.camp, 0x8a7458), shallow: ciHex(col.shallow, 0x5ac8d8), deep: ciHex(col.deep, 0x0e2a4a), bush: ciHex(col.bush, 0x2f6a3a) };
     C.snowline = d.snowline === undefined || d.snowline === "" ? 9999 : +d.snowline;
@@ -13367,6 +13402,23 @@ function buildCI(C) {
         for (let s = 4, k = 0; s < land - 26; s += 9, k++) { const sd = k % 2 ? 3.2 : -3.2, x = D.B.x - D.DIR.x * s + D.PERP.x * sd, z = D.B.z - D.DIR.z * s + D.PERP.z * sd, y = C.groundY(x, z); lp.add(CYL6, x, y + 1.2, z, 0, 0, 0, 0.07, 2.4, 0.07); lgl.add(ICO, x, y + 2.5, z, 0, 0, 0, 0.18); }
         lp.build(); lgl.build();
     }
+    // ----- bridges out to the walkable islands: planks, posts down to the sea floor, rails and a lamp every few posts -----
+    for (const b of C.bridges) {
+        const dx = (b.bx - b.ax) / b.len, dz = (b.bz - b.az) / b.len, px = -dz, pz = dx, yaw = Math.atan2(dx, dz);
+        const planks = batch(lamb(0x7a5a3a)), posts = batch(woodDark), rails = batch(woodDark), bulbs = batch(glowM(0xffd890));
+        for (let s = 0.5; s < b.len; s += 1) { const t = s / b.len, x = b.ax + dx * s, z = b.az + dz * s, y = C.deckY(b, t); planks.add(BOX, x, y - 0.07, z, 0, yaw, 0, 3.4, 0.14, 0.94); }
+        for (let s = 0, k = 0; s <= b.len; s += 3, k++) for (const sd of [-1.8, 1.8]) {
+            const t = s / b.len, x = b.ax + dx * s + px * sd, z = b.az + dz * s + pz * sd, y = C.deckY(b, t), foot = Math.min(y - 0.2, Math.max(-3, C.terrain(x, z)));
+            posts.add(CYL6, x, (y + 1.1 + foot) / 2, z, 0, 0, 0, 0.12, y + 1.1 - foot, 0.12);
+            if (s + 3 <= b.len) { const t2 = (s + 3) / b.len, y2 = C.deckY(b, t2); rails.add(BOX, x + dx * 1.5, (y + y2) / 2 + 0.95, z + dz * 1.5, 0, yaw, 0, 0.08, 0.1, 3.05); }
+            if (k % 3 === 0) bulbs.add(ICO, x, y + 1.35, z, 0, 0, 0, 0.16);
+        }
+        planks.build(); posts.build(); rails.build(); bulbs.build();
+    }
+    // ----- the walkable islands get rocks and bushes too -----
+    { const rock = batch(lamb(cols.rock)), bush = batch(lamb(cols.bush));
+        for (const q of C.isles) for (let k = 0; k < Math.round(q.r * 0.9 * clamp(d.decor === undefined ? 1 : +d.decor, 0, 3)); k++) { const a = srand() * 6.283, rr = Math.sqrt(srand()) * (q.r - 5), x = q.x + Math.cos(a) * rr, z = q.z + Math.sin(a) * rr, y = C.terrain(x, z); if (y < 0.4) continue; if (k % 3) bush.add(SPH, x, y + 0.35, z, 0, 0, 0, srange(0.35, 0.7)); else rock.add(ICO, x, y + 0.2, z, srand() * 3, srand() * 3, 0, srange(0.5, 1.2), srange(0.35, 0.8), srange(0.5, 1.2)); }
+        rock.build(); bush.build(); }
     {
         const yaw = Math.atan2(C.NEXT.DIR.x, C.NEXT.DIR.z);
         C.man = makeFerrymanFigure(0x2a2a3a, 0x8a8a9a, 0xffd890); C.man.position.set(C.FERRY.x, 0.3, C.FERRY.z); C.man.rotation.y = yaw + Math.PI; scene.add(C.man);
@@ -13479,6 +13531,7 @@ function drawMapC(C) {
     const X = x => c + x * sc, Z = z => c + z * sc;
     g.font = "bold 11px Consolas"; g.textAlign = "center"; g.lineWidth = 3; g.strokeStyle = "#000";
     for (const lm of C.LM) { g.fillStyle = lm.col; g.strokeText(lm.name, X(lm.x), Z(lm.z) - 6); g.fillText(lm.name, X(lm.x), Z(lm.z) - 6); }
+    g.strokeStyle = "#c89a5a"; g.lineWidth = 4; for (const b of C.bridges) { g.beginPath(); g.moveTo(X(b.ax), Z(b.az)); g.lineTo(X(b.bx), Z(b.bz)); g.stroke(); } // bridges
     for (const [D, txt, colr] of [[C.ARR, "ARRIVALS", "#bfe8ff"], [C.NEXT, `REBIRTH ${C.n} FERRY`, "#ffd890"]]) { const e = D.pt(D.LEN); g.strokeStyle = colr; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D.B.x), Z(D.B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); g.fillStyle = colr; g.strokeStyle = "#000"; g.lineWidth = 3; g.strokeText(txt, X(e.x), Z(e.z) + 14); g.fillText(txt, X(e.x), Z(e.z) + 14); }
     for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
     for (const t of trees) { if (t.gone || t.dying || t.boss) continue; g.fillStyle = t.mut ? mutCol(t.mut) : t.type.rare ? t.type.col : "rgba(40,60,40,.9)"; g.beginPath(); g.arc(X(t.x), Z(t.z), 2.5, 0, 7); g.fill(); }

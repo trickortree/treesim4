@@ -66,19 +66,75 @@ function askClaude({ prompt, system, model }) {
     });
 }
 
+// ---- your work, kept safe outside the Studio's folder: Documents\Tree Sim 4 Studio (OneDrive syncs it if your Documents are synced).
+// Every save goes there too, so downloading or updating the Studio never loses it, and on start the Studio offers to bring it back ----
+function workspace(root) {
+    const crypto = require("crypto"), WS = path.join(require("electron").app.getPath("documents"), "Tree Sim 4 Studio"), wsContent = path.join(WS, "content"), manifestF = path.join(WS, "manifest.json");
+    const hash = t => crypto.createHash("sha1").update(t).digest("hex");
+    const readT = f => { try { return fs.readFileSync(f, "utf8"); } catch (e) { return null; } };
+    const readManifest = () => { try { return JSON.parse(fs.readFileSync(manifestF, "utf8")); } catch (e) { return { files: {} }; } };
+    function mirror(name, text) { // a save: the same file goes to Documents
+        fs.mkdirSync(wsContent, { recursive: true });
+        fs.writeFileSync(path.join(wsContent, CONTENT[name]), text, "utf8");
+        const m = readManifest(); m.files = m.files || {}; m.files[name] = { hash: hash(text), savedAt: new Date().toISOString() }; m.studio = root;
+        fs.writeFileSync(manifestF, JSON.stringify(m, null, 2) + "\n", "utf8");
+    }
+    function backup() { // once each time the Studio starts, a dated copy of everything in Documents (the last 15 are kept)
+        if (!fs.existsSync(wsContent)) return;
+        const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16), dest = path.join(WS, "backups", stamp);
+        fs.mkdirSync(dest, { recursive: true });
+        for (const f of fs.readdirSync(wsContent)) fs.copyFileSync(path.join(wsContent, f), path.join(dest, f));
+        if (fs.existsSync(path.join(WS, "my-themes.json"))) fs.copyFileSync(path.join(WS, "my-themes.json"), path.join(dest, "my-themes.json"));
+        const all = fs.readdirSync(path.join(WS, "backups")).sort();
+        for (const old of all.slice(0, Math.max(0, all.length - 15))) fs.rmSync(path.join(WS, "backups", old), { recursive: true, force: true });
+    }
+    function summary(name, text) { // "2: Midwest Island, Mycelium Mire", for the "bring my work back?" question
+        if (text === null) return "nothing";
+        let v = null; try { const m = text.match(/export default\s*([\s\S]*?);?\s*$/); v = m ? JSON.parse(m[1].replace(/;\s*$/, "")) : null; } catch (e) { return "can't read it"; }
+        if (name === "world") return `${((v && v.objects) || []).length} placed, ${((v && v.moves) || []).length} built-ins moved`;
+        if (!Array.isArray(v)) return "?";
+        const names = v.map(x => x && x.name).filter(Boolean);
+        return v.length + (names.length ? ": " + names.slice(0, 4).join(", ") + (names.length > 4 ? "…" : "") : "");
+    }
+    function status() {
+        const out = { ok: true, folder: WS, fresh: false, diff: [] }, m = readManifest();
+        if (!fs.existsSync(wsContent)) { // the first time: what's here now is saved to Documents
+            out.fresh = true;
+            for (const name of Object.keys(CONTENT)) { const t = readT(path.join(root, "content", CONTENT[name])); if (t !== null) mirror(name, t); }
+            return out;
+        }
+        for (const name of Object.keys(CONTENT)) {
+            const here = readT(path.join(root, "content", CONTENT[name])), mine = readT(path.join(wsContent, CONTENT[name]));
+            if (mine === null) { if (here !== null) mirror(name, here); continue; }
+            if (here === mine) continue;
+            out.diff.push({ name, file: CONTENT[name], mine: summary(name, mine), here: summary(name, here), savedAt: (m.files && m.files[name] && m.files[name].savedAt) || "" });
+        }
+        return out;
+    }
+    const restore = names => { for (const n of names) if (CONTENT[n]) { const t = readT(path.join(wsContent, CONTENT[n])); if (t !== null) fs.writeFileSync(path.join(root, "content", CONTENT[n]), t, "utf8"); } };
+    const keepHere = names => { for (const n of names) if (CONTENT[n]) { const t = readT(path.join(root, "content", CONTENT[n])); if (t !== null) mirror(n, t); } };
+    return { WS, mirror, backup, status, restore, keepHere };
+}
+
 function setup(ipcMain, root) {
     const dir = path.join(root, "content");
     const rel = require("./release.js");
     let releasing = false;
     const studioVersion = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "studio.json"), "utf8")).version || ""; } catch (e) { return ""; } };
-    ipcMain.handle("studio:info", () => ({ claude: findClaude(), content: dir, version: studioVersion() }));
+    const ws = workspace(root);
+    try { ws.backup(); } catch (e) { /* no backup this time */ }
+    ipcMain.handle("studio:info", () => ({ claude: findClaude(), content: dir, version: studioVersion(), ws: ws.WS }));
+    ipcMain.handle("studio:wsStatus", () => { try { return ws.status(); } catch (err) { return { ok: false, error: String(err && err.message || err) }; } });
+    ipcMain.handle("studio:wsRestore", (e, names) => { try { ws.restore(Array.isArray(names) ? names : []); return { ok: true }; } catch (err) { return { ok: false, error: String(err && err.message || err) }; } });
+    ipcMain.handle("studio:wsKeep", (e, names) => { try { ws.keepHere(Array.isArray(names) ? names : []); return { ok: true }; } catch (err) { return { ok: false, error: String(err && err.message || err) }; } });
+    ipcMain.handle("studio:wsOpen", () => { fs.mkdirSync(ws.WS, { recursive: true }); require("electron").shell.openPath(ws.WS); });
     // your own island themes: kept next to the Studio, never shipped
-    const themesFile = path.join(__dirname, "my-themes.json");
+    const themesFile = path.join(__dirname, "my-themes.json"), wsThemes = path.join(ws.WS, "my-themes.json");
     ipcMain.handle("studio:themes", async (e, themes) => {
         try {
-            if (themes && typeof themes === "object") await fs.promises.writeFile(themesFile, JSON.stringify(themes, null, 2) + "\n", "utf8");
+            if (themes && typeof themes === "object") { const t = JSON.stringify(themes, null, 2) + "\n"; await fs.promises.writeFile(themesFile, t, "utf8"); try { await fs.promises.mkdir(ws.WS, { recursive: true }); await fs.promises.writeFile(wsThemes, t, "utf8"); } catch (err) { /* Documents unavailable */ } }
             let saved = {};
-            try { saved = JSON.parse(await fs.promises.readFile(themesFile, "utf8")); } catch (err) { /* none yet */ }
+            try { saved = JSON.parse(await fs.promises.readFile(themesFile, "utf8")); } catch (err) { try { saved = JSON.parse(await fs.promises.readFile(wsThemes, "utf8")); } catch (err2) { /* none yet */ } } // a fresh copy of the Studio still has your themes
             return { ok: true, themes: saved };
         } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
     });
@@ -98,10 +154,11 @@ function setup(ipcMain, root) {
         if (!CONTENT[name]) return { ok: false, error: "unknown content file: " + name };
         try {
             await fs.promises.mkdir(dir, { recursive: true });
-            const file = path.join(dir, CONTENT[name]), tmp = file + ".tmp";
-            await fs.promises.writeFile(tmp, HEADERS[name] + "export default " + JSON.stringify(data, null, 2) + ";\n", "utf8");
+            const file = path.join(dir, CONTENT[name]), tmp = file + ".tmp", text = HEADERS[name] + "export default " + JSON.stringify(data, null, 2) + ";\n";
+            await fs.promises.writeFile(tmp, text, "utf8");
             await fs.promises.rename(tmp, file);
-            return { ok: true, file };
+            let kept = true; try { ws.mirror(name, text); } catch (err) { kept = false; } // and a copy in Documents, safe from updates
+            return { ok: true, file, kept };
         } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
     });
     ipcMain.handle("studio:askClaude", (e, req) => askClaude(req || {}));

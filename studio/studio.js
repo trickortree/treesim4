@@ -123,7 +123,7 @@ bar.innerHTML = `<div class="logo">TREE SIM 4 STUDIO <span id="stVer" style="fon
   <div class="grow"></div>
   <button class="stB" id="stUndo" title="Undo (Ctrl+Z)">↶</button><button class="stB" id="stRedo" title="Redo (Ctrl+Y)">↷</button>
   <label class="stHint" style="margin:0;opacity:.8"><input type="checkbox" id="stAuto"> autosave</label>
-  <button class="stB" id="stSave" title="Save to content/ (Ctrl+S)">Save</button>
+  <button class="stB" id="stSave" title="Save to content/, with a copy in Documents\Tree Sim 4 Studio that updates never touch (Ctrl+S)">Save</button>
   <button class="stB" id="stRelBtn" title="Ship an update to players">🚀 Release</button>
   <button class="stB go" id="stPlay" title="Play-test from the camera (F5)">▶ Play <small>F5</small></button>`;
 const left = document.createElement("div"); left.id = "stLeft"; left.className = "st";
@@ -285,7 +285,7 @@ async function saveAll(quiet) {
     if (!jobs.length) { if (!quiet) say("Everything is saved"); return; }
     const res = await Promise.all(jobs), bad = res.find(r => !r.ok);
     $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty);
-    if (bad) say("Couldn't save: " + bad.error, 5000); else say(quiet ? "Autosaved" : "Saved to content/", quiet ? 900 : 2200);
+    if (bad) say("Couldn't save: " + bad.error, 5000); else say(quiet ? "Autosaved" : res.every(r => r.kept !== false) ? "Saved to content/ and your Documents" : "Saved to content/ (couldn't copy it to Documents)", quiet ? 900 : 2600);
 }
 
 // ---------- placing ----------
@@ -757,10 +757,10 @@ const BUILTIN_THEMES = {
 };
 let myThemes = {}; // your own themes, saved next to the Studio (studio/my-themes.json), not shipped with the game
 const THEMES = () => ({ ...BUILTIN_THEMES, ...Object.fromEntries(Object.entries(myThemes).map(([k, t]) => ["my:" + k, t])) });
-const THEME_KEYS = ["colors", "trees", "snowline", "economy", "hills", "hillSize", "beach", "cliffs", "decor", "plateau", "wobble", "radius", "features", "treeCount", "treeW", "allTiers", "animals", "cover", "coverCol", "flies", "fliesCol"];
+const THEME_KEYS = ["shape", "colors", "trees", "snowline", "economy", "hills", "hillSize", "beach", "cliffs", "decor", "plateau", "wobble", "radius", "features", "treeCount", "treeW", "allTiers", "animals", "cover", "coverCol", "flies", "fliesCol"];
 const ECON = { 2: "the Highland Isle", 3: "Mooncap Isle", 4: "Ashfall Isle", 5: "the Archipelago", 6: "the Iceberg" };
-const FTYPES = { mountain: "⛰ Mountain", hill: "Hill", spire: "Spire", crater: "Crater", plateau: "Plateau (mesa)", ridge: "Ridge", valley: "Valley", lake: "Lake", islet: "Islet", bay: "Bay" };
-const FDEF = { mountain: { r: 40, h: 35, dist: 0.55 }, hill: { r: 30, h: 10, dist: 0.5 }, spire: { r: 12, h: 45, dist: 0.6 }, crater: { r: 26, h: 16, dist: 0.55 }, plateau: { r: 28, h: 12, dist: 0.55 }, ridge: { r: 14, h: 22, len: 80, dist: 0.55 }, valley: { r: 10, len: 70, dist: 0.45 }, lake: { r: 14, dist: 0.5 }, islet: { r: 16, h: 6, dist: 1.4 }, bay: { width: 0.35, depth: 0.25 } };
+const FTYPES = { mountain: "⛰ Mountain", hill: "Hill", spire: "Spire", crater: "Crater", plateau: "Plateau (mesa)", ridge: "Ridge", valley: "Valley", lake: "Lake", islet: "Islet (scenery)", isle: "🏝 Walkable island + bridge", bay: "Bay" };
+const FDEF = { mountain: { r: 40, h: 35, dist: 0.55 }, hill: { r: 30, h: 10, dist: 0.5 }, spire: { r: 12, h: 45, dist: 0.6 }, crater: { r: 26, h: 16, dist: 0.55 }, plateau: { r: 28, h: 12, dist: 0.55 }, ridge: { r: 14, h: 22, len: 80, dist: 0.55 }, valley: { r: 10, len: 70, dist: 0.45 }, lake: { r: 14, dist: 0.5 }, islet: { r: 16, h: 6, dist: 1.4 }, isle: { r: 28, h: 4, dist: 1.7 }, bay: { width: 0.35, depth: 0.25 } };
 // ground cover: [key, label, most, colour key]
 const COVER = [["grass", "Grass tufts", 300], ["flowers", "Flowers", 80, "flowers"], ["berries", "Berry bushes", 80, "berries"], ["mush", "Mushrooms", 80, "mush"], ["glowshroom", "Glowing mushrooms", 80, "glowshroom"], ["rings", "Fairy rings", 30, "glowshroom"],
     ["logs", "Fallen logs", 60], ["stumps", "Stumps", 60], ["crystals", "Crystals", 80, "crystals"], ["cracks", "Glowing cracks", 80, "cracks"], ["bones", "Bones", 40], ["cairns", "Stone piles", 40]];
@@ -896,8 +896,11 @@ Return JSON with exactly these fields:
  "cover": {ground cover counts: "grass": 0-200, "flowers": 0-50, "berries": 0-40, "mush": 0-40, "glowshroom": 0-40, "rings": 0-12, "logs": 0-30, "stumps": 0-30, "crystals": 0-40, "cracks": 0-60, "bones": 0-20, "cairns": 0-20},
  "coverCol": {"flowers": "#rrggbb", "berries": "#rrggbb", "mush": "#rrggbb", "glowshroom": "#rrggbb", "crystals": "#rrggbb", "cracks": "#rrggbb"},
  "flies": "fireflies|spores|embers|none", "fliesCol": "#rrggbb or empty",
- "features": up to 10 of {"type": "mountain|hill|spire|crater|plateau|ridge|valley|lake|islet|bay", "dir": 0-359 (direction from the centre), "dist": 0.35-0.9 (fraction of the radius; islets 1.2-2), "r": size in metres (5-60), "h": height in metres (spires up to 70, hills 5-20), "len": length for ridges and valleys (30-150), "rot": angle of a ridge or valley in degrees, "width": bay width 0.1-1, "depth": bay depth 0.1-0.5, "lava": true for a lava crater, "name": "THE SOMETHING" or ""},
+ "shape": {"kind": "round|long|lobed", "stretch": 1-2.4 (long only), "lobes": 2-7 and "amount": 0.1-0.45 (lobed only), "angle": 0-359} (pick what suits it: long for a ridge or a spit of land, lobed for a clover of bays),
+ "features": up to 12 of {"type": "mountain|hill|spire|crater|plateau|ridge|valley|lake|islet|isle|bay" (islet = a rock in the sea you can't reach; isle = a real walkable island out at sea, joined to the main one by a bridge), "dir": 0-359 (direction from the centre), "dist": 0.35-0.9 (fraction of the radius; islets 1.2-2; isles 1.4-2.6), "bridge": true or false (isles only), "r": size in metres (5-60), "h": height in metres (spires up to 70, hills 5-20), "len": length for ridges and valleys (30-150), "rot": angle of a ridge or valley in degrees, "width": bay width 0.1-1, "depth": bay depth 0.1-0.5, "lava": true for a lava crater, "name": "THE SOMETHING" or ""},
+ "props": up to 14 groups of the game's own props to put around the island: [{"prop": a key from this list, "dir": 0-359, "dist": 0.3-0.85, "isle": -1 for the main island, or which "isle" feature (0 for the first isle, 1 for the second...), "count": 1-8}]: ${propChoices()},
  "campName": "1-2 words", "rideLine1": "what you see on the ferry ride", "rideLine2": "the island coming into view", "ferryLine": "what the Ferryman says before you sail", "arrive": "a welcome message"${invent ? `,
+ "landmarks": 1-3 new buildings or big structures that make this place special (a lighthouse, a ruined watchtower, a stilt house, a giant mushroom hut...): [{"description": "one sentence: what it is and what it looks like", "dir": 0-359, "dist": 0.3-0.8, "isle": -1 or which isle}],
  "newTrees": 2-3 short descriptions of new trees that only grow here (one sentence each, with their look and mood),
  "newAnimals": 1-2 short descriptions of new animals that only live here (one sentence each)` : ""}}
 Make it match the description and feel distinct.`;
@@ -907,7 +910,10 @@ Make it match the description and feel distinct.`;
     if (!j) { btn.disabled = false; btn.textContent = "Design it with Claude"; msg.className = "stMsg bad"; msg.textContent = "Claude's answer wasn't an island. Try again or reword it."; return; }
     cleanIsland(j, d); d.theme = ""; // Claude's own look, not one of the themes
     changed("islands"); rebuildNow(i0); if (tab === "islands" && islandSel === i0) renderIslands(); // built straight away, so the trees it invents can pick its new materials
-    let note = `${d.name}, shaped by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens.`, tok = r.tokens;
+    clearGenerated(n); // what Claude put here last time makes way
+    let placedN = 0;
+    for (const g of (Array.isArray(j.props) ? j.props : []).slice(0, 14)) if (g && T.PROPS[g.prop] && !T.PROPS[g.prop].custom) placedN += placeOnIsland(n, g.prop, g, Math.round(Math.min(8, Math.max(1, +g.count || 1))));
+    let note = `${d.name}, shaped by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens. ${placedN} props put around it.`, tok = r.tokens;
     const say2 = t => { const m = $("iAskMsg"); if (m) { m.className = "stMsg"; m.textContent = t; } };
     if (invent) { // then each new tree and animal gets its own short request, one at a time
         const tr0 = Array.isArray(j.newTrees) ? j.newTrees.filter(s => typeof s === "string" && s.trim()).slice(0, 3) : [], an0 = Array.isArray(j.newAnimals) ? j.newAnimals.filter(s => typeof s === "string" && s.trim()).slice(0, 2) : [];
@@ -930,14 +936,48 @@ Make it match the description and feel distinct.`;
             if (!MK.animals.sel) MK.animals.sel = a.key;
             const isl = islands[i0]; isl.animals = isl.animals || []; isl.animals.push({ kind: a.key, n: 6 });
         }
-        note += ` Invented ${made} new tree${made === 1 ? "" : "s"} and animals (~${(tok / 1000).toFixed(1)}k tokens in all).`;
+        const lm0 = Array.isArray(j.landmarks) ? j.landmarks.filter(s => s && typeof s.description === "string" && s.description.trim()).slice(0, 3) : [];
+        for (const [k, L] of lm0.entries()) { // new buildings: each one built by Claude from parts, then put on the island
+            say2(`${note} Building landmark ${k + 1} of ${lm0.length}…`);
+            const res = await claudeBuild("buildings", L.description.slice(0, 300), model, { name: "Landmark", r: 2, light: null, parts: [] });
+            if (!res.ok || !res.data.parts.length) continue;
+            const p = res.data; p.key = pmKeyFor(MK.props, p.name); myProps.push(p); T.defineCustomProp(p); changed("props"); tok += res.tokens; made++;
+            placeOnIsland(n, p.key, L, 1, true);
+        }
+        note += ` Invented ${made} new trees, animals and buildings (~${(tok / 1000).toFixed(1)}k tokens in all).`;
         islandChanged(true, i0);
     }
     btn.disabled = false; btn.textContent = "Design it with Claude";
     const m2 = $("iAskMsg"); if (m2) { m2.className = "stMsg good"; m2.textContent = note + " The ticket stays as you set it."; }
     $("iAsk") && ($("iAsk").value = desc);
 }
+// what Claude puts on an island: the game's props and the buildings it invents. Each is a real placed object, marked gen, so asking again clears them
+const propChoices = () => Object.entries(T.PROPS).filter(([k, p]) => !p.custom).map(([k, p]) => `${k} (${p.name})`).join(", ");
+function islandSpot(n, s) { // { dir, dist, isle } → somewhere to stand on that island, clear of the camp, docks and bridges
+    const C = T.customIsle(n); if (!C) return null;
+    const q = Number.isInteger(+s.isle) && +s.isle >= 0 ? C.isles[+s.isle] : null;
+    for (let k = 0; k < 14; k++) {
+        let x, z;
+        if (q) { const a = Math.random() * 6.283, rr = Math.random() * (q.r - 7); x = q.x + Math.cos(a) * rr; z = q.z + Math.sin(a) * rr; }
+        else { const th = ((+s.dir || 0) + (k ? (Math.random() - 0.5) * 50 : 0)) * DEG, f = Math.min(0.85, Math.max(0.25, +s.dist || 0.6)) * (k ? 0.8 + Math.random() * 0.35 : 1), rr = C.shoreR(th) * f; x = Math.cos(th) * rr; z = Math.sin(th) * rr; if (Math.hypot(x, z) < 36) continue; }
+        if (C.treeOk(x, z) && C.groundY(x, z) > 0.3) return { x, z };
+    }
+    return null;
+}
+function placeOnIsland(n, key, s, count = 1, face) {
+    const C = T.customIsle(n), c0 = islandSpot(n, s); if (!C || !c0) return 0;
+    let made = 0;
+    for (let k = 0; k < count; k++) {
+        const x = r3(c0.x + (k ? (Math.random() - 0.5) * 12 : 0)), z = r3(c0.z + (k ? (Math.random() - 0.5) * 12 : 0));
+        const o = { id: newId(), isle: n, kind: "prop", prop: key, x, y: r3(C.groundY(x, z)), z, rx: 0, ry: r3(face ? Math.atan2(-x, -z) : Math.random() * 6.283), rz: 0, s: 1, solid: true, gen: true }; // buildings face the camp
+        world.objects.push(o); T.placedBuild(o); made++;
+    }
+    if (made) changed("world");
+    return made;
+}
+function clearGenerated(n) { const old = world.objects.filter(q => q.gen && +q.isle === n); for (const o of old) { T.placedRemove(o); world.objects.splice(world.objects.indexOf(o), 1); } if (old.length) changed("world"); }
 function cleanIsland(src, d) { // every field checked before it reaches the game
+    if (src.shape && typeof src.shape === "object") { const s = src.shape, nm = (v, a, b, dflt) => { v = +v; return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : dflt; }; d.shape = { kind: ["round", "long", "lobed"].includes(s.kind) ? s.kind : "round", stretch: r3(nm(s.stretch, 1, 2.4, 1.6)), lobes: Math.round(nm(s.lobes, 2, 7, 3)), amount: r3(nm(s.amount, 0, 0.45, 0.3)), angle: Math.round(nm(s.angle, 0, 359, 0)) }; }
     const num = (v, a, b, dflt) => { v = +v; return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : dflt; }, hex = v => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : null), str = (v, n) => (typeof v === "string" ? v.slice(0, n) : "");
     if (str(src.name, 40).trim()) d.name = str(src.name, 40).trim();
     d.sub = str(src.sub, 80);
@@ -964,11 +1004,12 @@ function cleanIsland(src, d) { // every field checked before it reaches the game
     if (FLIES[src.flies]) d.flies = src.flies;
     if (src.fliesCol !== undefined) d.fliesCol = hex(src.fliesCol) || "";
     if (Array.isArray(src.features)) d.features = src.features.filter(f => f && FTYPES[f.type]).slice(0, 12).map(f => {
-        const o = { type: f.type, dir: Math.round(num(f.dir, 0, 359, 0)), dist: r3(num(f.dist, 0, f.type === "islet" ? 2.2 : 0.95, FDEF[f.type].dist || 0.5)) };
+        const o = { type: f.type, dir: Math.round(num(f.dir, 0, 359, 0)), dist: r3(num(f.dist, 0, f.type === "islet" ? 2.2 : f.type === "isle" ? 2.8 : 0.95, FDEF[f.type].dist || 0.5)) };
         if (f.r !== undefined) o.r = Math.round(num(f.r, 4, 90, FDEF[f.type].r || 20)); if (f.h !== undefined) o.h = Math.round(num(f.h, 0, 90, FDEF[f.type].h || 10));
         if (f.len !== undefined) o.len = Math.round(num(f.len, 10, 300, 60)); if (f.rot !== undefined) o.rot = Math.round(num(f.rot, -360, 360, 0));
         if (f.type === "bay") { o.width = r3(num(f.width, 0.08, 1.2, 0.35)); o.depth = r3(num(f.depth, 0.05, 0.6, 0.25)); }
         if (f.type === "crater" && f.lava) o.lava = true;
+        if (f.type === "isle") o.bridge = f.bridge !== false;
         if (str(f.name, 30).trim()) o.name = str(f.name, 30).trim().toUpperCase();
         return o;
     });
@@ -981,11 +1022,12 @@ function featRows(d) {
         let h = `<div class="stItem${open ? " on" : ""}" data-fopen="${i}"><span>${esc(FTYPES[f.type] || f.type)}${f.name ? " · " + esc(f.name) : ""}</span><span><small>${Math.round(f.dir || 0)}°</small> <button class="stB" data-fdel="${i}" style="padding:1px 6px">✕</button></span></div>`;
         if (!open) return h;
         h += `<div style="padding:6px 4px 10px 8px;border-left:2px solid #ffd04055;margin:2px 0 6px">`;
-        if (f.type !== "bay") h += rng(i, "dir", "Direction", Math.round(f.dir || 0), 0, 359, 1, "°") + rng(i, "dist", f.type === "islet" ? "Out at sea" : "Distance out", f.dist ?? D.dist ?? 0.5, f.type === "islet" ? 1.05 : 0, f.type === "islet" ? 2.2 : 0.95, 0.01);
+        if (f.type !== "bay") h += rng(i, "dir", "Direction", Math.round(f.dir || 0), 0, 359, 1, "°") + rng(i, "dist", f.type === "islet" || f.type === "isle" ? "Out at sea" : "Distance out", f.dist ?? D.dist ?? 0.5, f.type === "islet" ? 1.05 : f.type === "isle" ? 1.2 : 0, f.type === "islet" ? 2.2 : f.type === "isle" ? 2.8 : 0.95, 0.01);
         else h += rng(i, "dir", "Direction", Math.round(f.dir || 0), 0, 359, 1, "°") + rng(i, "width", "Width", f.width ?? D.width, 0.08, 1.2, 0.01) + rng(i, "depth", "Depth", f.depth ?? D.depth, 0.05, 0.6, 0.01);
-        if (["mountain", "hill", "spire", "crater", "plateau", "lake", "islet"].includes(f.type)) h += rng(i, "r", "Size", f.r ?? D.r, 4, 90, 1, "m");
-        if (["mountain", "hill", "spire", "crater", "plateau", "ridge", "islet"].includes(f.type)) h += rng(i, "h", "Height", f.h ?? D.h, 0, 90, 1, "m");
+        if (["mountain", "hill", "spire", "crater", "plateau", "lake", "islet", "isle"].includes(f.type)) h += rng(i, "r", "Size", f.r ?? D.r, 4, 90, 1, "m");
+        if (["mountain", "hill", "spire", "crater", "plateau", "ridge", "islet", "isle"].includes(f.type)) h += rng(i, "h", "Height", f.h ?? D.h, 0, 90, 1, "m");
         if (f.type === "ridge" || f.type === "valley") h += rng(i, "r", "Width", f.r ?? D.r, 4, 40, 1, "m") + rng(i, "len", "Length", f.len ?? D.len, 10, 300, 5, "m") + rng(i, "rot", "Angle", Math.round(f.rot ?? ((f.dir || 0) + 90)), -180, 180, 1, "°");
+        if (f.type === "isle") h += `<div class="stChecks"><label><input type="checkbox" data-fi="${i}" data-fk="bridge"${f.bridge !== false ? " checked" : ""}> A bridge to it from the main island</label></div>`;
         if (f.type === "crater") h += `<div class="stChecks"><label><input type="checkbox" data-fi="${i}" data-fk="lava"${f.lava ? " checked" : ""}> Full of lava</label></div>`;
         if (!["hill", "valley", "bay"].includes(f.type)) h += `<div class="stRow"><label>Name</label><input class="stIn" type="text" data-fi="${i}" data-fk="name" value="${esc(f.name || "")}" placeholder="none"></div>`;
         return h + `</div>`;
@@ -1034,6 +1076,9 @@ function renderIslands() {
       <div class="stRow" style="margin-top:6px"><input class="stIn" type="text" id="iThemeName" placeholder="name this look as a theme…" style="flex:1"><button class="stB" id="iThemeSave">Save as theme</button></div>
       <div class="stH" id="iSecLand">SHAPE</div>${rng("iRad", "Size", d.radius || 130, 70, 220, 5, "m")}${rng("iWob", "Wobbly coast", d.wobble ?? 0.12, 0, 0.35, 0.01)}
       <div class="stRow"><label>Seed</label><span><input class="stIn" type="number" id="iSeed" value="${d.seed}" step="0.1"> <button class="stB" id="iDice">🎲</button></span></div>
+      <div class="stRow"><label>Outline</label><select class="stSel" id="iShapeK">${[["round", "Round"], ["long", "Long"], ["lobed", "Lobed (clover)"]].map(([k, l]) => opt(k, (d.shape || {}).kind || "round", l)).join("")}</select></div>
+      ${(d.shape || {}).kind === "long" ? rng("iShapeS", "Stretch", d.shape.stretch ?? 1.6, 1, 2.4, 0.05) : ""}${(d.shape || {}).kind === "lobed" ? rng("iShapeL", "Lobes", d.shape.lobes ?? 3, 2, 7, 1) + rng("iShapeA", "How deep", d.shape.amount ?? 0.3, 0, 0.45, 0.01) : ""}${(d.shape || {}).kind && d.shape.kind !== "round" ? rng("iShapeAng", "Turned", d.shape.angle ?? 0, 0, 359, 1, "°") : ""}
+      <div class="stHint">Add walkable islands joined by bridges under <b>Features</b> (🏝 Walkable island + bridge).</div>
       <div class="stH">LAND</div>${rng("iPlat", "Camp height", d.plateau ?? 2.5, 0.6, 14, 0.1, "m")}${rng("iHills", "Hills", d.hills ?? 8, 0, 40, 1)}${rng("iHillS", "Hill size", d.hillSize || 1, 0.3, 3, 0.1)}${rng("iBeach", "Beach width", d.beach ?? 6, 2, 24, 1, "m")}${rng("iCliff", "Sea cliffs", d.cliffs || 0, 0, 1, 0.05)}${rng("iDecor", "Rocks and bushes", d.decor ?? 1, 0, 3, 0.1)}
       <div class="stH" id="iSecSculpt">SCULPT THE GROUND <small>${(d.sculpt || []).length} brush dabs</small></div>
       ${curIsle() === n ? `<div class="stBtns" style="margin:0">${[["", "Off"], ["raise", "⬆ Raise"], ["lower", "⬇ Lower"], ["flat", "▬ Flatten"], ["erase", "⌫ Erase"]].map(([k, l]) => `<button class="stB${sculpt.mode === k ? " on" : ""}" data-sculpt="${k}" style="padding:4px 7px;font-size:11px">${l}</button>`).join("")}</div>
@@ -1134,6 +1179,8 @@ function bindIslands() {
     range("iArrDir", v => (d.arrDir = v)); range("iNextDir", v => (d.nextDir = v));
     on("iSeed", "input", e => { d.seed = +e.target.value || 1; islandChanged(); });
     on("iDice", "click", () => { d.seed = r3(1 + Math.random() * 8); islandChanged(true); });
+    on("iShapeK", "change", e => { d.shape = { ...(d.shape || {}), kind: e.target.value }; islandChanged(true); });
+    range("iShapeS", v => (d.shape.stretch = v)); range("iShapeL", v => (d.shape.lobes = v)); range("iShapeA", v => (d.shape.amount = v)); range("iShapeAng", v => (d.shape.angle = v));
     // the terrain tool
     all("[data-sculpt]", "click", b => { sculpt.mode = b.dataset.sculpt; if (sculpt.mode) { deselect(); if (builtMode) setBuiltMode(false); } brushRing.visible = false; renderIslands(); say(sculpt.mode ? "Hold the left mouse button on the ground to paint" : "Sculpting off"); });
     on("iBrushR", "input", e => { sculpt.r = +e.target.value; pref("brushR", sculpt.r); e.target.nextElementSibling.textContent = sculpt.r + "m"; brushRing.scale.setScalar(sculpt.r); });
@@ -1312,6 +1359,13 @@ function cleanAnimal(src, into) {
     return a;
 }
 function makerPrompt(kind, desc) {
+    if (kind === "buildings") return `Build a building or big structure for a low-poly island from this description: "${desc}"
+
+Build it out of simple parts, like a model kit. Units are metres, y is up, the ground is y = 0, and its front (the door) faces +z. Each part is centred on its x, y, z, turned by rx, ry, rz in degrees, and sized by sx (width), sy (height), sz (depth).
+Shapes at size 1: ${SHAPES_TXT}.
+Style: chunky, spooky-cheerful low-poly, like a tree-chopping game where the trees are alive. Make it 4 to 14 m tall and up to 12 m across, with real detail: walls, a roof, a door, windows (glow: true for lit windows), chimneys, beams, steps, flags, lanterns. Use 15 to 50 parts. Put tint: true on the main walls so players can recolour it.
+Return JSON: {"name": "1-3 words", "r": how wide it is to bump into in metres (about half its width, 1.5-6), "light": {"on": true, "color": "#rrggbb", "power": 6-20, "range": 8-20, "y": height} or null,
+ "parts": [{"shape": "...", "x": 0, "y": 0.5, "z": 0, "rx": 0, "ry": 0, "rz": 0, "sx": 1, "sy": 1, "sz": 1, "color": "#rrggbb", "glow": false, "tint": false, "opacity": 1}]}`;
     if (kind === "animals") return `Build a low-poly animal from this description: "${desc}"
 
 Build it out of simple parts. Each part has a role that says how it moves: body (stays still), head (looks around: put the snout, mouth, beak and horns on it too), eye (blinks), ear (twitches), leg (swings from its top when it walks: one tall part per leg, reaching the ground), tail (wags), wing (flaps from the end nearest the body).
@@ -1332,7 +1386,7 @@ Return JSON: {"name": "1-3 words", "r": how wide it is to bump into in metres (0
 Example, a barrel: {"name":"Barrel","r":0.5,"light":null,"parts":[{"shape":"cyl","x":0,"y":0.55,"z":0,"sx":0.9,"sy":1.1,"sz":0.9,"color":"#8a5a30","tint":true},{"shape":"cyl","x":0,"y":0.2,"z":0,"sx":0.94,"sy":0.08,"sz":0.94,"color":"#3a3a40"},{"shape":"cyl","x":0,"y":0.9,"z":0,"sx":0.94,"sy":0.08,"sz":0.94,"color":"#3a3a40"}]}`;
 }
 async function claudeBuild(kind, desc, model, into) { // → { ok, data, tokens, ms, model } or { ok: false, error }
-    const r = await S.askClaude({ prompt: makerPrompt(kind, desc), system: `You build low-poly 3D ${kind === "animals" ? "animals" : "props"} out of simple shapes for Hypergamous Tree Chopping Simulator 4. Reply with ONLY one JSON object: no prose, no code fences.`, model });
+    const r = await S.askClaude({ prompt: makerPrompt(kind, desc), system: `You build low-poly 3D ${kind === "animals" ? "animals" : kind === "buildings" ? "buildings" : "props"} out of simple shapes for Hypergamous Tree Chopping Simulator 4. Reply with ONLY one JSON object: no prose, no code fences.`, model });
     if (!r.ok) return { ok: false, error: r.error };
     let j = null; try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
     if (!j || !Array.isArray(j.parts) || !j.parts.length) return { ok: false, error: `Claude's answer wasn't ${kind === "animals" ? "an animal" : "a prop"}. Try again or reword it.` };
@@ -1847,5 +1901,26 @@ S.info().then(i => {
     if (!i.claude) say("Claude Code wasn't found, so Ask Claude is off. Everything else works.", 6000);
 });
 S.themes().then(r => { if (r && r.ok && r.themes) { myThemes = r.themes; if (tab === "islands") renderIslands(); } });
+// your work's copy in Documents\Tree Sim 4 Studio: after an update or a fresh download, offer to bring it back
+S.wsStatus().then(st => {
+    if (!st || !st.ok) return;
+    if (st.fresh) { say(`Your work is now also kept in ${st.folder}, so updating the Studio never loses it`, 7000); return; }
+    if (!st.diff.length) return;
+    const LABEL = { islands: "Islands", trees: "Trees", props: "Props", animals: "Animals", world: "Placed and moved things" };
+    const box = document.createElement("div"); box.className = "st"; box.id = "stWs";
+    box.style.cssText = "position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:#0a0612cc";
+    box.innerHTML = `<div style="width:min(560px,92%);background:#1e1530;border:1px solid #ffd040;border-radius:12px;padding:18px 20px">
+      <div class="stH" style="margin-top:0">YOUR WORK IS SAFE</div>
+      <div style="font:600 13px 'Segoe UI';line-height:1.5;margin-bottom:10px">Your copy in <b>${esc(st.folder)}</b> isn't the same as what this Studio has. That happens after you update the Studio, or download it again.</div>
+      <div class="stList">${st.diff.map(f => `<div class="stItem" style="display:block"><b>${esc(LABEL[f.name] || f.name)}</b><br><small>Yours: ${esc(f.mine)}${f.savedAt ? " (saved " + esc(new Date(f.savedAt).toLocaleString()) + ")" : ""}</small><br><small>This copy: ${esc(f.here)}</small></div>`).join("")}</div>
+      <div class="stBtns" style="margin-top:12px"><button class="stB go" id="wsBack" style="flex:1">Bring my work back</button><button class="stB" id="wsHere">Use this copy's</button><button class="stB" id="wsLater">Later</button></div>
+      <div class="stHint">Either way nothing is lost: that folder also keeps dated backups (the last 15 times the Studio started). <a href="#" id="wsOpen" style="color:#ffd040">Open the folder</a></div></div>`;
+    document.body.appendChild(box);
+    const names = st.diff.map(f => f.name);
+    $("wsBack").addEventListener("click", async () => { const r = await S.wsRestore(names); if (r && r.ok) { box.remove(); say("Bringing your work back…"); setTimeout(() => location.reload(), 400); } else say("Couldn't bring it back: " + (r && r.error), 5000); });
+    $("wsHere").addEventListener("click", async () => { if (!confirm("Use this copy's files? Your copy in Documents is replaced (the old one stays in the backups folder).")) return; await S.wsKeep(names); box.remove(); say("Using this copy's files"); });
+    $("wsLater").addEventListener("click", () => box.remove());
+    $("wsOpen").addEventListener("click", e => { e.preventDefault(); S.wsOpen(); });
+});
 say("Tree Sim 4 Studio · right-drag to look around, F5 to play", 3500);
 window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get animals() { return myAnimals; }, get partSel() { return partSel; }, get treeGroup() { return treeGroup; }, pmNew, pmSelectPart, cleanProp, cleanAnimal, cleanIsland, migrateIsland, newIsland, islandChanged, claudeBuild, regrowHere, addAnimalToIsland, renderIslands, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };
