@@ -84,7 +84,7 @@ async function status(root) {
 
 // node --check every file the installer ships, using Electron's own Node so nothing else needs installing
 async function syntaxCheck(root) {
-    const files = ["game.js", "main.js", "preload.js", "updater.js", "intro.js", "content/trees.js", "content/world.js", "content/islands.js", "content/props.js", "content/animals.js"].filter(f => fs.existsSync(path.join(root, f)));
+    const files = ["game.js", "main.js", "preload.js", "updater.js", "intro.js", "content/trees.js", "content/world.js", "content/islands.js", "content/props.js", "content/animals.js", "content/people.js"].filter(f => fs.existsSync(path.join(root, f)));
     const bad = [];
     for (const f of files) {
         const r = await run(process.execPath, ["--check", f], root, 60000, { ...ENV, ELECTRON_RUN_AS_NODE: "1" });

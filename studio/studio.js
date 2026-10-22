@@ -39,10 +39,12 @@ body.studio-edit #hud, body.studio-edit #floaters, body.studio-edit #dmgdir, bod
 body:not(.studio-edit) .st { display: none !important; }
 .st { position: fixed; z-index: 300; color: #e8dcff; font: 13px "Segoe UI", system-ui, sans-serif; user-select: none; box-sizing: border-box; }
 .st * { box-sizing: border-box; }
-#stBar { top: 0; left: 0; right: 0; height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #130b20f2; border-bottom: 1px solid #ffd04044; box-shadow: 0 6px 30px rgba(0,0,0,.45); }
+#stBar { top: 0; left: 0; right: 0; min-height: 46px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 12px; background: #130b20f2; border-bottom: 1px solid #ffd04044; box-shadow: 0 6px 30px rgba(0,0,0,.45); }
 #stBar .logo { font: 900 15px "Segoe UI Black", sans-serif; letter-spacing: 3px; color: #ffd040; text-shadow: 0 2px 0 #5a2a8a; white-space: nowrap; margin-right: 6px; }
 #stBar .sep { width: 1px; height: 24px; background: #3a2c55; }
-#stBar .grow { flex: 1; }
+#stBar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; } /* Save, Release and Play stay together, on the next line if the window is narrow */
+@media (max-width: 1500px) { #stBar { gap: 6px 7px; } #stBar .stB small { display: none; } #stBar .logo { letter-spacing: 1.5px; font-size: 13px; } #stIsle { max-width: 190px; } #stFog { max-width: 130px; } #stWx { max-width: 90px; } }
+@media (max-width: 1100px) { #stClock { width: 70px !important; } #stBar .logo { font-size: 12px; } }
 .stB { cursor: pointer; background: #2a2040; color: #e8dcff; border: 1px solid #44365f; border-radius: 8px; padding: 6px 10px; font: 700 12px "Segoe UI"; white-space: nowrap; }
 .stB:hover { border-color: #ffd040; color: #ffd040; } .stB.on { background: #ffd040; color: #1a0e00; border-color: #ffd040; }
 .stB.go { background: #2a6a3a; border-color: #4aaa6a; color: #eaffef; } .stB.go:hover { color: #fff; border-color: #8affb0; }
@@ -52,11 +54,11 @@ body:not(.studio-edit) .st { display: none !important; }
 .stIn[type=number] { width: 74px; } .stIn[type=color] { width: 38px; height: 28px; padding: 1px 2px; }
 .stTa { width: 100%; resize: vertical; min-height: 54px; font: 600 13px "Segoe UI"; }
 #stSave.dirty::after { content: " ●"; color: #ffd040; }
-#stLeft, #stRight { top: 54px; bottom: 44px; width: 330px; background: #150d24ee; border: 1px solid #3a2c55; border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+#stLeft, #stRight { top: calc(var(--barH, 46px) + 8px); bottom: 44px; width: 330px; background: #150d24ee; border: 1px solid #3a2c55; border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
 #stLeft { left: 8px; } #stRight { right: 8px; width: 300px; }
 #stRight.empty { display: none !important; }
 .stTabs { display: flex; gap: 4px; padding: 10px 10px 0; }
-.stTabs .stB { flex: 1; padding: 6px 3px; }
+.stTabs .stB { flex: 1; padding: 6px 2px; font-size: 11px; }
 .stBody { flex: 1; overflow-y: auto; padding: 10px; }
 .stBody::-webkit-scrollbar { width: 8px; } .stBody::-webkit-scrollbar-thumb { background: #4a3a6a; border-radius: 4px; }
 .stH { font: 800 11px "Segoe UI"; letter-spacing: 2.5px; color: #8a7aa8; margin: 12px 0 7px; display: flex; justify-content: space-between; align-items: center; }
@@ -76,11 +78,11 @@ body:not(.studio-edit) .st { display: none !important; }
 .stClaude .stH { margin-top: 0; color: #c8a0ff; }
 .stMsg { font: 600 11px "Segoe UI"; margin-top: 6px; min-height: 14px; } .stMsg.bad { color: #ff8a7a; } .stMsg.good { color: #8affb0; }
 .stBtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-#stHelp { left: 346px; bottom: 8px; right: 316px; height: 30px; display: flex; align-items: center; justify-content: center; gap: 14px; background: #130b20d8; border: 1px solid #3a2c55; border-radius: 9px; font: 600 11px "Segoe UI"; color: #b8a8d8; overflow: hidden; white-space: nowrap; }
+#stHelp { left: 346px; bottom: 8px; right: 316px; min-height: 30px; display: flex; flex-wrap: wrap; row-gap: 2px; padding: 3px 8px; align-items: center; justify-content: center; gap: 14px; background: #130b20d8; border: 1px solid #3a2c55; border-radius: 9px; font: 600 11px "Segoe UI"; color: #b8a8d8; overflow: hidden; white-space: nowrap; }
 #stHelp b { color: #ffd040; font-weight: 800; }
 #stStatus { top: 56px; left: 50%; transform: translateX(-50%); padding: 6px 14px; background: #130b20e8; border: 1px solid #ffd04066; border-radius: 9px; font: 700 12px "Segoe UI"; opacity: 0; transition: opacity .25s; pointer-events: none; }
 #stStatus.show { opacity: 1; }
-#stRel { top: 54px; bottom: 44px; left: 50%; transform: translateX(-50%); width: min(880px, 94vw); background: #150d24f6; border: 1px solid #ffd04066; border-radius: 14px; display: none; flex-direction: column; box-shadow: 0 20px 80px rgba(0,0,0,.7); z-index: 320; }
+#stRel { top: calc(var(--barH, 46px) + 8px); bottom: 44px; left: 50%; transform: translateX(-50%); width: min(880px, 94vw); background: #150d24f6; border: 1px solid #ffd04066; border-radius: 14px; display: none; flex-direction: column; box-shadow: 0 20px 80px rgba(0,0,0,.7); z-index: 320; }
 #stRel.show { display: flex; }
 #stRel .stBody { padding: 16px 20px; }
 .relHead { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 0; }
@@ -120,14 +122,14 @@ bar.innerHTML = `<div class="logo">TREE SIM 4 STUDIO <span id="stVer" style="fon
   <label title="Time of day">🕑 <input class="stIn" id="stClock" type="range" min="0" max="24" step="0.25" style="width:110px;vertical-align:middle"></label>
   <select class="stSel" id="stWx" title="Weather"><option value="clear">Clear</option><option value="cloudy">Cloudy</option><option value="rain">Rain</option><option value="storm">Storm</option><option value="fog">Fog</option></select>
   <select class="stSel" id="stFog" title="How much of the game's fog the editor shows (play-testing always uses the real fog)"><option value="light">Editor fog: light</option><option value="off">Editor fog: off</option><option value="game">Editor fog: as in game</option></select>
-  <div class="grow"></div>
+  <div class="right">
   <button class="stB" id="stUndo" title="Undo (Ctrl+Z)">↶</button><button class="stB" id="stRedo" title="Redo (Ctrl+Y)">↷</button>
   <label class="stHint" style="margin:0;opacity:.8"><input type="checkbox" id="stAuto"> autosave</label>
   <button class="stB" id="stSave" title="Save to content/, with a copy in Documents\Tree Sim 4 Studio that updates never touch (Ctrl+S)">Save</button>
   <button class="stB" id="stRelBtn" title="Ship an update to players">🚀 Release</button>
-  <button class="stB go" id="stPlay" title="Play-test from the camera (F5)">▶ Play <small>F5</small></button>`;
+  <button class="stB go" id="stPlay" title="Play-test from the camera (F5)">▶ Play <small>F5</small></button></div>`;
 const left = document.createElement("div"); left.id = "stLeft"; left.className = "st";
-left.innerHTML = `<div class="stTabs"><button class="stB on" data-tab="place">Place</button><button class="stB" data-tab="props">Props</button><button class="stB" data-tab="animals">Animals</button><button class="stB" data-tab="trees">Trees</button><button class="stB" data-tab="islands">Islands</button></div><div class="stBody" id="stLeftBody"></div>`;
+left.innerHTML = `<div class="stTabs"><button class="stB on" data-tab="place">Place</button><button class="stB" data-tab="props">Props</button><button class="stB" data-tab="animals">Animals</button><button class="stB" data-tab="people">People</button><button class="stB" data-tab="trees">Trees</button><button class="stB" data-tab="islands">Islands</button></div><div class="stBody" id="stLeftBody"></div>`;
 const right = document.createElement("div"); right.id = "stRight"; right.className = "st empty";
 right.innerHTML = `<div class="stBody" id="stInsp"></div>`;
 const help = document.createElement("div"); help.id = "stHelp"; help.className = "st";
@@ -195,7 +197,7 @@ function groundHit(mx, my) {
     }
     return null;
 }
-const islandRecs = () => T.placed.filter(p => +p.o.isle === curIsle() && p.o.id !== "__pm"); // not the Prop Maker's preview
+const islandRecs = () => T.placed.filter(p => +p.o.isle === curIsle() && !String(p.o.id).startsWith("__")); // not the Makers' previews
 function pickPlaced(mx, my) {
     setRay(mx, my);
     const recs = islandRecs(), hits = ray.intersectObjects(recs.map(p => p.g), true);
@@ -267,10 +269,10 @@ function doRedo() { if (!redo.length) { say("Nothing to redo"); return; } undo.p
 
 // ---------- saving ----------
 let islands = (Array.isArray(T.CONTENT_ISLANDS) ? T.CONTENT_ISLANDS : []).map(d => JSON.parse(JSON.stringify(d)));
-let islandsDirty = false, propsDirty = false, animalsDirty = false;
+let islandsDirty = false, propsDirty = false, animalsDirty = false, peopleDirty = false;
 function changed(what = "world") {
-    if (what === "world") worldDirty = true; else if (what === "trees") treesDirty = true; else if (what === "props") propsDirty = true; else if (what === "animals") animalsDirty = true; else islandsDirty = true;
-    $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty);
+    if (what === "world") worldDirty = true; else if (what === "trees") treesDirty = true; else if (what === "props") propsDirty = true; else if (what === "animals") animalsDirty = true; else if (what === "people") peopleDirty = true; else islandsDirty = true;
+    $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty || peopleDirty);
     clearTimeout(saveT);
     if ($("stAuto").checked) saveT = setTimeout(() => saveAll(true), 1500);
 }
@@ -282,9 +284,10 @@ async function saveAll(quiet) {
     if (islandsDirty) jobs.push(S.save("islands", islands).then(r => { if (r.ok) islandsDirty = false; return r; }));
     if (propsDirty) jobs.push(S.save("props", myProps).then(r => { if (r.ok) propsDirty = false; return r; }));
     if (animalsDirty) jobs.push(S.save("animals", myAnimals).then(r => { if (r.ok) animalsDirty = false; return r; }));
+    if (peopleDirty) jobs.push(S.save("people", myPeople).then(r => { if (r.ok) peopleDirty = false; return r; }));
     if (!jobs.length) { if (!quiet) say("Everything is saved"); return; }
     const res = await Promise.all(jobs), bad = res.find(r => !r.ok);
-    $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty);
+    $("stSave").classList.toggle("dirty", worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty || peopleDirty);
     if (bad) say("Couldn't save: " + bad.error, 5000); else say(quiet ? "Autosaved" : res.every(r => r.kept !== false) ? "Saved to content/ and your Documents" : "Saved to content/ (couldn't copy it to Documents)", quiet ? 900 : 2600);
 }
 
@@ -402,8 +405,8 @@ function renderInspector() {
           <div class="stRow"><label>Text colour</label><span><input class="stIn" type="color" id="iColor" value="${o.color || (o.style === "glow" ? "#ffd040" : "#ffe8c0")}"> <button class="stB" id="iColorReset">reset</button></span></div>
           <div class="stChecks"><label><input type="checkbox" id="iPost"${o.post !== false ? " checked" : ""}> On a post</label></div>`;
     } else if (o.kind === "npc") {
-        h += `<div class="stRow"><label>Look</label><select class="stSel" id="iLook">${Object.keys(T.NPC_LOOKS).map(k => opt(k, o.look || "villager", k[0].toUpperCase() + k.slice(1))).join("")}</select></div>
-          <div class="stRow"><label>Shirt colour</label><span><input class="stIn" type="color" id="iTint" value="${o.col || hexOf(T.NPC_LOOKS[o.look || "villager"].shirt)}"> <button class="stB" id="iTintReset">reset</button></span></div>`;
+        h += `<div class="stRow"><label>Look</label><select class="stSel" id="iLook">${Object.entries(T.NPC_LOOKS).map(([k, L]) => opt(k, o.look || "villager", L.name || k[0].toUpperCase() + k.slice(1))).join("")}</select></div>
+          <div class="stRow"><label>Shirt colour</label><span><input class="stIn" type="color" id="iTint" value="${o.col || hexOf((T.NPC_LOOKS[o.look] || T.NPC_LOOKS.villager).shirt)}"> <button class="stB" id="iTintReset">reset</button></span></div>`;
     } else if (o.kind === "treespot") {
         h += `<div class="stRow"><label>Tree</label><select class="stSel" id="iTree" style="max-width:170px">${Object.entries(T.TYPES).filter(([k, t]) => !t.rush).map(([k, t]) => opt(k, o.tree, t.name)).join("")}</select></div>
           ${num("iTreeH", "Height", o.height || 7, 0.5)}${num("iRegrow", "Grows back (min)", o.regrow || 3, 0.5)}
@@ -500,11 +503,11 @@ function bindInspector(o) {
 }
 
 // ---------- the left panel: Place, Trees, Islands ----------
-let tab = ["trees", "islands", "props", "animals"].includes(pref("tab")) ? pref("tab") : "place";
+let tab = ["trees", "islands", "props", "animals", "people"].includes(pref("tab")) ? pref("tab") : "place";
 let propCat = pref("propCat") || "all", propFind = "";
 function renderLeft() {
     left.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
-    if (tab === "trees") renderTrees(); else if (tab === "islands") renderIslands(); else if (tab === "props" || tab === "animals") renderMaker(); else renderPlace();
+    if (tab === "trees") renderTrees(); else if (tab === "islands") renderIslands(); else if (tab === "props" || tab === "animals") renderMaker(); else if (tab === "people") renderPeople(); else renderPlace();
 }
 function propGrid() {
     const q = propFind.trim().toLowerCase(), list = Object.entries(T.PROPS).filter(([k, p]) => (propCat === "all" || p.cat === propCat) && (!q || p.name.toLowerCase().includes(q) || k.includes(q)));
@@ -536,7 +539,7 @@ function renderObjects() {
 }
 left.addEventListener("click", e => {
     const t = e.target.closest("[data-tab]");
-    if (t) { tab = t.dataset.tab; pref("tab", tab); clearPreview(); pmClearPreview(); partSel = -1; pmAt = null; renderLeft(); if (tab === "trees") showPreview(true); if (makerTab()) pmShowPreview(true); return; }
+    if (t) { tab = t.dataset.tab; pref("tab", tab); clearPreview(); pmClearPreview(); ppClear(); partSel = -1; pmAt = null; renderLeft(); if (tab === "trees") showPreview(true); if (makerTab()) pmShowPreview(true); if (tab === "people") ppShow(true); return; }
     const c = e.target.closest("[data-cat]");
     if (c) { propCat = c.dataset.cat; pref("propCat", propCat); renderPlace(); return; }
     const p = e.target.closest("[data-place]");
@@ -902,7 +905,8 @@ Return JSON with exactly these fields:
  "campName": "1-2 words", "rideLine1": "what you see on the ferry ride", "rideLine2": "the island coming into view", "ferryLine": "what the Ferryman says before you sail", "arrive": "a welcome message"${invent ? `,
  "landmarks": 1-3 new buildings or big structures that make this place special (a lighthouse, a ruined watchtower, a stilt house, a giant mushroom hut...): [{"description": "one sentence: what it is and what it looks like", "dir": 0-359, "dist": 0.3-0.8, "isle": -1 or which isle}],
  "newTrees": 2-3 short descriptions of new trees that only grow here (one sentence each, with their look and mood),
- "newAnimals": 1-2 short descriptions of new animals that only live here (one sentence each)` : ""}}
+ "newAnimals": 1-2 short descriptions of new animals that only live here (one sentence each),
+ "residents": 1-2 short descriptions of people who live here (one sentence each: who they are and how they look)` : ""}}
 Make it match the description and feel distinct.`;
     const r = await S.askClaude({ prompt, system: "You design islands for Hypergamous Tree Chopping Simulator 4, a spooky, cheerful first-person tree-chopping game. Reply with ONLY one JSON object: no prose, no code fences.", model });
     if (!r.ok) { btn.disabled = false; btn.textContent = "Design it with Claude"; msg.className = "stMsg bad"; msg.textContent = r.error; return; }
@@ -944,7 +948,15 @@ Make it match the description and feel distinct.`;
             const p = res.data; p.key = pmKeyFor(MK.props, p.name); myProps.push(p); T.defineCustomProp(p); changed("props"); tok += res.tokens; made++;
             placeOnIsland(n, p.key, L, 1, true);
         }
-        note += ` Invented ${made} new trees, animals and buildings (~${(tok / 1000).toFixed(1)}k tokens in all).`;
+        const rs0 = Array.isArray(j.residents) ? j.residents.filter(s => typeof s === "string" && s.trim()).slice(0, 2) : [];
+        for (const [k, rd] of rs0.entries()) { // people who live there: designed by Claude, then standing about the camp ready to talk
+            say2(`${note} Inventing resident ${k + 1} of ${rs0.length}…`);
+            const res = await claudePerson(rd.slice(0, 300), model);
+            if (!res.ok) continue;
+            const pp = cleanPerson(res.data, starterPerson()); pp.key = ppKey(pp.name); myPeople.push(pp); T.defineCustomPerson(pp); changed("people"); tok += res.tokens; made++;
+            placePerson(n, pp);
+        }
+        note += ` Invented ${made} new trees, animals, buildings and people (~${(tok / 1000).toFixed(1)}k tokens in all).`;
         islandChanged(true, i0);
     }
     btn.disabled = false; btn.textContent = "Design it with Claude";
@@ -1499,6 +1511,164 @@ function bindMaker() {
     pn("ptSx", "sx", 0.02, 20); pn("ptSy", "sy", 0.02, 20); pn("ptSz", "sz", 0.02, 20); pn("ptOp", "opacity", 0.1, 1);
 }
 
+// =====================================================================
+//  the People Maker: new kinds of people (content/people.js): how they look and what they say. By hand, or ask Claude
+// =====================================================================
+let myPeople = (Array.isArray(T.CONTENT_PEOPLE) ? T.CONTENT_PEOPLE : []).filter(p => p && /^p_/.test(p.key)).map(p => JSON.parse(JSON.stringify(p)));
+let ppSel = myPeople[0] ? myPeople[0].key : null, ppPreview = null, ppAt = null, ppT = 0;
+const PO = T.PERSON_OPTS;
+const PLABEL = { hat: { none: "No hat", cap: "Cap", top: "Top hat", crown: "Crown", hood: "Hood", helmet: "Helmet", bandana: "Bandana", beanie: "Beanie", straw: "Straw hat", horns: "Horns", witch: "Witch hat", mask: "Miner's mask" },
+    beardStyle: { none: "No beard", short: "Stubble", full: "Full", goatee: "Goatee", long: "Long" }, held: { none: "Nothing", lantern: "Lantern", staff: "Magic staff", sword: "Sword", book: "Book", torch: "Torch", rod: "Fishing rod", hammer: "Hammer" },
+    anim: { wave: "Waves at you", smith: "Hammers away", witch: "Stirs a cauldron" } };
+const ppCur = () => myPeople.find(p => p.key === ppSel) || null;
+const ppKey = name => { const base = "p_" + slug(name, "person"); let k = base, n = 2; while (T.NPC_LOOKS[k] || myPeople.some(p => p.key === k)) k = base + "_" + n++; return k; };
+function starterPerson() {
+    return { name: "New Person", lines: ["Hello there!", "Lovely day for chopping, isn't it?"], look: { skin: "#f0c8a0", shirt: "#3a6a9a", pants: "#2a2a3a", boots: "#2a1a12", belt: "#2a1a12", wide: 1, size: 1, hairStyle: "short", hair: "#6a4a2a", hat: "none", hatCol: "#2a2a30",
+        beardStyle: "none", beard: "#6a4a2a", held: "none", heldCol: "#8a8a96", anim: "wave", face: { eyes: "round", eyeCol: "#2a5a8a", brows: "normal", mouth: "smile", nose: "small", moustache: "none" } } };
+}
+function ppClear() { if (ppPreview) { T.placedRemove(ppPreview.o); ppPreview = null; } }
+function ppShow(move) {
+    const p = ppCur(); if (!p || tab !== "people" || mode !== "edit") { ppClear(); return; }
+    if (!ppAt || move) { let s = previewSpot(); const f = fwd().setY(0).normalize(); if (Math.hypot(s.x - cam.pos.x, s.z - cam.pos.z) < 3.5) s = { x: cam.pos.x + f.x * 4.5, z: cam.pos.z + f.z * 4.5 }; ppAt = { x: s.x, z: s.z }; }
+    ppClear();
+    ppPreview = T.placedBuild({ id: "__pp", isle: curIsle(), kind: "npc", look: p.key, x: ppAt.x, y: T.groundY(ppAt.x, ppAt.z), z: ppAt.z, rx: 0, ry: Math.atan2(cam.pos.x - ppAt.x, cam.pos.z - ppAt.z), rz: 0, s: 1, solid: false, label: p.name.toUpperCase(), labelCol: "#ffd890" });
+}
+function ppApply(rerender) { // the new look goes into the game: the preview, and everyone of this kind you've placed
+    const p = ppCur(); if (!p) return;
+    changed("people"); clearTimeout(ppT);
+    ppT = setTimeout(() => { T.defineCustomPerson(p); ppShow(); for (const rec of T.placed.slice()) if (rec.o.look === p.key && rec.o.id !== "__pp") T.placedRebuild(rec.o); }, 150);
+    if (rerender) renderPeople();
+}
+function ppFrame() { if (!ppPreview) return; const c = ppPreview.g.position.clone().add(new THREE.Vector3(0, 1.1, 0)), f = fwd().setY(0).normalize(); cam.pos.copy(c).addScaledVector(f, -3.6).add(new THREE.Vector3(0, 0.4, 0)); lookAtPoint(c); }
+function ppNew(base) { const p = base || starterPerson(); p.key = ppKey(p.name); myPeople.push(p); ppSel = p.key; ppAt = null; T.defineCustomPerson(p); changed("people"); renderPeople(); ppShow(true); ppFrame(); }
+function placePerson(n, p) { // a resident: near the camp, facing it, ready to talk
+    const C = T.customIsle(n); if (!C) return false;
+    const spots = [C.SMITH, C.DEPOT, C.WITCH, C.BED, { x: 0, z: -3 }];
+    for (let k = 0; k < 30; k++) {
+        const a = Math.random() * 6.283, d = 13 + Math.random() * 9, x = r3(Math.cos(a) * d), z = r3(Math.sin(a) * d);
+        if (spots.some(s => s && Math.hypot(x - s.x, z - s.z) < 5) || !C.treeOk(x, z)) continue;
+        const o = { id: newId(), isle: n, kind: "npc", look: p.key, x, y: r3(C.groundY(x, z)), z, rx: 0, ry: r3(Math.atan2(-x, -z)), rz: 0, s: 1, solid: true, label: p.name.toUpperCase(), labelCol: "#ffd890", act: { type: "talk", who: p.name, lines: (p.lines || []).length ? p.lines.slice() : ["Hello!"] }, gen: true };
+        world.objects.push(o); T.placedBuild(o); changed("world"); return true;
+    }
+    return false;
+}
+// ---- Ask Claude for a person: one short request, every field checked ----
+function cleanPerson(src, into) {
+    const hex = v => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : null), pick = (k, v, d) => (PO[k].includes(v) ? v : d), numv = (v, a, b, d) => { v = +v; return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : d; };
+    const p = JSON.parse(JSON.stringify(into)), L = (src && src.look) || {}, F = L.face || {};
+    if (typeof src.name === "string" && src.name.trim()) p.name = src.name.trim().slice(0, 32);
+    if (Array.isArray(src.lines)) { const ln = src.lines.filter(s => typeof s === "string" && s.trim()).map(s => s.trim().slice(0, 160)).slice(0, 6); if (ln.length) p.lines = ln; }
+    for (const k of ["skin", "shirt", "pants", "boots", "belt", "hair", "hatCol", "beard", "heldCol"]) if (hex(L[k])) p.look[k] = hex(L[k]);
+    for (const k of ["apron", "vest", "cape", "scarf"]) { if (hex(L[k])) p.look[k] = hex(L[k]); else delete p.look[k]; }
+    p.look.wide = r3(numv(L.wide, 0.7, 1.6, p.look.wide || 1)); p.look.size = r3(numv(L.size, 0.6, 1.5, p.look.size || 1)); p.look.belly = !!L.belly; p.look.ghost = !!L.ghost;
+    for (const k of ["hairStyle", "hat", "beardStyle", "held", "anim"]) p.look[k] = pick(k, L[k], p.look[k] || PO[k][0]);
+    const f = (p.look.face = p.look.face || {});
+    for (const k of ["eyes", "brows", "mouth", "nose", "moustache"]) f[k] = pick(k, F[k], f[k] || PO[k][0]);
+    for (const k of ["eyeCol", "moustacheCol", "paintCol"]) if (hex(F[k])) f[k] = hex(F[k]);
+    for (const k of T.FACE_EXTRAS) f[k] = !!F[k];
+    return p;
+}
+const personPrompt = desc => `Design a person for a spooky, cheerful low-poly tree-chopping game from this description: "${desc}"
+They're chunky little villagers made of boxes. You choose their colours, clothes, hair, hat, beard, what they hold, how they move, their face, and what they say when the player talks to them.
+Return JSON: {"name": "their name, 1-3 words", "lines": 3-5 things they say, in character, short and funny (under 120 characters each),
+ "look": {"skin": "#rrggbb", "shirt": "#rrggbb", "pants": "#rrggbb", "boots": "#rrggbb", "belt": "#rrggbb", "wide": 0.8-1.5 (how broad), "size": 0.7-1.3 (how tall), "belly": bool, "ghost": bool (see-through and glowing),
+  "hairStyle": "${PO.hairStyle.join("|")}", "hair": "#rrggbb", "hat": "${PO.hat.join("|")}", "hatCol": "#rrggbb", "beardStyle": "${PO.beardStyle.join("|")}", "beard": "#rrggbb",
+  "apron": "#rrggbb" or leave it out, "vest": "#rrggbb" or leave it out, "cape": "#rrggbb" or leave it out, "scarf": "#rrggbb" or leave it out,
+  "held": "${PO.held.join("|")}", "heldCol": "#rrggbb", "anim": "wave|smith|witch" (wave = waves at the player, smith = hammers away, witch = stirs a cauldron),
+  "face": {"eyes": "${PO.eyes.join("|")}", "eyeCol": "#rrggbb", "brows": "${PO.brows.join("|")}", "mouth": "${PO.mouth.join("|")}", "nose": "${PO.nose.join("|")}", "moustache": "${PO.moustache.join("|")}", "moustacheCol": "#rrggbb",
+   "glasses": bool, "monocle": bool, "eyepatch": bool, "scar": bool, "freckles": bool, "blush": bool, "stitches": bool, "paint": bool (war paint), "paintCol": "#rrggbb"}}}
+Make them match the description and look distinct.`;
+async function claudePerson(desc, model) {
+    const r = await S.askClaude({ prompt: personPrompt(desc), system: "You design characters for Hypergamous Tree Chopping Simulator 4, a spooky, cheerful first-person tree-chopping game. Reply with ONLY one JSON object: no prose, no code fences.", model });
+    if (!r.ok) return { ok: false, error: r.error };
+    let j = null; try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
+    if (!j || !j.look) return { ok: false, error: "Claude's answer wasn't a person. Try again or reword it." };
+    return { ok: true, data: j, tokens: r.tokens, ms: r.ms, model: r.model };
+}
+async function askClaudePeople(p) {
+    const desc = ($("ppAsk").value || "").trim(), msg = $("ppAskMsg"), btn = $("ppAskGo");
+    if (!desc) { msg.className = "stMsg bad"; msg.textContent = "Describe the person first."; return; }
+    const model = $("ppModel").value; pref("model", model);
+    btn.disabled = true; btn.textContent = "Claude is dressing them…"; msg.className = "stMsg"; msg.textContent = `Asking ${model}…`;
+    const res = await claudePerson(desc, model);
+    const b2 = $("ppAskGo"); if (b2) { b2.disabled = false; b2.textContent = "Design them with Claude"; }
+    if (!res.ok) { const m = $("ppAskMsg"); if (m) { m.className = "stMsg bad"; m.textContent = res.error; } return; }
+    if (!myPeople.includes(p)) return;
+    Object.assign(p, cleanPerson(res.data, p)); T.defineCustomPerson(p); changed("people");
+    for (const rec of T.placed.slice()) if (rec.o.look === p.key && rec.o.id !== "__pp") T.placedRebuild(rec.o);
+    if (tab === "people" && ppSel === p.key) { renderPeople(); ppShow(); const m2 = $("ppAskMsg"); if (m2) { m2.className = "stMsg good"; m2.textContent = `${p.name}, designed by ${res.model} in ${(res.ms / 1000).toFixed(1)}s · ~${(res.tokens / 1000).toFixed(1)}k tokens`; } $("ppAsk") && ($("ppAsk").value = desc); }
+}
+function renderPeople() {
+    const p = ppCur(), model = pref("model") || "haiku";
+    const sel = (id, k, v, labels) => `<select class="stSel" id="${id}">${PO[k].map(x => opt(x, v, (labels && labels[x]) || x[0].toUpperCase() + x.slice(1))).join("")}</select>`, col = (id, v) => `<input class="stIn" type="color" id="${id}" value="${v || "#808080"}">`;
+    let h = `<div class="stH">MY PEOPLE <small>${myPeople.length ? myPeople.length + " made" : ""}</small></div>
+      <div class="stList">${myPeople.map(q => `<div class="stItem${q.key === ppSel ? " on" : ""}" data-pp="${esc(q.key)}"><span>🧍 ${esc(q.name)}</span><small>${esc(((q.lines || [])[0] || "").slice(0, 26))}</small></div>`).join("") || `<div class="stHint">No people yet. Make one, or describe them and let Claude design them.</div>`}</div>
+      <div class="stBtns"><button class="stB go" id="ppNew">+ New person</button>${p ? `<button class="stB" id="ppDup">Duplicate</button><button class="stB warn" id="ppDel">Delete</button>` : ""}</div>`;
+    if (!p) { $("stLeftBody").innerHTML = h; bindPeople(); return; }
+    const L = p.look, F = L.face || (L.face = {}), swatch = (id, v, label) => `<label style="display:flex;gap:5px;align-items:center">${col(id, v)} ${label}</label>`;
+    h += `<div class="stClaude" style="margin-top:12px"><div class="stH">✦ ASK CLAUDE <select class="stSel" id="ppModel">${opt("haiku", model, "Haiku (cheapest)")}${opt("sonnet", model, "Sonnet")}${opt("opus", model, "Opus")}</select></div>
+        <textarea class="stTa" id="ppAsk" placeholder="Describe a person, e.g. a nervous lighthouse keeper with a huge grey beard and a yellow raincoat"></textarea>
+        <div class="stBtns"><button class="stB" id="ppAskGo" style="flex:1">Design them with Claude</button></div><div class="stMsg" id="ppAskMsg"></div></div>
+      <div class="stH">NAME</div><div class="stRow"><input class="stIn" type="text" id="ppName" value="${esc(p.name)}" style="flex:1"><small style="opacity:.5">${esc(p.key)}</small></div>
+      <div class="stH">WHAT THEY SAY <small>one line per F press</small></div><textarea class="stTa" id="ppLines">${esc((p.lines || []).join("\n"))}</textarea>
+      <div class="stH">BODY</div>
+      <div class="stChecks">${swatch("ppSkin", L.skin, "Skin")}${swatch("ppShirt", L.shirt, "Shirt")}${swatch("ppPants", L.pants, "Trousers")}${swatch("ppBoots", L.boots, "Boots")}${swatch("ppBelt", L.belt, "Belt")}</div>
+      ${num("ppWide", "Build (0.7 thin – 1.6 broad)", L.wide || 1, 0.05)}${num("ppSize", "Height (0.6 – 1.5)", L.size || 1, 0.05)}
+      <div class="stChecks"><label><input type="checkbox" id="ppBelly"${L.belly ? " checked" : ""}> Belly</label><label><input type="checkbox" id="ppGhost"${L.ghost ? " checked" : ""}> Ghost</label></div>
+      <div class="stChecks">${["apron", "vest", "cape", "scarf"].map(k => `<label style="display:flex;gap:5px;align-items:center"><input type="checkbox" data-wear="${k}"${L[k] ? " checked" : ""}> ${k[0].toUpperCase() + k.slice(1)} ${col("ppW_" + k, L[k] || "#7a3a2a")}</label>`).join("")}</div>
+      <div class="stH">HAIR, HAT AND BEARD</div>
+      <div class="stRow"><label>Hair</label><span>${sel("ppHairS", "hairStyle", L.hairStyle || "short")} ${col("ppHair", L.hair)}</span></div>
+      <div class="stRow"><label>Hat</label><span>${sel("ppHat", "hat", L.hat || "none", PLABEL.hat)} ${col("ppHatCol", L.hatCol)}</span></div>
+      <div class="stRow"><label>Beard</label><span>${sel("ppBeardS", "beardStyle", L.beardStyle || "none", PLABEL.beardStyle)} ${col("ppBeard", L.beard)}</span></div>
+      <div class="stH">FACE</div>
+      <div class="stRow"><label>Eyes</label><span>${sel("ppEyes", "eyes", F.eyes || "round")} ${col("ppEyeCol", F.eyeCol || "#2a5a8a")}</span></div>
+      <div class="stRow"><label>Eyebrows</label>${sel("ppBrows", "brows", F.brows || "normal")}</div>
+      <div class="stRow"><label>Mouth</label>${sel("ppMouth", "mouth", F.mouth || "smile")}</div>
+      <div class="stRow"><label>Nose</label>${sel("ppNose", "nose", F.nose || "small")}</div>
+      <div class="stRow"><label>Moustache</label><span>${sel("ppMous", "moustache", F.moustache || "none")} ${col("ppMousCol", F.moustacheCol || L.hair || "#4a2a1a")}</span></div>
+      <div class="stChecks">${T.FACE_EXTRAS.map(k => `<label><input type="checkbox" data-fx="${k}"${F[k] ? " checked" : ""}> ${({ paint: "War paint" })[k] || k[0].toUpperCase() + k.slice(1)}</label>`).join("")}</div>
+      ${F.paint ? `<div class="stRow"><label>War paint colour</label>${col("ppPaint", F.paintCol || "#c03030")}</div>` : ""}
+      <div class="stH">HOLDS AND DOES</div>
+      <div class="stRow"><label>Holds</label><span>${sel("ppHeld", "held", L.held || "none", PLABEL.held)} ${col("ppHeldCol", L.heldCol || "#8a8a96")}</span></div>
+      <div class="stRow"><label>Moves</label>${sel("ppAnim", "anim", L.anim || "wave", PLABEL.anim)}</div>
+      <div class="stH">PREVIEW</div><div class="stBtns"><button class="stB" id="ppHere">Move preview here</button><button class="stB go" id="ppPlace">Place one in the world</button></div>
+      <div class="stHint">Your people are also in the Place tab's Person look list, and Ask Claude can invent residents for an island. Saved in <b>content/people.js</b>.</div>`;
+    $("stLeftBody").innerHTML = h;
+    bindPeople();
+}
+function bindPeople() {
+    const body = $("stLeftBody"), on = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); };
+    body.querySelectorAll("[data-pp]").forEach(it => it.addEventListener("click", () => { ppSel = it.dataset.pp; ppAt = null; renderPeople(); ppShow(true); ppFrame(); }));
+    on("ppNew", "click", () => ppNew());
+    const p = ppCur(); if (!p) return;
+    const L = p.look, F = L.face || (L.face = {});
+    on("ppDup", "click", () => ppNew({ ...JSON.parse(JSON.stringify(p)), name: p.name + " 2" }));
+    on("ppDel", "click", () => {
+        const uses = world.objects.filter(o => o.look === p.key);
+        if (!confirm(`Delete ${p.name}?${uses.length ? ` The ${uses.length} placed in the world become plain villagers.` : ""}`)) return;
+        ppClear(); T.dropCustomPerson(p.key); myPeople = myPeople.filter(q => q !== p);
+        for (const o of uses) { o.look = "villager"; T.placedRebuild(o); }
+        if (uses.length) changed("world");
+        ppSel = myPeople[0] ? myPeople[0].key : null; changed("people"); renderPeople(); ppShow(true);
+    });
+    on("ppAskGo", "click", () => askClaudePeople(p));
+    on("ppName", "input", e => { p.name = e.target.value.slice(0, 32) || "Person"; ppApply(); }); on("ppName", "change", () => renderPeople());
+    on("ppLines", "input", e => { p.lines = e.target.value.split("\n").map(s => s.trim()).filter(Boolean).slice(0, 8); changed("people"); });
+    const c = (id, set) => on(id, "input", e => { set(e.target.value); ppApply(); });
+    c("ppSkin", v => (L.skin = v)); c("ppShirt", v => (L.shirt = v)); c("ppPants", v => (L.pants = v)); c("ppBoots", v => (L.boots = v)); c("ppBelt", v => (L.belt = v));
+    c("ppHair", v => (L.hair = v)); c("ppHatCol", v => (L.hatCol = v)); c("ppBeard", v => (L.beard = v)); c("ppEyeCol", v => (F.eyeCol = v)); c("ppMousCol", v => (F.moustacheCol = v)); c("ppPaint", v => (F.paintCol = v)); c("ppHeldCol", v => (L.heldCol = v));
+    const n2 = (id, k, a, b) => on(id, "input", e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) { L[k] = r3(Math.min(b, Math.max(a, v))); ppApply(); } });
+    n2("ppWide", "wide", 0.7, 1.6); n2("ppSize", "size", 0.6, 1.5);
+    on("ppBelly", "change", e => { L.belly = e.target.checked; ppApply(); }); on("ppGhost", "change", e => { L.ghost = e.target.checked; ppApply(); });
+    body.querySelectorAll("[data-wear]").forEach(b => b.addEventListener("change", () => { const k = b.dataset.wear; if (b.checked) L[k] = $("ppW_" + k).value; else delete L[k]; ppApply(); }));
+    for (const k of ["apron", "vest", "cape", "scarf"]) on("ppW_" + k, "input", e => { if (L[k]) { L[k] = e.target.value; ppApply(); } });
+    const s = (id, set) => on(id, "change", e => { set(e.target.value); ppApply(); });
+    s("ppHairS", v => (L.hairStyle = v)); s("ppHat", v => (L.hat = v)); s("ppBeardS", v => (L.beardStyle = v)); s("ppEyes", v => (F.eyes = v)); s("ppBrows", v => (F.brows = v)); s("ppMouth", v => (F.mouth = v)); s("ppNose", v => (F.nose = v)); s("ppMous", v => (F.moustache = v)); s("ppHeld", v => (L.held = v)); s("ppAnim", v => (L.anim = v));
+    body.querySelectorAll("[data-fx]").forEach(b => b.addEventListener("change", () => { F[b.dataset.fx] = b.checked; ppApply(b.dataset.fx === "paint"); }));
+    on("ppHere", "click", () => { ppShow(true); ppFrame(); });
+    on("ppPlace", "click", () => { ppClear(); tab = "place"; pref("tab", tab); renderLeft(); startPlacing({ kind: "npc", look: p.key, solid: true, label: p.name.toUpperCase(), labelCol: "#ffd890", act: { type: "talk", who: p.name, lines: (p.lines || []).length ? p.lines.slice() : ["Hello!"] } }); say(`Click the ground to place ${p.name}`); });
+}
+
 // ---------- moving what the game built (a bed, a stall, a rock...): saved as "moves" in content/world.js ----------
 let builtMode = false, bsel = null; // bsel: { n, i, o }
 const moveOf = (n, i) => T.MOVES.find(m => +m.isle === n && m.i === i);
@@ -1577,7 +1747,7 @@ function undoStroke() {
 let camSaved = null;
 function play() {
     if (mode !== "edit") return;
-    cancelPlacing(); tc.detach(); clearPreview(); pmClearPreview();
+    cancelPlacing(); tc.detach(); clearPreview(); pmClearPreview(); ppClear();
     T.setSeeAll(false); // new trees grow the way players see them
     camSaved = { pos: cam.pos.clone(), yaw: cam.yaw, pitch: cam.pitch };
     mode = "play";
@@ -1599,6 +1769,7 @@ function stop() {
     if (sel) select(sel);
     if (tab === "trees") showPreview();
     if (makerTab()) pmShowPreview();
+    if (tab === "people") ppShow();
     syncBar();
 }
 
@@ -1783,7 +1954,7 @@ function closeRelease() { if (R.busy) { say("Hang on: the release is still going
 // ---------- islands, time, weather ----------
 function goIsle(id) {
     const e = ISLES().find(q => q.id === id); if (!e) return;
-    deselect(); cancelPlacing(); clearPreview(); previewAt = null; pmClearPreview(); pmAt = null;
+    deselect(); cancelPlacing(); clearPreview(); previewAt = null; pmClearPreview(); pmAt = null; ppClear(); ppAt = null;
     const enter = e.isle >= T.CI_BASE ? () => T.enterCI(T.customIsle(e.isle)) : [null, T.enterIsle1, T.enterIsle2, T.enterIsle3, T.enterIsle4, T.enterIsle5, T.enterIsle6][e.isle];
     if (curIsle() !== e.isle) enter();
     if (e.arch && T.getArch() !== e.arch) T.setArch5(e.arch, true);
@@ -1791,6 +1962,7 @@ function goIsle(id) {
     overview(e);
     renderLeft(); syncBar();
     if (makerTab()) pmShowPreview(true);
+    if (tab === "people") ppShow(true);
     say("Now editing " + e.name);
 }
 function syncBar() {
@@ -1813,7 +1985,7 @@ $("stFog").value = fogMode;
 $("stFog").addEventListener("change", e => { fogMode = e.target.value; pref("fog", fogMode); e.target.blur(); });
 $("stUndo").addEventListener("click", doUndo); $("stRedo").addEventListener("click", doRedo);
 $("stAuto").checked = pref("auto") !== "0";
-$("stAuto").addEventListener("change", e => { pref("auto", e.target.checked ? "1" : "0"); if (e.target.checked && (worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty)) saveAll(true); });
+$("stAuto").addEventListener("change", e => { pref("auto", e.target.checked ? "1" : "0"); if (e.target.checked && (worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty || peopleDirty)) saveAll(true); });
 $("stSave").addEventListener("click", () => saveAll(false));
 $("stPlay").addEventListener("click", play);
 $("stRelBtn").addEventListener("click", openRelease);
@@ -1896,6 +2068,8 @@ for (const tr of trees) T.defineCustomTree(tr);
 regrowHere(); // the game grew this forest before the Studio started, with only the trees your axe allows
 if (tab === "trees") showPreview(true);
 if (makerTab()) pmShowPreview(true);
+if (tab === "people") ppShow(true);
+{ const syncBarH = () => document.documentElement.style.setProperty("--barH", bar.offsetHeight + "px"); new ResizeObserver(syncBarH).observe(bar); syncBarH(); } // the panels start below the bar, however many rows it wraps onto
 S.info().then(i => {
     if (i.version) { $("stVer").textContent = i.version; document.title = "Tree Sim 4 Studio " + i.version; }
     if (!i.claude) say("Claude Code wasn't found, so Ask Claude is off. Everything else works.", 6000);
@@ -1923,4 +2097,4 @@ S.wsStatus().then(st => {
     $("wsOpen").addEventListener("click", e => { e.preventDefault(); S.wsOpen(); });
 });
 say("Tree Sim 4 Studio · right-drag to look around, F5 to play", 3500);
-window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get animals() { return myAnimals; }, get partSel() { return partSel; }, get treeGroup() { return treeGroup; }, pmNew, pmSelectPart, cleanProp, cleanAnimal, cleanIsland, migrateIsland, newIsland, islandChanged, claudeBuild, regrowHere, addAnimalToIsland, renderIslands, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };
+window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get animals() { return myAnimals; }, get people() { return myPeople; }, cleanPerson, ppNew, placePerson, get partSel() { return partSel; }, get treeGroup() { return treeGroup; }, pmNew, pmSelectPart, cleanProp, cleanAnimal, cleanIsland, migrateIsland, newIsland, islandChanged, claudeBuild, regrowHere, addAnimalToIsland, renderIslands, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };

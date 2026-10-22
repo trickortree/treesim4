@@ -6,6 +6,7 @@ import CONTENT_WORLD from "./content/world.js";
 import CONTENT_ISLANDS from "./content/islands.js";
 import CONTENT_PROPS from "./content/props.js";
 import CONTENT_ANIMALS from "./content/animals.js";
+import CONTENT_PEOPLE from "./content/people.js";
 
 // =====================================================================
 //  TS4 test 3: day/night, rare trees, shop, landmarks, chests, contracts
@@ -643,8 +644,8 @@ function lightsFrame() {
     if (lpN++ % 60 === 0) scene.traverse(o => { if (o.isPointLight && !o.userData.pool && o !== lantern && !vLights.has(o)) { vLights.add(o); o.layers.set(5); } }); // off the camera's layer: no longer drawn directly
     const cp = camera.position; lpCand.length = 0;
     for (const L of vLights) {
-        if (!L.parent) { vLights.delete(L); continue; }
-        let on = L.intensity > 0; for (let o = L; on && o; o = o.parent) if (!o.visible) on = false;
+        let on = L.intensity > 0, root = L; for (let o = L; o; o = o.parent) { if (!o.visible) on = false; root = o; }
+        if (root !== scene) { vLights.delete(L); continue; } // taken out of the world (with whatever it hung from): it stops shining
         if (!on) continue;
         L.getWorldPosition(lpV); const reach = L.distance > 0 ? L.distance : 80, d = lpV.distanceTo(cp);
         if (d > reach + 30) continue;
@@ -4763,12 +4764,14 @@ function npcFaceTex(kind) {
 // a proper little person: legs, boots, torso, two swinging arms, a head with a face, hair, beard and hat
 const npcs = [];
 function makeHumanoid(o) {
-    const g = new THREE.Group(), sk = lamb(o.skin), sh = lamb(o.shirt), pa = lamb(o.pants), bo = lamb(0x2a1a12), W = o.wide || 1;
+    const g = new THREE.Group(), sk = lamb(o.skin), sh = lamb(o.shirt), pa = lamb(o.pants), bo = lamb(o.boots !== undefined ? o.boots : 0x2a1a12), W = o.wide || 1;
     const box = (par, m, x, y, z, sx, sy, sz) => part(par, BOX, m, x, y, z, sx, sy, sz);
     for (const sd of [-1, 1]) { box(g, pa, sd * 0.15 * W, 0.48, 0, 0.24 * W, 0.86, 0.26); box(g, bo, sd * 0.15 * W, 0.09, 0.05, 0.27 * W, 0.18, 0.36); }
-    box(g, lamb(0x2a1a12), 0, 0.93, 0, 0.6 * W, 0.1, 0.32);
+    box(g, lamb(o.belt !== undefined ? o.belt : 0x2a1a12), 0, 0.93, 0, 0.6 * W, 0.1, 0.32);
     const torso = new THREE.Group(); torso.position.y = 0.95; g.add(torso);
     box(torso, sh, 0, 0.38, 0, 0.62 * W, 0.74, 0.36);
+    if (o.cape !== undefined) { const c = box(torso, lamb(o.cape), 0, 0.12, -0.22, 0.7 * W, 1.12, 0.05); c.rotation.x = 0.1; }
+    if (o.scarf !== undefined) { box(torso, lamb(o.scarf), 0, 0.74, 0.02, 0.5 * W, 0.12, 0.42); box(torso, lamb(o.scarf), 0.13, 0.52, 0.2, 0.12, 0.34, 0.04); }
     if (o.belly) part(torso, ICO, sh, 0, 0.26, 0.1, 0.34 * W, 0.3, 0.26);
     if (o.apron) { box(torso, lamb(o.apron), 0, 0.2, 0.2, 0.52 * W, 0.92, 0.04); box(torso, lamb(o.apron), 0, 0.62, 0.19, 0.36 * W, 0.3, 0.03); }
     if (o.vest) for (const sd of [-1, 1]) box(torso, lamb(o.vest), sd * 0.17 * W, 0.38, 0.185, 0.24 * W, 0.72, 0.03);
@@ -4783,13 +4786,93 @@ function makeHumanoid(o) {
     box(head, sk, 0, 0.0, 0, 0.44, 0.48, 0.42);
     box(head, sk, 0, -0.02, 0.24, 0.08, 0.11, 0.07);
     for (const sd of [-1, 1]) box(head, sk, sd * 0.23, 0, 0, 0.05, 0.12, 0.09);
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.48), new THREE.MeshBasicMaterial({ map: npcFaceTex(o.face), transparent: true })); face.position.z = 0.214; head.add(face);
-    if (o.hair) { box(head, lamb(o.hair), 0, 0.22, -0.02, 0.47, 0.1, 0.46); box(head, lamb(o.hair), 0, 0.04, -0.2, 0.47, 0.4, 0.08); for (const sd of [-1, 1]) box(head, lamb(o.hair), sd * 0.225, 0.1, -0.05, 0.04, 0.22, 0.3); }
-    if (o.beard) { box(head, lamb(o.beard), 0, -0.24, 0.12, 0.44, 0.18, 0.2); box(head, lamb(o.beard), 0, -0.38, 0.15, 0.32, 0.16, 0.14); }
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.48), new THREE.MeshBasicMaterial({ map: o.faceSpec ? faceSpecTex(o.faceSpec) : npcFaceTex(o.face), transparent: true })); face.position.z = 0.214; head.add(face);
+    const hs = o.hairStyle || "short", hm = o.hair !== undefined ? lamb(o.hair) : null;
+    if (hm && hs !== "bald") {
+        if (hs !== "mohawk" && hs !== "spiky") box(head, hm, 0, 0.22, -0.02, 0.47, 0.1, 0.46);
+        if (hs === "short" || hs === "bun") { box(head, hm, 0, 0.04, -0.2, 0.47, 0.4, 0.08); for (const sd of [-1, 1]) box(head, hm, sd * 0.225, 0.1, -0.05, 0.04, 0.22, 0.3); }
+        if (hs === "long") { box(head, hm, 0, -0.12, -0.21, 0.5, 0.74, 0.1); for (const sd of [-1, 1]) box(head, hm, sd * 0.235, -0.06, -0.06, 0.05, 0.6, 0.32); }
+        if (hs === "bun") part(head, ICO, hm, 0, 0.3, -0.2, 0.15, 0.15, 0.15);
+        if (hs === "mohawk") box(head, hm, 0, 0.33, -0.02, 0.1, 0.22, 0.48);
+        if (hs === "spiky") for (let k = 0; k < 6; k++) { const c = part(head, CONE6, hm, ((k % 3) - 1) * 0.14, 0.32, k < 3 ? 0.08 : -0.12, 0.08, 0.24, 0.08); c.rotation.z = ((k % 3) - 1) * -0.35; }
+    }
+    const bs = o.beardStyle || "full", bm = o.beard !== undefined ? lamb(o.beard) : null;
+    if (bm) {
+        if (bs === "full" || bs === "long") { box(head, bm, 0, -0.24, 0.12, 0.44, 0.18, 0.2); box(head, bm, 0, -0.38, 0.15, 0.32, 0.16, 0.14); }
+        if (bs === "long") box(head, bm, 0, -0.62, 0.17, 0.26, 0.36, 0.1);
+        if (bs === "short") box(head, bm, 0, -0.25, 0.12, 0.42, 0.1, 0.18);
+        if (bs === "goatee") box(head, bm, 0, -0.3, 0.19, 0.12, 0.16, 0.08);
+    }
     if (o.hat === "cap") { part(head, CYL8, lamb(o.hatCol), 0, 0.28, 0, 0.25, 0.14, 0.25); box(head, lamb(o.hatCol), 0, 0.22, 0.28, 0.42, 0.03, 0.22); }
     if (o.hat === "witch") { const hc = lamb(o.hatCol); part(head, CYL8, hc, 0, 0.27, 0, 0.62, 0.04, 0.62); const cn = part(head, CONE6, hc, 0, 0.62, -0.04, 0.27, 0.72, 0.27); cn.rotation.x = -0.22; part(head, CYL8, new THREE.MeshBasicMaterial({ color: 0xb06aff }), 0, 0.33, 0, 0.29, 0.07, 0.29); }
     if (o.hat === "mask") { const m = box(head, lamb(0x2a2a32), 0, 0.3, 0.06, 0.48, 0.26, 0.08); m.rotation.x = -1.1; const v = box(head, new THREE.MeshBasicMaterial({ color: 0x3a8ac0 }), 0, 0.34, 0.12, 0.3, 0.06, 0.02); v.rotation.x = -1.1; box(head, lamb(0x2a2a32), 0, 0.2, 0, 0.47, 0.06, 0.45); }
-    return { g, head, torso, armL: arms[0], armR: arms[1], kind: o.face, ph: Math.random() * 6, swing: 0, cyc: 0 };
+    // the hats a Studio person can wear (the game's own people use cap, witch and mask above)
+    const hc = o.hatCol !== undefined ? lamb(o.hatCol) : lamb(0x2a2a30);
+    if (o.hat === "top") { part(head, CYL8, hc, 0, 0.46, 0, 0.26, 0.42, 0.26); part(head, CYL8, hc, 0, 0.26, 0, 0.42, 0.03, 0.42); part(head, CYL8, lamb(0x8a1a1a), 0, 0.3, 0, 0.27, 0.06, 0.27); }
+    if (o.hat === "crown") { part(head, CYL8, glowM(0xffd040), 0, 0.3, 0, 0.25, 0.12, 0.25); for (let k = 0; k < 5; k++) { const a = (k / 5) * 6.283; part(head, CONE6, glowM(0xffd040), Math.cos(a) * 0.2, 0.42, Math.sin(a) * 0.2, 0.06, 0.14, 0.06); } part(head, ICO, glowM(0xff3a5a), 0, 0.31, 0.25, 0.04, 0.04, 0.04); }
+    if (o.hat === "hood") { box(head, hc, 0, 0.28, -0.02, 0.54, 0.1, 0.52); box(head, hc, 0, 0.02, -0.25, 0.54, 0.62, 0.06); for (const sd of [-1, 1]) box(head, hc, sd * 0.26, 0.02, -0.02, 0.05, 0.62, 0.5); const t = part(head, CONE6, hc, 0, 0.24, -0.34, 0.14, 0.3, 0.14); t.rotation.x = -1.2; }
+    if (o.hat === "helmet") { part(head, CAPG, hc, 0, 0.12, 0, 0.27, 0.3, 0.27); box(head, hc, 0, 0.12, 0, 0.58, 0.04, 0.56); }
+    if (o.hat === "bandana") { box(head, hc, 0, 0.18, 0, 0.48, 0.09, 0.46); box(head, hc, 0, 0.12, -0.26, 0.12, 0.16, 0.06); }
+    if (o.hat === "beanie") { part(head, CAPG, hc, 0, 0.16, 0, 0.26, 0.24, 0.26); part(head, ICO, lamb(0xf2f2f2), 0, 0.42, 0, 0.07, 0.07, 0.07); }
+    if (o.hat === "straw") { part(head, CYL8, hc, 0, 0.26, 0, 0.62, 0.03, 0.62); part(head, CYL8, hc, 0, 0.34, 0, 0.24, 0.16, 0.24); }
+    if (o.hat === "horns") for (const sd of [-1, 1]) { const c = part(head, CONE6, hc, sd * 0.2, 0.32, 0, 0.07, 0.3, 0.07); c.rotation.z = -sd * 0.6; }
+    // something in the right hand
+    let hammer = null;
+    if (o.held) {
+        const hand = new THREE.Group(); hand.position.set(0, -0.64, 0.05); arms[1].add(hand); const hd = lamb(o.heldCol !== undefined ? o.heldCol : 0x8a8a96), wd = lamb(0x6a4a2a);
+        if (o.held === "lantern") { box(hand, lamb(0x2a2a30), 0, -0.14, 0.08, 0.16, 0.2, 0.16); box(hand, glowM(0xffc060), 0, -0.14, 0.08, 0.1, 0.14, 0.1); }
+        if (o.held === "staff") { part(hand, CYL6, wd, 0, 0.2, 0.08, 0.04, 1.6, 0.04); part(hand, ICO, glowM(o.heldCol !== undefined ? o.heldCol : 0x7affef), 0, 1.04, 0.08, 0.1, 0.1, 0.1); }
+        if (o.held === "sword") { box(hand, hd, 0, 0.32, 0.08, 0.06, 0.7, 0.02); box(hand, lamb(0x6a4a2a), 0, -0.06, 0.08, 0.2, 0.04, 0.05); }
+        if (o.held === "book") box(hand, hd, 0, -0.08, 0.12, 0.18, 0.24, 0.07);
+        if (o.held === "torch") { part(hand, CYL6, wd, 0, 0.08, 0.08, 0.05, 0.5, 0.05); part(hand, CONE6, glowM(0xff8a2a), 0, 0.42, 0.08, 0.08, 0.2, 0.08); }
+        if (o.held === "rod") { const r = part(hand, CYL6, wd, 0, 0.5, 0.2, 0.02, 1.4, 0.02); r.rotation.x = 0.5; }
+        if (o.held === "hammer") { part(hand, BOX, wd, 0, 0, 0.22, 0.05, 0.05, 0.5); hammer = part(hand, BOX, hd, 0, 0, 0.48, 0.24, 0.13, 0.13); }
+    }
+    if (o.size) g.scale.setScalar(o.size);
+    return { g, head, torso, armL: arms[0], armR: arms[1], kind: o.anim || o.face, ph: Math.random() * 6, swing: 0, cyc: 0, hammer };
+}
+// a Studio person's face, drawn from parts: eyes, brows, nose, mouth, a moustache, and extras like glasses or war paint
+const faceSpecCache = {};
+function faceSpecTex(s) {
+    const key = JSON.stringify(s); if (faceSpecCache[key]) return faceSpecCache[key];
+    const cv = document.createElement("canvas"); cv.width = 128; cv.height = 140;
+    const g = cv.getContext("2d"), col = (v, d) => (/^#[0-9a-f]{6}$/i.test(String(v)) ? v : d), ec = col(s.eyeCol, "#2a5a8a"), hair = col(s.hairCol, "#4a2a1a");
+    if (s.blush) { g.fillStyle = "rgba(255,110,120,.4)"; g.fillRect(16, 72, 20, 12); g.fillRect(92, 72, 20, 12); }
+    if (s.freckles) { g.fillStyle = "rgba(120,60,30,.55)"; for (const [x, y] of [[22, 70], [30, 76], [25, 83], [98, 70], [106, 76], [101, 83], [58, 72], [68, 70]]) g.fillRect(x, y, 3, 3); }
+    if (s.paint) { g.fillStyle = col(s.paintCol, "#c03030"); for (const x of [26, 90]) { g.fillRect(x - 8, 68, 22, 5); g.fillRect(x - 6, 76, 18, 5); } }
+    const E = s.eyes || "round", eye = x => {
+        const y = 56;
+        if (E === "closed") { g.fillStyle = "#222"; g.fillRect(x - 10, y, 20, 4); return; }
+        if (E === "glow") { g.fillStyle = ec; g.fillRect(x - 10, y - 7, 20, 14); g.fillStyle = "#fff"; g.fillRect(x - 3, y - 3, 6, 6); return; }
+        const h = E === "sleepy" ? 7 : E === "wide" ? 16 : 12;
+        g.fillStyle = "#fff"; g.fillRect(x - 9, y - h / 2, 18, h); g.fillStyle = ec; g.fillRect(x - 4, y - h / 2 + 1, 8, h - 2); g.fillStyle = "#000"; g.fillRect(x - 2, y - 2, 4, 4);
+        if (E === "angry") { g.fillStyle = "#000"; g.save(); g.translate(x, y - 7); g.rotate(x < 64 ? 0.35 : -0.35); g.fillRect(-11, -2, 22, 5); g.restore(); }
+    };
+    if (!s.eyepatch) { eye(40); eye(88); } else { eye(40); g.fillStyle = "#111"; g.fillRect(74, 44, 30, 26); g.save(); g.translate(64, 40); g.rotate(-0.35); g.fillRect(-64, -2, 128, 4); g.restore(); }
+    const B = s.brows || "normal";
+    if (B !== "none") { g.fillStyle = col(s.browCol, hair); const t = B === "angry" ? 0.28 : B === "worried" ? -0.28 : 0; for (const [x, k] of [[40, 1], [88, -1]]) { g.save(); g.translate(x, 41); g.rotate(t * k); g.fillRect(-14, -3, 28, B === "bushy" ? 10 : 6); g.restore(); } }
+    const N = s.nose || "small";
+    if (N === "small") { g.fillStyle = "rgba(0,0,0,.18)"; g.fillRect(60, 64, 8, 12); }
+    else if (N === "long") { g.fillStyle = "rgba(0,0,0,.25)"; g.beginPath(); g.moveTo(58, 58); g.lineTo(70, 58); g.lineTo(64, 90); g.closePath(); g.fill(); }
+    else if (N === "round") { g.fillStyle = "rgba(200,60,60,.55)"; g.beginPath(); g.arc(64, 72, 9, 0, 7); g.fill(); }
+    const Mo = s.moustache || "none"; g.fillStyle = col(s.moustacheCol, hair);
+    if (Mo === "thin") g.fillRect(44, 86, 40, 4);
+    else if (Mo === "thick") { g.beginPath(); g.moveTo(34, 96); g.quadraticCurveTo(64, 78, 94, 96); g.lineTo(94, 88); g.quadraticCurveTo(64, 76, 34, 88); g.fill(); }
+    else if (Mo === "curly") { g.fillRect(44, 84, 40, 7); g.beginPath(); g.arc(42, 82, 6, 0, 7); g.arc(86, 82, 6, 0, 7); g.fill(); }
+    const M = s.mouth || "smile"; g.strokeStyle = "#3a1010"; g.fillStyle = "#3a1010"; g.lineWidth = 4;
+    if (M === "smile") { g.beginPath(); g.arc(64, 96, 16, 0.2 * Math.PI, 0.8 * Math.PI); g.stroke(); }
+    else if (M === "grin") { g.beginPath(); g.moveTo(38, 98); g.quadraticCurveTo(64, 124, 90, 98); g.closePath(); g.fill(); g.fillStyle = "#f4f0e0"; g.fillRect(44, 99, 40, 6); }
+    else if (M === "frown") { g.beginPath(); g.arc(64, 118, 16, 1.2 * Math.PI, 1.8 * Math.PI); g.stroke(); }
+    else if (M === "open") { g.beginPath(); g.ellipse(64, 104, 12, 9, 0, 0, 7); g.fill(); }
+    else if (M === "flat") g.fillRect(48, 102, 32, 4);
+    else if (M === "fangs") { g.fillRect(44, 100, 40, 5); g.fillStyle = "#fff"; for (const x of [50, 74]) { g.beginPath(); g.moveTo(x, 104); g.lineTo(x + 6, 104); g.lineTo(x + 3, 113); g.closePath(); g.fill(); } }
+    else if (M === "tongue") { g.beginPath(); g.ellipse(64, 102, 12, 8, 0, 0, 7); g.fill(); g.fillStyle = "#e05a7a"; g.fillRect(58, 104, 12, 10); }
+    if (s.glasses) { g.strokeStyle = "#222"; g.lineWidth = 4; g.strokeRect(26, 46, 28, 24); g.strokeRect(74, 46, 28, 24); g.beginPath(); g.moveTo(54, 56); g.lineTo(74, 56); g.stroke(); }
+    if (s.monocle && !s.eyepatch) { g.strokeStyle = "#d8b040"; g.lineWidth = 3; g.beginPath(); g.arc(88, 56, 14, 0, 7); g.stroke(); g.beginPath(); g.moveTo(100, 64); g.lineTo(108, 110); g.stroke(); }
+    if (s.scar) { g.strokeStyle = "rgba(150,50,50,.85)"; g.lineWidth = 3; g.beginPath(); g.moveTo(30, 36); g.lineTo(50, 80); g.stroke(); for (let k = 0; k < 4; k++) { g.beginPath(); g.moveTo(32 + k * 5, 46 + k * 9); g.lineTo(42 + k * 5, 42 + k * 9); g.stroke(); } }
+    if (s.stitches) { g.strokeStyle = "#2a2a2a"; g.lineWidth = 2; g.beginPath(); g.moveTo(70, 20); g.lineTo(100, 34); g.stroke(); for (let k = 0; k < 5; k++) { g.beginPath(); g.moveTo(72 + k * 6, 16 + k * 3); g.lineTo(70 + k * 6, 28 + k * 3); g.stroke(); } }
+    const tex = new THREE.CanvasTexture(cv); tex.magFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace;
+    return (faceSpecCache[key] = tex);
 }
 function updateNpcs(dt, list = npcs) {
     for (const p of list) {
@@ -13957,6 +14040,28 @@ function releaseAnimals(kind, count, x, z) {
 const NPC_LOOKS = { villager: { face: "clerk", skin: 0xf0c8a0, shirt: 0x3a6a9a, pants: 0x2a2a3a, hair: 0x6a4a2a }, smith: { face: "smith", skin: 0xe8b890, shirt: 0x5a3a2a, pants: 0x2a2a3a, apron: 0x3a2a1a, beard: 0x6a4a2a, hat: "cap", hatCol: 0x2a2a30, wide: 1.3, belly: true },
     witch: { face: "witch", skin: 0xc8e0b0, shirt: 0x3a2a5a, pants: 0x1a1a2a, hair: 0x2a1a3a, hat: "witch", hatCol: 0x2a1a3a }, sailor: { face: "clerk", skin: 0xe8c0a0, shirt: 0xf2f2f2, vest: 0x1a3a6a, pants: 0x1a2a4a, hat: "cap", hatCol: 0x1a3a6a, beard: 0xd8d0c8 },
     ghost: { face: "clerk", skin: 0x9fe8ff, shirt: 0x5ab8d8, pants: 0x3a8aa8, hair: 0xd8f8ff, ghost: true }, miner: { face: "smith", skin: 0xe8b890, shirt: 0x6a5a3a, pants: 0x3a3a3a, hat: "mask", beard: 0x3a2a1a } };
+// ---- people made in the Studio's People Maker (content/people.js, keys p_): a look, built like the game's own villagers ----
+const PERSON_OPTS = { hairStyle: ["short", "long", "bun", "mohawk", "spiky", "bald"], hat: ["none", "cap", "top", "crown", "hood", "helmet", "bandana", "beanie", "straw", "horns", "witch", "mask"], beardStyle: ["none", "short", "full", "goatee", "long"],
+    held: ["none", "lantern", "staff", "sword", "book", "torch", "rod", "hammer"], anim: ["wave", "smith", "witch"], eyes: ["round", "sleepy", "wide", "angry", "closed", "glow"], brows: ["normal", "angry", "worried", "bushy", "none"],
+    mouth: ["smile", "grin", "frown", "open", "flat", "fangs", "tongue"], nose: ["small", "long", "round", "none"], moustache: ["none", "thin", "thick", "curly"] };
+const FACE_EXTRAS = ["glasses", "monocle", "eyepatch", "scar", "freckles", "blush", "stitches", "paint"];
+function defineCustomPerson(d) {
+    if (!d || !/^p_[a-z0-9_]+$/.test(String(d.key))) return null;
+    const L = d.look || {}, F = L.face || {}, isHex = v => /^#[0-9a-f]{6}$/i.test(String(v)), hx = (v, dflt) => (isHex(v) ? hexN(v) : dflt), pick = (k, v) => (PERSON_OPTS[k].includes(v) ? v : PERSON_OPTS[k][0]);
+    const look = { name: String(d.name || "Person").slice(0, 32), custom: true, face: "clerk", skin: hx(L.skin, 0xf0c8a0), shirt: hx(L.shirt, 0x3a6a9a), pants: hx(L.pants, 0x2a2a3a), boots: hx(L.boots, 0x2a1a12), belt: hx(L.belt, 0x2a1a12),
+        wide: clamp(+L.wide || 1, 0.7, 1.6), size: clamp(+L.size || 1, 0.6, 1.5), belly: !!L.belly, ghost: !!L.ghost, hairStyle: pick("hairStyle", L.hairStyle), beardStyle: pick("beardStyle", L.beardStyle), anim: pick("anim", L.anim) };
+    if (look.hairStyle !== "bald") look.hair = hx(L.hair, 0x4a2a1a);
+    const hat = pick("hat", L.hat); if (hat !== "none") { look.hat = hat; look.hatCol = hx(L.hatCol, 0x2a2a30); }
+    if (look.beardStyle !== "none") look.beard = hx(L.beard, look.hair !== undefined ? look.hair : 0x4a2a1a);
+    for (const k of ["apron", "vest", "cape", "scarf"]) if (isHex(L[k])) look[k] = hexN(L[k]);
+    const held = pick("held", L.held); if (held !== "none") { look.held = held; look.heldCol = hx(L.heldCol, 0x8a8a96); }
+    look.faceSpec = { eyes: pick("eyes", F.eyes), eyeCol: isHex(F.eyeCol) ? F.eyeCol : "#2a5a8a", brows: pick("brows", F.brows), mouth: pick("mouth", F.mouth), nose: pick("nose", F.nose), moustache: pick("moustache", F.moustache),
+        hairCol: "#" + (look.hair !== undefined ? look.hair : 0x4a2a1a).toString(16).padStart(6, "0"), moustacheCol: isHex(F.moustacheCol) ? F.moustacheCol : undefined, paintCol: isHex(F.paintCol) ? F.paintCol : undefined };
+    for (const k of FACE_EXTRAS) if (F[k]) look.faceSpec[k] = true;
+    return (NPC_LOOKS[d.key] = look);
+}
+function dropCustomPerson(k) { if (/^p_/.test(String(k))) delete NPC_LOOKS[k]; }
+for (const d of Array.isArray(CONTENT_PEOPLE) ? CONTENT_PEOPLE : []) defineCustomPerson(d);
 // a sign's face: a wooden board with carved letters, or the game's dark board with glowing ones
 function signTexture(o) {
     const cv = document.createElement("canvas"); cv.width = 512; cv.height = 256;
@@ -14000,7 +14105,7 @@ function placedBuild(o) {
     else if (o.kind === "npc") {
         const look = { ...(NPC_LOOKS[o.look] || NPC_LOOKS.villager) };
         if (o.col) look.shirt = hexN(o.col);
-        npc = makeHumanoid(look); body.add(npc.g); npc.yaw = +o.ry || 0; r = 0.45; if (look.face === "smith") giveHammer(npc);
+        npc = makeHumanoid(look); body.add(npc.g); npc.yaw = +o.ry || 0; r = 0.45; if (npc.kind === "smith" && !npc.hammer) giveHammer(npc);
         if (look.ghost) body.traverse(m => { if (m.isMesh && m.material && !m.material.map) m.material = fxMat(m.material, "ghost"); });
     } else if (o.kind === "treespot") { if (STUDIO) { pm(body, PTORUS, pglow(0x6dffa0), 0, 0.05, 0, 0.9, 0.9, 0.15, Math.PI / 2); pm(body, CONE6, pglow(0x6dffa0), 0, 0.6, 0, 0.12, 0.8, 0.12); } }
     else { P = PROPS[o.prop] || PROPS.rock; P.make(body, o.col ? hexN(o.col) : P.tint); r = P.r; }
@@ -14033,6 +14138,7 @@ function placedRemove(o) {
     if (i < 0) return;
     const rec = placed[i];
     if (rec.g.parent) rec.g.parent.remove(rec.g);
+    rec.g.traverse(m => { if (m.isPointLight && m.parent) m.parent.remove(m); }); // and its light goes out with it
     if (rec.tex) { rec.tex.dispose(); rec.g.traverse(m => { if (m.isMesh && m.material.map === rec.tex) m.material.dispose(); }); }
     if (rec.label) { rec.label.el.remove(); const j = labelList.indexOf(rec.label); if (j >= 0) labelList.splice(j, 1); }
     if (rec.tree && !rec.tree.gone) { scene.remove(rec.tree.g); rec.tree.gone = true; }
@@ -14213,6 +14319,7 @@ if (STUDIO) {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
         CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, CONTENT_ANIMALS, defineCustomProp, dropCustomProp, PART_SHAPES,
         WILD_KINDS, ANIMAL_ROLES, ANIMAL_WAYS, defineCustomAnimal, dropCustomAnimal, makeCustomAnimal, makePartsGroup, releaseAnimals,
+        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson,
         MOVES, builtinAt, builtinIndexOf, moveHome, placeBuiltin, ciReshape, ciSettle, terrainMesh, wildBy, ABIL, BASE_AXES, ciAxes, RECIPES, GLOW_MATS, resetIsleTrees,
         setSeeAll(v) { studioSeeAll = !!v; }, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,

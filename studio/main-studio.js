@@ -5,8 +5,9 @@ const os = require("os");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 
-const CONTENT = { trees: "trees.js", world: "world.js", islands: "islands.js", props: "props.js", animals: "animals.js" };
+const CONTENT = { trees: "trees.js", world: "world.js", islands: "islands.js", props: "props.js", animals: "animals.js", people: "people.js" };
 const HEADERS = {
+    people: "// People made in Tree Sim 4 Studio's People Maker (npm run studio). The Studio writes this file: make people there.\n// Each person: { key (starts with p_), name, lines, look: { skin, shirt, pants, boots, belt, wide, size, belly, ghost, hairStyle, hair, hat, hatCol, beardStyle, beard, apron, vest, cape, scarf, held, heldCol, anim, face: { eyes, eyeCol, brows, mouth, nose, moustache, glasses, ... } } }\n",
     animals: "// Animals made in Tree Sim 4 Studio's Animal Maker (npm run studio). The Studio writes this file: make animals there.\n// Each animal: { key (starts with a_), name, way, size, speed, run, flee, herd, alt, night, pitch, parts: [{ shape, role, x, y, z, rx, ry, rz, sx, sy, sz, color, glow, opacity }] }\n",
     props: "// Props made in Tree Sim 4 Studio's Prop Maker (npm run studio). The Studio writes this file: make props there.\n// Each prop: { key (starts with u_), name, r, light, parts: [{ shape, x, y, z, rx, ry, rz, sx, sy, sz, color, glow, tint, opacity }] }\n",
     trees: "// Custom trees made in Tree Sim 4 Studio (npm run studio). The Studio writes this file: edit trees there.\n// Each tree's key starts with c_. Colours are \"#rrggbb\". See the vault's \"Tree Designer\" note for every field.\n",
