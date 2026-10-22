@@ -10077,7 +10077,7 @@ function buildCasinoWing() {
     {
         const BW = 3.4, BH = 4.6, bx = CS_X0 + 0.25, cyy = 3.0;
         const tex = csCanvas(256, 340, (g, w, h) => { g.fillStyle = "#0e0818"; g.fillRect(0, 0, w, h); const sp = w / (PL_ROWS + 2); g.fillStyle = "#e8dcff"; for (let r = 0; r < PL_ROWS; r++) for (let k = 0; k <= r + 2; k++) { g.beginPath(); g.arc(w / 2 + (k - (r + 2) / 2) * sp, ((r + 1.1) / (PL_ROWS + 1.6)) * (h - 30), 2.4, 0, 7); g.fill(); } PLINKO.med.forEach((m, k) => { g.fillStyle = plSlotCol(m); g.fillRect(w / 2 + (k - 6) * sp - sp * 0.46, h - 26, sp * 0.92, 22); }); });
-        const board = new THREE.Mesh(new THREE.PlaneGeometry(BW, BH), new THREE.MeshBasicMaterial({ map: tex })); board.position.set(bx, cyy, PLINKO_Z); board.rotation.y = Math.PI / 2; scene.add(board);
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(BW, BH), new THREE.MeshBasicMaterial({ map: tex })); board.position.set(bx + 0.04, cyy, PLINKO_Z); board.rotation.y = Math.PI / 2; scene.add(board); // in front of its gold frame (the frame's face is at bx + 0.01)
         trim.add(BOX, bx - 0.05, cyy, PLINKO_Z, 0, 0, 0, 0.12, BH + 0.3, BW + 0.3); wain.add(BOX, CS_X0 + 0.7, 0.4, PLINKO_Z, 0, 0, 0, 1.2, 0.8, BW);
         wingSign("PLINKO", "#ff5ad8", CS_X0 + 0.12, 6.1, PLINKO_Z, Math.PI / 2, 3.4, 1.0);
         const ballM = new THREE.MeshBasicMaterial({ color: 0xff5ad8 }), live = [];
@@ -13478,24 +13478,30 @@ function makeCI(d, n) {
     C.trees = (Array.isArray(d.trees) ? d.trees : []).filter(k => TYPES[k] && !TYPES[k].custom && !TYPES[k].rush);
     for (const k of C.trees) { const T = TYPES[k]; T.isl = [...(T.isl || [1]).filter(i => i !== n), n]; } // borrowed trees grow here too
     C.fallbackTree = C.trees[0] || Object.keys(TYPES).find(k => TYPES[k].custom && (TYPES[k].isl || []).includes(n)) || "pine";
-    C.lines = [String(d.rideLine1 || "The sea goes quiet. Something new waits ahead..."), String(d.rideLine2 || `${C.name} rises out of the sea.`)];
-    const rb = d.rebirth || {};
-    C.cost = Math.max(0, Math.round(rb.cost === undefined ? 25000000 * Math.pow(2, n - CI_BASE) : +rb.cost));
-    // the ticket asks for materials from the island before. If that's a Studio island with its own, they're swapped for its (rank for rank)
-    const prevC = customIsle(n - 1), tk = k => (prevC && prevC.subMats ? Object.keys(prevC.subMats({ [k]: 1 }))[0] : k);
-    C.items = {}; for (const [k, v] of Object.entries(rb.items || {})) { const k2 = tk(k); if (MATS[k2] && +v > 0) C.items[k2] = (C.items[k2] || 0) + Math.round(+v); }
+    ciMeta(C);
     C.ready = () => save.money >= C.cost && Object.entries(C.items).every(([k, v]) => (save.mats[k] || 0) >= v);
     C.nearest = () => {
         const px = player.pos.x, pz = player.pos.z, near = (p, r) => Math.hypot(px - p.x, pz - p.z) < r;
         if (near(C.SMITH_AT, 3.4)) return { k: "smith" };
         if (near(C.DEPOT_AT, 3.4)) return { k: "depot" };
         if (near(C.WITCH_AT, 3.4)) return { k: "witch" };
-        if (near(C.BED, 3.6)) return { k: "bed" };
+        if (near(C.BED, C.BED_R || 3.6)) return { k: "bed" };
         if (near(C.FERRY, 3.4)) return { k: "ferryC" };
         for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
         return null;
     };
     return C;
+}
+// what an island says on the ferry ride and what its ticket costs: worked out again by the Studio when only those change, with no rebuild
+function ciMeta(C) {
+    const d = C.d, n = C.n;
+    C.name = String(d.name || "New Island").slice(0, 40);
+    C.lines = [String(d.rideLine1 || "The sea goes quiet. Something new waits ahead..."), String(d.rideLine2 || `${C.name} rises out of the sea.`)];
+    const rb = d.rebirth || {};
+    C.cost = Math.max(0, Math.round(rb.cost === undefined ? 25000000 * Math.pow(2, n - CI_BASE) : +rb.cost));
+    // the ticket asks for materials from the island before. If that's a Studio island with its own, they're swapped for its (rank for rank)
+    const prevC = customIsle(n - 1), tk = k => (prevC && prevC.subMats ? Object.keys(prevC.subMats({ [k]: 1 }))[0] : k);
+    C.items = {}; for (const [k, v] of Object.entries(rb.items || {})) { const k2 = tk(k); if (MATS[k2] && +v > 0) C.items[k2] = (C.items[k2] || 0) + Math.round(+v); }
 }
 function buildCI(C) {
     const n = C.n, d = C.d, cols = C.cols, P = C.P, prevB = curBuild, prevAdd = addTgt;
@@ -13546,10 +13552,11 @@ function buildCI(C) {
         // the island's own architecture: any camp building can be one built from parts in the Studio (d.camp: bed, forge, post, witch → prop keys).
         // It stands just behind its spot, facing the fire, so the bed, the keepers and where you stand to use them stay clear
         const own = k => { const B = d.camp && PROPS[d.camp[k]]; return B && B.custom ? B : null; };
-        const ownBuilding = (at, B) => {
-            const len = Math.hypot(at.x, at.z) || 1, r = clamp(B.r || 2.5, 1, 6), x = at.x + (at.x / len) * (r + 0.6), z = at.z + (at.z / len) * (r + 0.6);
-            const g = new THREE.Group(); g.position.set(x, P, z); g.rotation.y = Math.atan2(-x, -z); B.make(g); scene.add(g);
-            circles.push({ x, z, r }); return Math.max(P + 3, new THREE.Box3().setFromObject(g).max.y);
+        const ownBuilding = (at, B) => { // its front (+z) faces the fire, just behind the spot: measured from the model itself, so its keeper stands right at the door
+            const g = new THREE.Group(); B.make(g);
+            const front = Math.max(0.4, new THREE.Box3().setFromObject(g).max.z), back = front + 0.9, len = Math.hypot(at.x, at.z) || 1, x = at.x + (at.x / len) * back, z = at.z + (at.z / len) * back;
+            g.position.set(x, P, z); g.rotation.y = Math.atan2(-x, -z); scene.add(g);
+            circles.push({ x, z, r: Math.min(clamp(B.r || 2.5, 1, 6), back - 0.5) }); return Math.max(P + 3, new THREE.Box3().setFromObject(g).max.y);
         };
         const stallOr = (at, k, a, b, col, roof) => { // the usual stall, or the island's own building with its keeper standing out front
             const B = own(k); if (!B) return { g: stall3(at, a, b, col, roof), y: P + 6.2, z: -0.6 };
@@ -13560,14 +13567,20 @@ function buildCI(C) {
         let hut = own("bed"), bedM = own("bedModel"); if (hut && !bedM && (hut.r || 0) <= 1.6) { bedM = hut; hut = null; }
         if (bedM) hut = null; // a bed of your own stands on its own: no hut or tent round it
         if (hut) ownBuilding(C.BED, hut);
-        else if (!bedM) { // the usual: an A-frame canvas tent over the bed, open at both ends so you can walk in to sleep
+        else if (bedM) scene.add(new THREE.Group()); // nothing round your own bed, but the tent's place is kept: moves saved in the Studio count the island's things in order
+        else { // the usual: an A-frame canvas tent over the bed, open at both ends so you can walk in to sleep
             const tentM = lamb(ciHex(d.colors && d.colors.tent, 0xc89a5a)), tg = new THREE.Group(), th = Math.atan(1.25 / 1.9); tg.position.set(C.BED.x, P, C.BED.z - 0.15); scene.add(tg);
             for (const s of [-1, 1]) part(tg, BOX, tentM, s * 0.64, 0.95, 0, 0.07, 2.27, 2.9, 0, 0, s * th);
             part(tg, CYL6, woodDark, 0, 1.93, 0, 0.06, 3.2, 0.06, Math.PI / 2);
             for (const z of [-1.5, 1.5]) part(tg, CYL6, woodDark, 0, 0.97, z, 0.06, 1.94, 0.06);
         }
         const bed = new THREE.Group(); bed.position.set(C.BED.x, P, C.BED.z); scene.add(bed);
-        if (bedM) { bed.rotation.y = Math.atan2(-C.BED.x, -C.BED.z); bedM.make(bed); } // you walk up to it to sleep, so it stays walk-through
+        if (bedM) { // your own bed: you bump into it like the model it is, and can sleep from anywhere round its edge
+            bed.rotation.y = Math.atan2(-C.BED.x, -C.BED.z); bedM.make(bed);
+            const bb = new THREE.Box3().setFromObject(bed), half = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2, br = clamp(+bedM.r || 0, 0, 6);
+            if (br > 0) circles.push({ x: C.BED.x, z: C.BED.z, r: br });
+            C.BED_R = Math.max(3.6, br + 2, half + 1.5);
+        }
         else { part(bed, BOX, wood, 0, 0.3, 0, 1.4, 0.3, 2.3); part(bed, BOX, lamb(0x8a2a3a), 0, 0.52, -0.3, 1.3, 0.14, 1.5); }
         const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(C.BED.x, Math.max(P + 3.2, new THREE.Box3().setFromObject(bed).max.y + 0.7), C.BED.z);
         const sS = stallOr(C.SMITH, "forge", "THE FORGE", "CRAFT AXES · GUNS", "#ffb060", 0x4a3020), gS = sS.g;
@@ -13871,9 +13884,23 @@ function moveHome(o, n) { // where the game put it, and the collisions and label
         circs: circles.filter(q => inBox(q.x, q.z)).map(q => ({ q, h: { x: q.x, z: q.z } })),
         labels: labelList.filter(l => l.isle === n && inBox(l.position.x, l.position.z)).map(l => ({ l, h: l.position.clone() })) });
 }
+// a move is saved by its thing's place in the island's group (m.i), plus where the game first put it and what it is (m.at, m.sig). If things were added
+// or taken away before it since (a camp building swapped, a tent gone), the move finds its thing again by those instead of landing on its neighbour
+function resolveMove(n, m) {
+    const G = isleGroup(n); if (!G || !Array.isArray(m.at)) return;
+    builtinAt(n, -1);
+    const homeOf = c => (c.userData.home ? c.userData.home.pos : c.position), sigOf = c => c.type + ":" + c.children.length;
+    const fits = c => c && !c.userData.placed && (!m.sig || sigOf(c) === m.sig) && Math.hypot(homeOf(c).x - m.at[0], homeOf(c).z - m.at[1]) < 0.6;
+    if (fits(builtinAt(n, m.i))) return;
+    let best = -1, bd = 0.6;
+    for (let j = 0; j < G.userData.builtN; j++) { const c = G.children[j]; if (!fits(c)) continue; const p = homeOf(c), d = Math.hypot(p.x - m.at[0], p.z - m.at[1]); if (d < bd) { bd = d; best = j; } }
+    if (best >= 0) m.i = best;
+}
 function placeBuiltin(n, m) {
     if (m.i === "ench") { if (isle === n) placeEnchTable(); return isle === n ? enchTable.g : null; } // it reads its move itself, and always stands on the ground
+    resolveMove(n, m);
     const o = builtinAt(n, m.i); if (!o) return null;
+    if (!Array.isArray(m.at)) { const hp = moveHome(o, n).pos; m.at = [Math.round(hp.x * 10) / 10, Math.round(hp.z * 10) / 10]; m.sig = o.type + ":" + o.children.length; } // remember what it is, for next time
     const H = moveHome(o, n), dx = (m.x ?? H.pos.x) - H.pos.x, dy = (m.y ?? H.pos.y) - H.pos.y, dz = (m.z ?? H.pos.z) - H.pos.z, dr = (m.ry ?? H.rot.y) - H.rot.y, k = clamp(+m.s || 1, 0.1, 10);
     o.position.set(H.pos.x + dx, H.pos.y + dy, H.pos.z + dz); o.rotation.set(H.rot.x, H.rot.y + dr, H.rot.z); o.scale.copy(H.scale).multiplyScalar(k);
     o.visible = !m.hide;
@@ -14511,7 +14538,7 @@ if (STUDIO) {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
         CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, CONTENT_ANIMALS, defineCustomProp, dropCustomProp, PART_SHAPES,
         WILD_KINDS, ANIMAL_ROLES, ANIMAL_WAYS, defineCustomAnimal, dropCustomAnimal, makeCustomAnimal, makePartsGroup, releaseAnimals,
-        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson, ISLE_FONTS, openCShop, casinoHome, ROOF_KINDS, getCasino: () => casino, enterCasino, enchTable, builtinLabels,
+        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson, ISLE_FONTS, openCShop, casinoHome, ROOF_KINDS, getCasino: () => casino, enterCasino, enchTable, builtinLabels, ciMeta,
         MOVES, builtinAt, builtinIndexOf, moveHome, placeBuiltin, ciReshape, ciSettle, terrainMesh, wildBy, ABIL, BASE_AXES, ciAxes, RECIPES, GLOW_MATS, resetIsleTrees,
         setSeeAll(v) { studioSeeAll = !!v; }, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,
