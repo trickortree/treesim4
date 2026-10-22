@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -59,7 +59,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.8.0 (REBIRTH 5: THE ICEBERG)\n\n- REBIRTH 5: Port Haven's ferry now sails to THE ICEBERG ($10M + 8 Stormglass). A huge snow plateau on blue ice cliffs, Igloo Camp, Yeti Peak, a frozen lake, falling snow and the aurora at night.\n- New animals: polar bears, penguins and arctic foxes.\n- New trees and 7 new materials, up to Permafrost Cores and Yeti Hearts.\n- BOSS: THE YETI. A giant shaggy tree in his den: ground slams, snowballs, ice spikes, Snowlings and avalanches. Drops Yeti Hearts and big cash, and regrows at dawn.\n- 2 new axes: Frostbite ([Z] Blizzard) and Yeti's Fang ([Z] Yeti Stomp). New gun: the Cryo Cannon, which freezes what it hits.\n- The Casino moved to the Iceberg (it always stands on the newest island) and adds HI-LO and KENO.\n- Abilities now do half damage to bosses."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.9.0 (THE DESERT UPDATE!)\n\n- NEW TREE: the Mirrorbark Saguaro, growing on Glassdune Expanse.\n- NEW TREE: the Lantern Spire, growing on Glassdune Expanse.\n- NEW TREE: the Cinderglass Tamarisk, growing on Glassdune Expanse.\n- REBIRTH 6: GLASSDUNE EXPANSE, Where the sands hum back at the sky. Talk to the Ferryman on the Iceberg to sail there.\n- NEW PROPS: Mega Town Machine, Toppled Relay Tower, Crumbling Caravan Waystation, Sandy Locomotive. Look around!\n- NEW ANIMALS: Chromeback Skink, Vaultfox. Keep an eye out!\n- Glassdune Expanse: 50 new signs and props (look for \"PROPERTY OF MEGA TOWN\").\n- Walkable Archipelago terrain: judge slopes over a stride, slide along cliffs\n\nSTAY TUNED, NEXT UPDATE WILL BE A HUGE ONE."
     }
   }
 }
