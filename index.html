@@ -164,14 +164,14 @@
   /* a Studio island's shops */
   #panelCShop { width: min(640px, 94vw); max-height: 86vh; overflow: auto; }
   #panelCShop h2 { padding-right: 90px; }
-  #csSay { font: italic 14px/1.5 "Segoe UI"; opacity: .85; margin: -6px 0 12px; }
-  #csItems { display: flex; flex-direction: column; gap: 8px; }
-  .csItem { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); }
-  .csIc { font-size: 28px; width: 38px; text-align: center; flex: none; }
-  .csTx { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .csTx b { font: 800 15px "Segoe UI"; color: var(--amber); } .csTx small { font: 13px/1.4 "Segoe UI"; opacity: .8; } .csTx i { font: normal 700 12px Consolas, monospace; color: var(--green); }
-  #panelCShop .csBuy { flex: none; width: 160px; font: 800 14px/1.3 "Segoe UI"; letter-spacing: 1px; padding: 10px 12px; white-space: normal; box-shadow: 0 4px 0 #8a5a00; }
-  #panelCShop .csBuy:disabled { opacity: .45; cursor: default; filter: grayscale(.6); }
+  #shSay { font: italic 14px/1.5 "Segoe UI"; opacity: .85; margin: -6px 0 12px; }
+  #shItems { display: flex; flex-direction: column; gap: 8px; }
+  .shItem { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); }
+  .shIc { font-size: 28px; width: 38px; text-align: center; flex: none; }
+  .shTx { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .shTx b { font: 800 15px "Segoe UI"; color: var(--amber); } .shTx small { font: 13px/1.4 "Segoe UI"; opacity: .8; } .shTx i { font: normal 700 12px Consolas, monospace; color: var(--green); }
+  #panelCShop .shBuy { flex: none; width: 160px; font: 800 14px/1.3 "Segoe UI"; letter-spacing: 1px; padding: 10px 12px; white-space: normal; box-shadow: 0 4px 0 #8a5a00; }
+  #panelCShop .shBuy:disabled { opacity: .45; cursor: default; filter: grayscale(.6); }
   #panelRelic h2 { padding-right: 140px; font-size: 24px; } #relicN { font-size: 18px; color: #fff; opacity: .8; }
   #relicSay { opacity: .8; font-style: italic; margin: 4px 0 12px; }
   #relicGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; width: min(380px, 80vw); aspect-ratio: 509 / 602; margin: 0 auto; background: #120c04; border: 3px solid #ffd040; padding: 4px; }
@@ -552,10 +552,10 @@
 </div>
 <div id="panelCShop" class="panel">
   <button class="xbtn" data-close>✕ <kbd>Esc</kbd></button>
-  <h2 id="csTitle">THE SHOP</h2>
-  <div id="csSay"></div>
-  <div id="csItems"></div>
-  <div class="foot" id="csFoot"></div>
+  <h2 id="shTitle">THE SHOP</h2>
+  <div id="shSay"></div>
+  <div id="shItems"></div>
+  <div class="foot" id="shFoot"></div>
 </div>
 
 <div id="updateModal" class="umodal">

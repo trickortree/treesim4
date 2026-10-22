@@ -975,6 +975,7 @@ Return JSON with exactly these fields:
  "features": up to 12 of {"type": "mountain|hill|spire|crater|plateau|ridge|valley|lake|islet|isle|bay" (islet = a rock in the sea you can't reach; isle = a real walkable island out at sea, joined to the main one by a bridge), "dir": 0-359 (direction from the centre), "dist": 0.35-0.9 (fraction of the radius; islets 1.2-2; isles 1.4-2.6), "bridge": true or false (isles only), "r": size in metres (5-60), "h": height in metres (spires up to 70, hills 5-20), "len": length for ridges and valleys (30-150), "rot": angle of a ridge or valley in degrees, "width": bay width 0.1-1, "depth": bay depth 0.1-0.5, "lava": true for a lava crater, "name": "THE SOMETHING" or ""},
  "props": up to 14 groups of the game's own props to put around the island: [{"prop": a key from this list, "dir": 0-359, "dist": 0.3-0.85, "isle": -1 for the main island, or which "isle" feature (0 for the first isle, 1 for the second...), "count": 1-8}]: ${propChoices()},
  "campName": "1-2 words", "rideLine1": "what you see on the ferry ride", "rideLine2": "the island coming into view", "ferryLine": "what the Ferryman says before you sail", "arrive": "a welcome message",
+ "casino": the casino tower moves to the newest island and is re-skinned for it, outside and in: {"name": "THE SOMETHING (2-4 words, its name)", "tagline": "a short sign line, like OPEN 24/7", "dir": 0-359 (which side of the island it stands on), "roofKind": "spire|dome|crown|flat", "wall": "#rrggbb", "base": "#rrggbb (the plinth)", "trim": "#rrggbb (bands round each tier)", "roof": "#rrggbb", "glow": "#rrggbb (lit windows)", "dim": "#rrggbb (dark windows)", "rock": "#rrggbb (the giant dice and stones round it)", "sign": "#rrggbb (bright neon)", "hall": {"walls": "#rrggbb (the wallpaper's colour inside)", "carpet": "#rrggbb (the carpet's colour)", "trim": "#rrggbb (the trim, usually a metal)", "light": "#rrggbb (the chandeliers' light)"}} (make it belong to this island),
  "ui": the game's menus while you're on this island: {"accent": "#rrggbb (titles and highlights)", "panel": "#rrggbb (a dark menu background)", "ink": "#rrggbb (light, readable text)", "font": one of ${T.ISLE_FONTS.map(f => `"${f}"`).join(", ")} (for headings), "corner": 0-24 (how round the menus are)}${invent ? `,
  "architecture": "one or two sentences: how everything here is built (what from, shapes, roofs, colours, details), so every building matches",
  "camp": {"bed": "one sentence: the hut the player sleeps in", "forge": "one sentence: the forge where axes are made", "post": "one sentence: the trading post where materials are sold", "witch": "one sentence: the hut where potions are brewed"} (all in that architecture),
@@ -1130,6 +1131,23 @@ function cleanIsland(src, d) { // every field checked before it reaches the game
         if (Number.isFinite(+u.corner)) ui.corner = Math.round(num(u.corner, 0, 28, 14));
         d.ui = ui;
     }
+    if (src.casino && typeof src.casino === "object") d.casino = cleanCasino(src.casino);
+}
+// a casino look: colours, its name and sign line, the roof, which side it stands on, and tints for the hall inside (kept light, so the hall never goes dark)
+function cleanCasino(c) {
+    const hex = v => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : null), str = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : ""), cs = {};
+    for (const k of ["wall", "base", "trim", "roof", "glow", "dim", "rock", "sign"]) if (hex(c[k])) cs[k] = hex(c[k]);
+    if (cs.sign && lum(cs.sign) < 0.3) cs.sign = shade(cs.sign, 0.35, true); // neon has to glow
+    if (str(c.name, 26)) cs.name = str(c.name, 26).toUpperCase();
+    const tl = str(c.tagline, 80); if (tl) cs.tagline = (tl.length <= 28 ? tl : tl.slice(0, 29).replace(/[\s,;:.!-]+\S*$/, "")).toUpperCase(); // cut at a word
+    if (T.ROOF_KINDS.includes(c.roofKind)) cs.roofKind = c.roofKind;
+    if (c.dir !== undefined && c.dir !== "" && Number.isFinite(+c.dir)) cs.dir = Math.round(((+c.dir % 360) + 360) % 360);
+    if (c.hall && typeof c.hall === "object") {
+        const h = {};
+        for (const [k, low] of [["walls", 0], ["carpet", 0], ["trim", 0.2], ["light", 0.45]]) { const v = hex(c.hall[k]); if (v) h[k] = lum(v) < low ? shade(v, low, true) : v; } // wallpaper and carpet are made rich and dark in the game
+        if (Object.keys(h).length) cs.hall = h;
+    }
+    return cs;
 }
 // colour helpers for the menu look: relative luminance, contrast ratio, and a colour pushed darker (or lighter) to a luminance
 const lum = h => { const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
@@ -1155,10 +1173,28 @@ function archRows(d, n) {
       <div class="stRow"><label>Corners</label><span style="display:flex;align-items:center;gap:6px"><input type="range" id="iUiCorner" min="0" max="28" step="1" value="${ui.corner ?? 14}" style="width:120px"><small>${ui.corner ?? 14}px</small></span></div>
       <div class="stBtns"><button class="stB" id="iUiReset">The game's usual look</button></div>
       <div class="stHint">Play-test (F5) and open a menu or a shop to see it.${ui.accent || ui.panel || ui.ink ? "" : " Ask Claude picks one for each island it designs."}</div>
+      ${casinoRows(d, n)}
       <div class="stH">SHOPS <small>${sh.length} on this island</small></div>
       <div class="stList">${sh.map(o => `<div class="stItem" data-shopgo="${o.id}"><span>🛒 ${esc(o.act.title || "A shop")}</span><small>${(o.act.items || []).length} things</small></div>`).join("") || `<div class="stHint">No shops yet.</div>`}</div>
       <div class="stBtns"><button class="stB go" id="iShopAdd">+ A shop by the camp</button></div>
       <div class="stHint">Click a shop to go to it and change what it sells. Ask Claude (with invent on) opens 1-2 shops with their own keepers and buildings.</div>`;
+}
+// the casino's look for this island: it stands on the newest island, so this look shows whenever this one is the newest
+function casinoRows(d, n) {
+    const c = d.casino || {}, h = c.hall || {}, home = T.casinoHome() === n, live = T.customIsle(n), C0 = live && live.built ? live : null;
+    const col = (k, label, v, dflt, hall) => `<label style="display:flex;align-items:center;gap:5px"><input class="stIn" type="color" ${hall ? "data-chall" : "data-cas"}="${k}" value="${v || dflt}"> ${label}</label>`;
+    const dir = c.dir ?? 215;
+    return `<div class="stH" id="iSecCasino">THE CASINO <small>${home ? "stands here: this is your newest island" : `stands on your newest island (Rebirth ${T.casinoHome() - 1})`}</small></div>
+      <div class="stRow"><label>Name</label><input class="stIn" type="text" id="iCasName" value="${esc(c.name || "")}" placeholder="THE CASINO"></div>
+      <div class="stRow"><label>Sign line</label><input class="stIn" type="text" id="iCasTag" value="${esc(c.tagline || "")}" placeholder="OPEN 24/7"></div>
+      <div class="stRow"><label>Roof</label><select class="stSel" id="iCasRoof">${T.ROOF_KINDS.map(k => opt(k, c.roofKind || "spire", { spire: "A spire", dome: "A dome", crown: "A crown of points", flat: "Flat, with battlements" }[k])).join("")}</select></div>
+      <div class="stRow"><label>Stands</label><span style="display:flex;align-items:center;gap:6px"><input type="range" id="iCasDir" min="0" max="359" step="1" value="${dir}" style="width:120px"><small>${dir}°</small></span></div>
+      <div class="stHint" style="margin-top:0">Outside${c.wall || c.trim || c.sign ? "" : " (until you pick, it takes the island's own colours)"}:</div>
+      <div class="stChecks">${col("wall", "Walls", c.wall, "#c8b898")}${col("base", "Base", c.base, "#4a4038")}${col("trim", "Bands", c.trim, "#d8a840")}${col("roof", "Roof", c.roof, "#3a3028")}${col("glow", "Lit windows", c.glow, "#ffd060")}${col("dim", "Dark windows", c.dim, "#3a2a10")}${col("rock", "Dice & stones", c.rock, "#6a6a74")}${col("sign", "Neon", c.sign, "#ffd060")}</div>
+      <div class="stHint">The hall inside:</div>
+      <div class="stChecks">${col("walls", "Wallpaper", h.walls, "#c42f4a", 1)}${col("carpet", "Carpet", h.carpet, "#d71d39", 1)}${col("trim", "Gold trim", h.trim, "#d8a840", 1)}${col("light", "Chandeliers", h.light, "#ffd8a0", 1)}</div>
+      <div class="stBtns"><button class="stB" id="iCasGo"${home ? "" : " disabled"}>Go to it</button><button class="stB" id="iCasIn"${home ? "" : " disabled"}>Walk inside</button><button class="stB" id="iCasReset">The island's colours</button></div>
+      <div class="stHint">Ask Claude designs a casino for every island it makes. ${C0 && home && !C0.CAS ? "There's no flat spot for it on this side: try another direction." : ""}</div>`;
 }
 // somewhere near the camp to stand: clear of the camp's buildings, facing the fire
 function campSpot(n) {
@@ -1312,6 +1348,24 @@ function bindIslands() {
     on("iUiFont", "change", e => setUi("font", e.target.value));
     on("iUiCorner", "input", e => { e.target.nextElementSibling.textContent = e.target.value + "px"; setUi("corner", +e.target.value); });
     on("iUiReset", "click", () => { delete d.ui; islandChanged(true); });
+    // the casino's look
+    const setCas = (fn, rerender) => { d.casino = JSON.parse(JSON.stringify(d.casino || {})); fn(d.casino); islandChanged(rerender); };
+    on("iCasName", "change", e => setCas(c => { const v = e.target.value.trim().slice(0, 26).toUpperCase(); if (v) c.name = v; else delete c.name; }));
+    on("iCasTag", "change", e => setCas(c => { const v = e.target.value.trim().slice(0, 28).toUpperCase(); if (v) c.tagline = v; else delete c.tagline; }));
+    on("iCasRoof", "change", e => setCas(c => (c.roofKind = e.target.value)));
+    on("iCasDir", "input", e => { e.target.nextElementSibling.textContent = e.target.value + "°"; setCas(c => (c.dir = +e.target.value)); });
+    all("[data-cas]", "input", el => setCas(c => (c[el.dataset.cas] = el.value)));
+    all("[data-chall]", "input", el => setCas(c => { c.hall = c.hall || {}; c.hall[el.dataset.chall] = el.value; }));
+    on("iCasReset", "click", () => setCas(c => { for (const k of ["wall", "base", "trim", "roof", "glow", "dim", "rock", "sign", "hall"]) delete c[k]; }, true));
+    const toCasino = () => { const C = T.customIsle(n); if (!C || !C.CAS) { say("It's still being built: try again in a moment"); return null; } return C.CAS; };
+    on("iCasGo", "click", () => {
+        if (curIsle() !== n) goIsle(String(n));
+        setTimeout(() => { const p = toCasino(); if (!p) return; const len = Math.hypot(p.x, p.z) || 1, gy = T.groundY(p.x, p.z); cam.pos.set(p.x - (p.x / len) * 42, gy + 16, p.z - (p.z / len) * 42); lookAtPoint(new THREE.Vector3(p.x, gy + 12, p.z)); }, 600);
+    });
+    on("iCasIn", "click", () => {
+        if (curIsle() !== n) goIsle(String(n));
+        setTimeout(() => { if (!toCasino() || !T.getCasino()) return; play(); setTimeout(() => T.enterCasino(), 300); say("Inside the casino (F5 to stop)", 3500); }, 600);
+    });
     all("[data-shopgo]", "click", it => { const o = world.objects.find(q => q.id === it.dataset.shopgo); if (!o) return; if (curIsle() !== n) goIsle(String(n)); select(o); focusSel(); });
     on("iShopAdd", "click", () => {
         if (curIsle() !== n) goIsle(String(n));
