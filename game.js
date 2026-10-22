@@ -13538,11 +13538,14 @@ function buildCI(C) {
             const top = ownBuilding(at, B), g = new THREE.Group(); g.position.set(at.x, P, at.z); g.rotation.y = Math.atan2(-at.x, -at.z); scene.add(g);
             return { g, y: Math.max(P + 6.2, top + 1.2), z: 0 };
         };
-        const hut = own("bed");
+        // the bed itself (d.camp.bedModel) and the hut around it (d.camp.bed). A small prop picked as the hut is a bed, so it takes the bed's place
+        let hut = own("bed"), bedM = own("bedModel"); if (hut && !bedM && (hut.r || 0) <= 1.6) { bedM = hut; hut = null; }
         if (hut) ownBuilding(C.BED, hut);
         else { const tent = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.6, 4), lamb(ciHex(d.colors && d.colors.tent, 0xc89a5a))); tent.position.set(C.BED.x - 1.5, P + 1.3, C.BED.z + 1.6); tent.rotation.y = Math.PI / 4; scene.add(tent); circles.push({ x: C.BED.x - 1.5, z: C.BED.z + 1.6, r: 1.8 }); }
-        const bed = new THREE.Group(); bed.position.set(C.BED.x, P, C.BED.z); scene.add(bed); part(bed, BOX, wood, 0, 0.3, 0, 1.4, 0.3, 2.3); part(bed, BOX, lamb(0x8a2a3a), 0, 0.52, -0.3, 1.3, 0.14, 1.5);
-        const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(C.BED.x, P + 3.2, C.BED.z);
+        const bed = new THREE.Group(); bed.position.set(C.BED.x, P, C.BED.z); scene.add(bed);
+        if (bedM) { bed.rotation.y = Math.atan2(-C.BED.x, -C.BED.z); bedM.make(bed); } // you walk up to it to sleep, so it stays walk-through
+        else { part(bed, BOX, wood, 0, 0.3, 0, 1.4, 0.3, 2.3); part(bed, BOX, lamb(0x8a2a3a), 0, 0.52, -0.3, 1.3, 0.14, 1.5); }
+        const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(C.BED.x, Math.max(P + 3.2, new THREE.Box3().setFromObject(bed).max.y + 0.7), C.BED.z);
         const sS = stallOr(C.SMITH, "forge", "THE FORGE", "CRAFT AXES · GUNS", "#ffb060", 0x4a3020), gS = sS.g;
         const smith = makeHumanoid({ face: "smith", skin: 0xe8b890, shirt: 0x5a3a2a, pants: 0x2a2a3a, apron: 0x3a2a1a, beard: 0x6a4a2a, hat: "cap", hatCol: 0x2a2a30, wide: 1.3, belly: true });
         smith.g.position.set(0, 0, sS.z); gS.add(smith.g); smith.yaw = gS.rotation.y; C.npcs.push(giveHammer(smith));
