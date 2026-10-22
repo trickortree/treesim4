@@ -5,6 +5,14 @@ import * as THREE from "three";
 import { TransformControls } from "../node_modules/three/examples/jsm/controls/TransformControls.js";
 
 const T = window.__ts4, S = window.ts4Studio;
+// Claude runs three requests at once at most (the main process allows three); the rest wait their turn
+let askOn = 0; const askWait = [];
+function askQ(req) {
+    return new Promise(res => {
+        const go = () => { askOn++; S.askClaude(req).catch(e => ({ ok: false, error: String(e) })).then(r => { askOn--; res(r); const nx = askWait.shift(); if (nx) nx(); }); };
+        if (askOn < 3) go(); else askWait.push(go);
+    });
+}
 if (!T || !S) throw new Error("Tree Sim 4 Studio needs the game's studio handle (run it with npm run studio)");
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -126,6 +134,7 @@ bar.innerHTML = `<div class="logo">TREE SIM 4 STUDIO <span id="stVer" style="fon
   <button class="stB" id="stUndo" title="Undo (Ctrl+Z)">↶</button><button class="stB" id="stRedo" title="Redo (Ctrl+Y)">↷</button>
   <label class="stHint" style="margin:0;opacity:.8"><input type="checkbox" id="stAuto"> autosave</label>
   <button class="stB" id="stSave" title="Save to content/, with a copy in Documents\Tree Sim 4 Studio that updates never touch (Ctrl+S)">Save</button>
+  <button class="stB" id="stSyncBtn" title="Bring in what's on GitHub (releases and Studio updates) and keep your own work: islands, trees, props, animals, people and placed things from both sides are kept">⟳ Sync</button>
   <button class="stB" id="stRelBtn" title="Ship an update to players">🚀 Release</button>
   <button class="stB go" id="stPlay" title="Play-test from the camera (F5)">▶ Play <small>F5</small></button></div>`;
 const left = document.createElement("div"); left.id = "stLeft"; left.className = "st";
@@ -276,8 +285,10 @@ function changed(what = "world") {
     clearTimeout(saveT);
     if ($("stAuto").checked) saveT = setTimeout(() => saveAll(true), 1500);
 }
+let synced = false; // after a sync brought things in, what's in memory is from before it: never save that over the merged files
 async function saveAll(quiet) {
     clearTimeout(saveT);
+    if (synced) { say("Restart the Studio first: a sync just brought in new work", 4000); return; }
     const jobs = [];
     if (worldDirty) jobs.push(S.save("world", { version: 1, objects: world.objects, moves: T.MOVES }).then(r => { if (r.ok) worldDirty = false; return r; }));
     if (treesDirty) jobs.push(S.save("trees", trees).then(r => { if (r.ok) treesDirty = false; return r; }));
@@ -302,9 +313,12 @@ const TEMPLATES = {
     loot: { kind: "prop", prop: "chest", solid: true, act: { type: "loot", cash: 5000, mat: "", amount: 0, every: "day", message: "You found treasure!" } },
     shrine: { kind: "prop", prop: "shrine", solid: true, act: { type: "shrine", buff: "fury", secs: 180, heal: true, message: "The shrine hums with power." } },
     portal: { kind: "prop", prop: "portal", solid: false, act: { type: "portal", to: "" } },
-    treespot: { kind: "treespot", tree: "pine", height: 7, regrow: 3, solid: false }
+    treespot: { kind: "treespot", tree: "pine", height: 7, regrow: 3, solid: false },
+    shop: { kind: "npc", look: "villager", solid: true, label: "THE SHOP", labelCol: "#ffd890", act: { type: "shop", title: "The Shop", who: "Shopkeeper", greeting: "Have a look. Everything's fairly priced. Mostly.", color: "", items: [
+        { name: "Fury tonic", desc: "Hit harder for a while.", icon: "⚔️", cash: 50000, mats: {}, give: { buff: "fury", secs: 300 } },
+        { name: "Hot stew", desc: "Back to full health.", icon: "🍲", cash: 10000, mats: {}, give: { heal: true } }] } }
 };
-const THINGS = [["npc", "🧍 Person"], ["note", "📜 Note"], ["loot", "💰 Treasure chest"], ["shrine", "✨ Shrine"], ["portal", "🌀 Portal"], ["treespot", "🌲 Tree spot"], ["sign", "🪧 Wooden sign"], ["glowsign", "✦ Glowing sign"]];
+const THINGS = [["npc", "🧍 Person"], ["shop", "🛒 Shop"], ["note", "📜 Note"], ["loot", "💰 Treasure chest"], ["shrine", "✨ Shrine"], ["portal", "🌀 Portal"], ["treespot", "🌲 Tree spot"], ["sign", "🪧 Wooden sign"], ["glowsign", "✦ Glowing sign"]];
 const scatter = { on: pref("scatter") === "1", n: +pref("scN") || 8, r: +pref("scR") || 8, min: +pref("scMin") || 0.7, max: +pref("scMax") || 1.3 };
 let placing = null; // { o, rec, tpl }
 function startPlacing(tpl) {
@@ -435,13 +449,14 @@ function renderInspector() {
       <div class="stChecks"><label title="${solidOk ? "You bump into it instead of walking through" : "This one is too thin to bump into"}"><input type="checkbox" id="iSolid"${o.solid && solidOk ? " checked" : ""}${solidOk ? "" : " disabled"}> Solid</label></div>
       <div class="stBtns"><button class="stB" id="iGround">Snap to ground</button><button class="stB" id="iFace">Face camera</button><button class="stB" id="iSpin">Random turn</button><button class="stB" id="iFocus">Focus (F)</button><button class="stB" id="iDup">Duplicate</button><button class="stB warn" id="iDel">Delete</button></div>`;
     if (o.kind !== "treespot") {
-        h += `<div class="stH">WHEN YOU PRESS F</div><div class="stRow"><label>Does</label><select class="stSel" id="iAct">${opt("", a.type || "", "Nothing")}${opt("talk", a.type, "Talks")}${opt("read", a.type, "Can be read")}${opt("loot", a.type, "Gives loot")}${opt("shrine", a.type, "Blesses you (shrine)")}${opt("portal", a.type, "Teleports you (portal)")}</select></div>`;
+        h += `<div class="stH">WHEN YOU PRESS F</div><div class="stRow"><label>Does</label><select class="stSel" id="iAct">${opt("", a.type || "", "Nothing")}${opt("talk", a.type, "Talks")}${opt("read", a.type, "Can be read")}${opt("loot", a.type, "Gives loot")}${opt("shrine", a.type, "Blesses you (shrine)")}${opt("portal", a.type, "Teleports you (portal)")}${opt("shop", a.type, "Runs a shop")}</select></div>`;
         if (a.type === "talk") h += `<div class="stRow"><label>Name</label><input class="stIn" type="text" id="aWho" value="${esc(a.who || "")}"></div><div class="stHint">What they say, one line each:</div><textarea class="stTa" id="aLines" rows="4">${esc((a.lines || []).join("\n"))}</textarea>`;
         if (a.type === "read") h += `<div class="stRow"><label>Title</label><input class="stIn" type="text" id="aTitle" value="${esc(a.title || "")}"></div><div class="stHint">The text (a blank line starts a new page):</div><textarea class="stTa" id="aText" rows="5">${esc(a.text || "")}</textarea>`;
         if (a.type === "loot") h += `${num("aCash", "Cash", a.cash || 0, 100)}<div class="stRow"><label>Material</label><select class="stSel" id="aMat" style="max-width:150px">${opt("", a.mat || "", "none")}${Object.entries(T.MATS).map(([k, m]) => opt(k, a.mat, m.name)).join("")}</select></div>${a.mat ? num("aAmt", "Amount", a.amount || 1, 1) : ""}
             <div class="stRow"><label>Refills</label><select class="stSel" id="aEvery">${opt("day", a.every || "day", "Every day")}${opt("once", a.every, "Never (once only)")}</select></div><div class="stRow"><label>Message</label><input class="stIn" type="text" id="aMsg" value="${esc(a.message || "")}"></div><div class="stHint">Cash grows with the player's rebirths.</div>`;
         if (a.type === "shrine") h += `<div class="stRow"><label>Buff</label><select class="stSel" id="aBuff">${opt("", a.buff || "", "none")}${Object.entries(T.BUFFS).map(([k, b]) => opt(k, a.buff, b.name)).join("")}</select></div>${num("aSecs", "Seconds", a.secs || 120, 10)}<div class="stChecks"><label><input type="checkbox" id="aHeal"${a.heal !== false ? " checked" : ""}> Heals to full</label></div><div class="stRow"><label>Message</label><input class="stIn" type="text" id="aMsg" value="${esc(a.message || "")}"></div><div class="stHint">Once a day.</div>`;
         if (a.type === "portal") { const others = world.objects.filter(q => q !== o && +q.isle === +o.isle); h += `<div class="stRow"><label>Leads to</label><select class="stSel" id="aTo" style="max-width:170px">${opt("", a.to || "", "choose…")}${others.map(q => opt(q.id, a.to, `${objName(q)} (${Math.round(q.x)}, ${Math.round(q.z)})`)).join("")}</select></div><div class="stHint">Place two portals and point each at the other for a two-way trip.</div>`; }
+        if (a.type === "shop") h += shopEditor(a);
     }
     box.innerHTML = h;
     bindInspector(o);
@@ -484,8 +499,8 @@ function bindInspector(o) {
     on("iSpin", "click", () => { edit(q => (q.ry = r3(Math.random() * Math.PI * 2)), ""); re(); });
     on("iFocus", "click", focusSel); on("iDup", "click", duplicateSel); on("iDel", "click", removeSel);
     // what F does
-    const DEF = { talk: { who: "Stranger", lines: ["..."] }, read: { title: "A note", text: "" }, loot: { cash: 5000, mat: "", amount: 0, every: "day", message: "You found treasure!" }, shrine: { buff: "fury", secs: 180, heal: true, message: "The shrine hums with power." }, portal: { to: "" } };
-    on("iAct", "change", e => { edit(q => { const t = e.target.value; if (!t) delete q.act; else q.act = { type: t, ...DEF[t] }; }, ""); re(); });
+    const DEF = { talk: { who: "Stranger", lines: ["..."] }, read: { title: "A note", text: "" }, loot: { cash: 5000, mat: "", amount: 0, every: "day", message: "You found treasure!" }, shrine: { buff: "fury", secs: 180, heal: true, message: "The shrine hums with power." }, portal: { to: "" }, shop: JSON.parse(JSON.stringify(TEMPLATES.shop.act)) };
+    on("iAct", "change", e => { edit(q => { const t = e.target.value; if (!t) delete q.act; else q.act = { type: t, ...JSON.parse(JSON.stringify(DEF[t])) }; }, ""); re(); });
     const act = (id, ev, fn, tag) => on(id, ev, e => edit(q => { q.act = q.act || {}; fn(q.act, e.target); }, tag || id));
     act("aWho", "input", (a, t) => (a.who = t.value.slice(0, 30)));
     act("aLines", "input", (a, t) => (a.lines = t.value.split("\n").map(s => s.slice(0, 200)).slice(0, 20)));
@@ -500,6 +515,51 @@ function bindInspector(o) {
     act("aSecs", "input", (a, t) => (a.secs = Math.min(900, Math.max(10, +t.value || 120))));
     act("aHeal", "change", (a, t) => (a.heal = t.checked));
     act("aTo", "change", (a, t) => (a.to = t.value));
+    act("aGreet", "input", (a, t) => (a.greeting = t.value.slice(0, 160)));
+    act("aCol", "input", (a, t) => (a.color = t.value));
+    // a shop's items: each row edits its own item
+    right.querySelectorAll("[data-si]").forEach(row => {
+        const i = +row.dataset.si, val = k => { const f = row.querySelector(`[data-sf="${k}"]`); return f ? f.value : ""; };
+        row.querySelectorAll("[data-sf]").forEach(f => f.addEventListener(f.tagName === "SELECT" ? "change" : "input", () => {
+            edit(q => { const it = q.act.items[i]; if (it) shopField(it, f.dataset.sf, f.value, val); }, "shop" + i + f.dataset.sf);
+            if (f.dataset.sf === "gk") re();
+        }));
+    });
+    right.querySelectorAll("[data-sdel]").forEach(b => b.addEventListener("click", () => { edit(q => q.act.items.splice(+b.dataset.sdel, 1), ""); re(); }));
+    on("aItemAdd", "click", () => { edit(q => { q.act.items = q.act.items || []; if (q.act.items.length < 12) q.act.items.push({ name: "Something new", desc: "", icon: "✦", cash: 10000, mats: {}, give: { heal: true } }); }, ""); re(); });
+}
+// ---- the shop editor (Place inspector, "Runs a shop") ----
+function shopEditor(a) {
+    const its = Array.isArray(a.items) ? a.items : [], mats = sel => Object.entries(T.MATS).map(([k, m]) => opt(k, sel, m.name)).join("");
+    let h = `<div class="stRow"><label>Shop name</label><input class="stIn" type="text" id="aTitle" value="${esc(a.title || "")}"></div>
+      <div class="stRow"><label>Keeper</label><input class="stIn" type="text" id="aWho" value="${esc(a.who || "")}"></div>
+      <div class="stRow"><label>Greeting</label><input class="stIn" type="text" id="aGreet" value="${esc(a.greeting || "")}"></div>
+      <div class="stRow"><label>Colour</label><input class="stIn" type="color" id="aCol" value="${a.color || "#ffd040"}"></div>
+      <div class="stH">FOR SALE <small>${its.length} of 12</small></div>`;
+    its.forEach((it, i) => {
+        const g = it.give || {}, gk = g.buff ? "buff" : g.mat ? "mat" : g.cash ? "cash" : "heal", mk = Object.keys(it.mats || {})[0] || "";
+        h += `<div class="stItem" style="display:block" data-si="${i}">
+          <div class="stRow"><label>Name</label><span style="display:flex;gap:4px"><input class="stIn" type="text" data-sf="icon" value="${esc(it.icon || "")}" style="width:42px" title="an emoji"><input class="stIn" type="text" data-sf="name" value="${esc(it.name || "")}" style="width:118px"></span></div>
+          <div class="stRow"><label>Says</label><input class="stIn" type="text" data-sf="desc" value="${esc(it.desc || "")}"></div>
+          <div class="stRow"><label>Costs $</label><input class="stIn" type="number" data-sf="cash" value="${+it.cash || 0}" min="0" step="1000"></div>
+          <div class="stRow"><label>and</label><span style="display:flex;gap:4px"><input class="stIn" type="number" data-sf="matN" value="${mk ? it.mats[mk] : 0}" min="0" style="width:56px"><select class="stSel" data-sf="matK" style="max-width:118px">${opt("", mk, "no material")}${mats(mk)}</select></span></div>
+          <div class="stRow"><label>Gives</label><select class="stSel" data-sf="gk">${opt("buff", gk, "a buff")}${opt("mat", gk, "materials")}${opt("cash", gk, "cash")}${opt("heal", gk, "a full heal")}</select></div>
+          ${gk === "buff" ? `<div class="stRow"><label>Buff</label><span style="display:flex;gap:4px"><select class="stSel" data-sf="buff" style="max-width:118px">${Object.entries(T.BUFFS).map(([k, b]) => opt(k, g.buff, b.name)).join("")}</select><input class="stIn" type="number" data-sf="secs" value="${g.secs || 180}" min="10" max="900" style="width:56px" title="seconds"></span></div>`
+            : gk === "mat" ? `<div class="stRow"><label>How many</label><span style="display:flex;gap:4px"><input class="stIn" type="number" data-sf="gn" value="${g.n || 5}" min="1" style="width:56px"><select class="stSel" data-sf="gmat" style="max-width:118px">${mats(g.mat)}</select></span></div>`
+            : gk === "cash" ? `<div class="stRow"><label>Pays $</label><input class="stIn" type="number" data-sf="gcash" value="${g.cash || 0}" min="0" step="1000"></div>` : ""}
+          <div class="stBtns"><button class="stB warn" data-sdel="${i}">Remove</button></div></div>`;
+    });
+    return h + `<div class="stBtns">${its.length < 12 ? `<button class="stB go" id="aItemAdd">+ Something to sell</button>` : ""}</div><div class="stHint">Press F next to them in the game to shop. The shop uses the island's own menu look.</div>`;
+}
+function shopField(it, k, v, val) {
+    const n = (x, a, b) => Math.min(b, Math.max(a, Math.round(+x || 0)));
+    if (k === "name") it.name = v.slice(0, 40); else if (k === "icon") it.icon = Array.from(v).slice(0, 2).join(""); else if (k === "desc") it.desc = v.slice(0, 140);
+    else if (k === "cash") it.cash = n(v, 0, 1e10);
+    else if (k === "matN" || k === "matK") { const mk = val("matK"), mn = n(val("matN"), 0, 999); it.mats = mk && mn > 0 ? { [mk]: mn } : {}; }
+    else if (k === "gk") it.give = v === "buff" ? { buff: "fury", secs: 180 } : v === "mat" ? { mat: Object.keys(T.MATS)[0], n: 5 } : v === "cash" ? { cash: 10000 } : { heal: true };
+    else if (k === "buff" || k === "secs") it.give = { buff: val("buff"), secs: n(val("secs"), 10, 900) };
+    else if (k === "gn" || k === "gmat") it.give = { mat: val("gmat"), n: n(val("gn"), 1, 999) };
+    else if (k === "gcash") it.give = { cash: n(v, 0, 1e10) };
 }
 
 // ---------- the left panel: Place, Trees, Islands ----------
@@ -732,7 +792,7 @@ async function askClaude(tr) {
     if (!desc) { msg.className = "stMsg bad"; msg.textContent = "Describe the tree first."; return; }
     const model = $("tModel").value;
     btn.disabled = true; btn.textContent = "Claude is designing it…"; msg.className = "stMsg"; msg.textContent = `Asking ${model}…`;
-    const r = await S.askClaude({ prompt: claudePrompt(desc, tr), system: CLAUDE_SYSTEM, model });
+    const r = await askQ({ prompt: claudePrompt(desc, tr), system: CLAUDE_SYSTEM, model });
     btn.disabled = false; btn.textContent = "Design it with Claude";
     if (!r.ok) { msg.className = "stMsg bad"; msg.textContent = r.error; return; }
     let j = null;
@@ -878,11 +938,23 @@ function dropMatEverywhere(key) { // a material is gone: trees that dropped it d
 function treeChoices() { const out = []; for (const [k, t] of Object.entries(T.TYPES)) { if (t.rush || t.custom) continue; out.push(`${k} (${t.name}, ${isleName((t.isl || [1]).filter(i => i <= 6)[0] || 1)}${t.rare ? ", rare" : ""}${t.night ? ", night" : ""})`); } return out.join("; "); }
 const animalChoices = () => Object.entries(T.WILD_KINDS).map(([k, W]) => `${k} (${W.name}${W.fly ? ", flies" : ""}${W.custom ? ", made in the Studio" : ""})`).join("; ");
 const abilChoices = () => T.ABIL.slice(0, T.BASE_AXES).map((a, i) => `${i} ${a.name}`).join(", ");
+// what Ask Claude last said about an island, and which island it's busy on: kept here so the tab can redraw while it works
+let askNote = null, askBusy = null;
+function setAskMsg(d, cls, text) {
+    askNote = { d, cls, text };
+    const m = $("iAskMsg"); if (m && islands[islandSel] === d) { m.className = "stMsg" + (cls ? " " + cls : ""); m.textContent = text; }
+    const b = $("iAskGo"); if (b) { b.disabled = askBusy === islands[islandSel]; b.textContent = b.disabled ? "Claude is shaping it…" : "Design it with Claude"; }
+}
 async function askClaudeIsland(d) {
-    const desc = ($("iAsk").value || "").trim(), msg = $("iAskMsg"), btn = $("iAskGo"), invent = $("iInvent").checked, i0 = islandSel, n = T.CI_BASE + i0;
-    if (!desc) { msg.className = "stMsg bad"; msg.textContent = "Describe the island first."; return; }
+    const desc = ($("iAsk").value || "").trim(), invent = $("iInvent").checked, i0 = islandSel, n = T.CI_BASE + i0;
+    if (askBusy) { setAskMsg(d, "bad", "Claude is still working on an island."); return; }
+    if (!desc) { setAskMsg(d, "bad", "Describe the island first."); return; }
     const model = $("iModel").value; pref("model", model); pref("invent", invent ? "1" : "0");
-    btn.disabled = true; btn.textContent = "Claude is shaping it…"; msg.className = "stMsg"; msg.textContent = `Asking ${model}…`;
+    askBusy = d; setAskMsg(d, "", `Asking ${model}…`);
+    try { await askIsland(d, desc, invent, i0, n, model); }
+    finally { askBusy = null; if (askNote && askNote.d === d && !askNote.cls) askNote.cls = "bad"; setAskMsg(d, askNote ? askNote.cls : "", askNote ? askNote.text : ""); $("iAsk") && ($("iAsk").value = desc); }
+}
+async function askIsland(d, desc, invent, i0, n, model) {
     const prompt = `Design an island from this description: "${desc}"
 
 It's island ${n} in a chain of rebirth islands for a spooky low-poly tree-chopping game. The camp sits flat in the middle (radius ~30 m): keep features away from the centre.
@@ -902,66 +974,88 @@ Return JSON with exactly these fields:
  "shape": {"kind": "round|long|lobed", "stretch": 1-2.4 (long only), "lobes": 2-7 and "amount": 0.1-0.45 (lobed only), "angle": 0-359} (pick what suits it: long for a ridge or a spit of land, lobed for a clover of bays),
  "features": up to 12 of {"type": "mountain|hill|spire|crater|plateau|ridge|valley|lake|islet|isle|bay" (islet = a rock in the sea you can't reach; isle = a real walkable island out at sea, joined to the main one by a bridge), "dir": 0-359 (direction from the centre), "dist": 0.35-0.9 (fraction of the radius; islets 1.2-2; isles 1.4-2.6), "bridge": true or false (isles only), "r": size in metres (5-60), "h": height in metres (spires up to 70, hills 5-20), "len": length for ridges and valleys (30-150), "rot": angle of a ridge or valley in degrees, "width": bay width 0.1-1, "depth": bay depth 0.1-0.5, "lava": true for a lava crater, "name": "THE SOMETHING" or ""},
  "props": up to 14 groups of the game's own props to put around the island: [{"prop": a key from this list, "dir": 0-359, "dist": 0.3-0.85, "isle": -1 for the main island, or which "isle" feature (0 for the first isle, 1 for the second...), "count": 1-8}]: ${propChoices()},
- "campName": "1-2 words", "rideLine1": "what you see on the ferry ride", "rideLine2": "the island coming into view", "ferryLine": "what the Ferryman says before you sail", "arrive": "a welcome message"${invent ? `,
- "landmarks": 1-3 new buildings or big structures that make this place special (a lighthouse, a ruined watchtower, a stilt house, a giant mushroom hut...): [{"description": "one sentence: what it is and what it looks like", "dir": 0-359, "dist": 0.3-0.8, "isle": -1 or which isle}],
+ "campName": "1-2 words", "rideLine1": "what you see on the ferry ride", "rideLine2": "the island coming into view", "ferryLine": "what the Ferryman says before you sail", "arrive": "a welcome message",
+ "ui": the game's menus while you're on this island: {"accent": "#rrggbb (titles and highlights)", "panel": "#rrggbb (a dark menu background)", "ink": "#rrggbb (light, readable text)", "font": one of ${T.ISLE_FONTS.map(f => `"${f}"`).join(", ")} (for headings), "corner": 0-24 (how round the menus are)}${invent ? `,
+ "architecture": "one or two sentences: how everything here is built (what from, shapes, roofs, colours, details), so every building matches",
+ "camp": {"bed": "one sentence: the hut the player sleeps in", "forge": "one sentence: the forge where axes are made", "post": "one sentence: the trading post where materials are sold", "witch": "one sentence: the hut where potions are brewed"} (all in that architecture),
+ "shops": 1-2 shops run by locals: [{"title": "the shop's name", "keeper": "one sentence: who runs it and how they look", "building": "one sentence: the shop building, in the architecture", "greeting": "what the keeper says when you walk in", "color": "#rrggbb", "dir": 0-359, "dist": 0.25-0.6,
+   "items": 3-6 things for sale: [{"name": "1-3 words", "desc": "a short funny line", "icon": "one emoji", "cash": 10000-3000000, "mats": {"the name of one of this island's mats": 1-40} or {} (some things cost the island's materials as well as, or instead of, cash), "give": {"buff": one of ${Object.entries(T.BUFFS).map(([k, b]) => `"${k}" (${b.name})`).join(", ")}, "secs": 60-900} or {"mat": "a material name", "n": 1-40} or {"heal": true}}]}],
+ "newProps": 2-4 small models only found here (lanterns, totems, statues, carts, signposts...): [{"description": "one sentence: what it is and what it looks like", "dir": 0-359, "dist": 0.3-0.85, "count": 1-6}],
+ "landmarks": 1-3 new buildings or big structures that make this place special (a lighthouse, a ruined watchtower, a stilt house, a giant mushroom hut...), in the architecture: [{"description": "one sentence: what it is and what it looks like", "dir": 0-359, "dist": 0.3-0.8, "isle": -1 or which isle}],
  "newTrees": 2-3 short descriptions of new trees that only grow here (one sentence each, with their look and mood),
  "newAnimals": 1-2 short descriptions of new animals that only live here (one sentence each),
  "residents": 1-2 short descriptions of people who live here (one sentence each: who they are and how they look)` : ""}}
 Make it match the description and feel distinct.`;
-    const r = await S.askClaude({ prompt, system: "You design islands for Hypergamous Tree Chopping Simulator 4, a spooky, cheerful first-person tree-chopping game. Reply with ONLY one JSON object: no prose, no code fences.", model });
-    if (!r.ok) { btn.disabled = false; btn.textContent = "Design it with Claude"; msg.className = "stMsg bad"; msg.textContent = r.error; return; }
+    const r = await askQ({ prompt, system: "You design islands for Hypergamous Tree Chopping Simulator 4, a spooky, cheerful first-person tree-chopping game. Reply with ONLY one JSON object: no prose, no code fences.", model });
+    if (!r.ok) { setAskMsg(d, "bad", r.error); return; }
     let j = null; try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
-    if (!j) { btn.disabled = false; btn.textContent = "Design it with Claude"; msg.className = "stMsg bad"; msg.textContent = "Claude's answer wasn't an island. Try again or reword it."; return; }
+    if (!j) { setAskMsg(d, "bad", "Claude's answer wasn't an island. Try again or reword it."); return; }
     cleanIsland(j, d); d.theme = ""; // Claude's own look, not one of the themes
     changed("islands"); rebuildNow(i0); if (tab === "islands" && islandSel === i0) renderIslands(); // built straight away, so the trees it invents can pick its new materials
     clearGenerated(n); // what Claude put here last time makes way
     let placedN = 0;
     for (const g of (Array.isArray(j.props) ? j.props : []).slice(0, 14)) if (g && T.PROPS[g.prop] && !T.PROPS[g.prop].custom) placedN += placeOnIsland(n, g.prop, g, Math.round(Math.min(8, Math.max(1, +g.count || 1))));
     let note = `${d.name}, shaped by ${r.model} in ${(r.ms / 1000).toFixed(1)}s · ~${(r.tokens / 1000).toFixed(1)}k tokens. ${placedN} props put around it.`, tok = r.tokens;
-    const say2 = t => { const m = $("iAskMsg"); if (m) { m.className = "stMsg"; m.textContent = t; } };
-    if (invent) { // then each new tree and animal gets its own short request, one at a time
-        const tr0 = Array.isArray(j.newTrees) ? j.newTrees.filter(s => typeof s === "string" && s.trim()).slice(0, 3) : [], an0 = Array.isArray(j.newAnimals) ? j.newAnimals.filter(s => typeof s === "string" && s.trim()).slice(0, 2) : [];
-        let made = 0;
-        for (const [k, tdesc] of tr0.entries()) {
-            say2(`${note} Inventing tree ${k + 1} of ${tr0.length}…`);
+    const say2 = t => setAskMsg(d, "", t);
+    if (invent) { // then everything it invents gets its own short request, three at a time: trees, animals, the camp's buildings, shops and their keepers, models, landmarks and people
+        const strs = (v, k) => (Array.isArray(v) ? v : []).filter(s => typeof s === "string" && s.trim()).slice(0, k).map(s => s.trim().slice(0, 300));
+        const objs = (v, k) => (Array.isArray(v) ? v : []).filter(s => s && typeof s === "object").slice(0, k);
+        const arch = typeof j.architecture === "string" ? j.architecture.trim().slice(0, 300) : "", styled = s => (arch ? `${s} Built in this island's style: ${arch}` : s);
+        const isl = islands[i0], jobs = [], got = { tree: 0, animal: 0, camp: 0, shop: 0, model: 0, landmark: 0, person: 0 };
+        let done = 0;
+        const tick = () => say2(`${note} Inventing: ${++done} of ${jobs.length} done…`);
+        const build = async (kind, desc, starter) => { // a building or model from parts, kept in My props
+            const res = await claudeBuild(kind, desc, model, starter); if (!res.ok || !res.data.parts.length) return null;
+            const p = res.data; p.key = pmKeyFor(MK.props, p.name); myProps.push(p); T.defineCustomProp(p); changed("props"); tok += res.tokens; return p;
+        };
+        const person = async desc => {
+            const res = await claudePerson(desc, model); if (!res.ok) return null;
+            const pp = cleanPerson(res.data, starterPerson()); pp.key = ppKey(pp.name); myPeople.push(pp); T.defineCustomPerson(pp); changed("people"); tok += res.tokens; return pp;
+        };
+        strs(j.newTrees, 3).forEach((tdesc, k) => jobs.push(async () => {
             const tr = blankTree("New Tree"); tr.isl = [n];
-            const rt = await S.askClaude({ prompt: claudePrompt(tdesc.slice(0, 300), tr), system: CLAUDE_SYSTEM, model });
+            const rt = await askQ({ prompt: claudePrompt(tdesc, tr), system: CLAUDE_SYSTEM, model });
             let jt = null; if (rt.ok) try { jt = JSON.parse((rt.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
-            if (!jt) continue;
+            if (!jt) return;
             const t2 = cleanTree(jt, tr); t2.key = uniqueKey(t2.name); t2.isl = [n]; t2.minTier = Math.min(t2.minTier, k); // the first one grows from the start
-            trees.push(t2); T.defineCustomTree(t2); changed("trees"); tok += rt.tokens; made++;
+            trees.push(t2); T.defineCustomTree(t2); changed("trees"); tok += rt.tokens; got.tree++;
             if (!curTree()) treeSel = t2.key;
-        }
-        for (const [k, adesc] of an0.entries()) {
-            say2(`${note} Inventing animal ${k + 1} of ${an0.length}…`);
-            const res = await claudeBuild("animals", adesc.slice(0, 300), model, starterAnimal());
-            if (!res.ok) continue;
-            const a = res.data; a.key = pmKeyFor(MK.animals, a.name); myAnimals.push(a); T.defineCustomAnimal(a); changed("animals"); tok += res.tokens; made++;
+        }));
+        strs(j.newAnimals, 2).forEach(adesc => jobs.push(async () => {
+            const res = await claudeBuild("animals", adesc, model, starterAnimal()); if (!res.ok) return;
+            const a = res.data; a.key = pmKeyFor(MK.animals, a.name); myAnimals.push(a); T.defineCustomAnimal(a); changed("animals"); tok += res.tokens; got.animal++;
             if (!MK.animals.sel) MK.animals.sel = a.key;
-            const isl = islands[i0]; isl.animals = isl.animals || []; isl.animals.push({ kind: a.key, n: 6 });
+            isl.animals = isl.animals || []; isl.animals.push({ kind: a.key, n: 6 });
+        }));
+        const camp0 = j.camp && typeof j.camp === "object" ? j.camp : {};
+        if (arch || Object.keys(camp0).length) { // the camp in the island's own architecture
+            isl.camp = {};
+            for (const [k, [label, what]] of Object.entries(CAMP)) jobs.push(async () => {
+                const desc = typeof camp0[k] === "string" && camp0[k].trim() ? camp0[k].trim().slice(0, 240) : what;
+                const p = await build("buildings", styled(`${desc} It's ${what}: 5-9 m across, its open front facing +z.`), { name: label, r: 3, light: null, parts: [] });
+                if (p) { isl.camp[k] = p.key; got.camp++; }
+            });
         }
-        const lm0 = Array.isArray(j.landmarks) ? j.landmarks.filter(s => s && typeof s.description === "string" && s.description.trim()).slice(0, 3) : [];
-        for (const [k, L] of lm0.entries()) { // new buildings: each one built by Claude from parts, then put on the island
-            say2(`${note} Building landmark ${k + 1} of ${lm0.length}…`);
-            const res = await claudeBuild("buildings", L.description.slice(0, 300), model, { name: "Landmark", r: 2, light: null, parts: [] });
-            if (!res.ok || !res.data.parts.length) continue;
-            const p = res.data; p.key = pmKeyFor(MK.props, p.name); myProps.push(p); T.defineCustomProp(p); changed("props"); tok += res.tokens; made++;
-            placeOnIsland(n, p.key, L, 1, true);
-        }
-        const rs0 = Array.isArray(j.residents) ? j.residents.filter(s => typeof s === "string" && s.trim()).slice(0, 2) : [];
-        for (const [k, rd] of rs0.entries()) { // people who live there: designed by Claude, then standing about the camp ready to talk
-            say2(`${note} Inventing resident ${k + 1} of ${rs0.length}…`);
-            const res = await claudePerson(rd.slice(0, 300), model);
-            if (!res.ok) continue;
-            const pp = cleanPerson(res.data, starterPerson()); pp.key = ppKey(pp.name); myPeople.push(pp); T.defineCustomPerson(pp); changed("people"); tok += res.tokens; made++;
-            placePerson(n, pp);
-        }
-        note += ` Invented ${made} new trees, animals, buildings and people (~${(tok / 1000).toFixed(1)}k tokens in all).`;
+        objs(j.shops, 2).forEach(s => jobs.push(async () => { // a shop: its building and its keeper made side by side, then put together
+            const [bld, keeper] = await Promise.all([typeof s.building === "string" && s.building.trim() ? build("buildings", styled(`${s.building.trim().slice(0, 240)} It's a shop with a counter at the front.`), { name: "Shop", r: 3, light: null, parts: [] }) : null, typeof s.keeper === "string" && s.keeper.trim() ? person(s.keeper.trim().slice(0, 300)) : null]);
+            if (placeShop(n, s, bld, keeper, cleanShop(s, isl, keeper))) got.shop++;
+        }));
+        objs(j.newProps, 4).filter(s => typeof s.description === "string" && s.description.trim()).forEach(s => jobs.push(async () => {
+            const p = await build("props", styled(s.description.trim().slice(0, 300)), { name: "Model", r: 0.5, light: null, parts: [] });
+            if (p && placeOnIsland(n, p.key, s, Math.round(Math.min(6, Math.max(1, +s.count || 2))))) got.model++;
+        }));
+        objs(j.landmarks, 3).filter(L => typeof L.description === "string" && L.description.trim()).forEach(L => jobs.push(async () => { // new buildings, put on the island facing the camp
+            const p = await build("buildings", styled(L.description.trim().slice(0, 300)), { name: "Landmark", r: 2, light: null, parts: [] });
+            if (p && placeOnIsland(n, p.key, L, 1, true)) got.landmark++;
+        }));
+        strs(j.residents, 2).forEach(rd => jobs.push(async () => { const pp = await person(rd); if (pp && placePerson(n, pp)) got.person++; })); // people who live there, about the camp ready to talk
+        say2(`${note} Inventing ${jobs.length} things, three at a time…`);
+        await Promise.all(jobs.map(f => f().catch(e => console.error(e)).then(tick)));
+        const parts = [["tree", "trees"], ["animal", "animals"], ["camp", "camp buildings"], ["shop", "shops"], ["model", "models"], ["landmark", "landmarks"], ["person", "residents"]].filter(([k]) => got[k]).map(([k, w]) => `${got[k]} ${w}`);
+        note += ` Invented ${parts.join(", ") || "nothing new"} (~${(tok / 1000).toFixed(1)}k tokens in all).`;
         islandChanged(true, i0);
     }
-    btn.disabled = false; btn.textContent = "Design it with Claude";
-    const m2 = $("iAskMsg"); if (m2) { m2.className = "stMsg good"; m2.textContent = note + " The ticket stays as you set it."; }
-    $("iAsk") && ($("iAsk").value = desc);
+    setAskMsg(d, "good", note + " The ticket stays as you set it.");
 }
 // what Claude puts on an island: the game's props and the buildings it invents. Each is a real placed object, marked gen, so asking again clears them
 const propChoices = () => Object.entries(T.PROPS).filter(([k, p]) => !p.custom).map(([k, p]) => `${k} (${p.name})`).join(", ");
@@ -1026,6 +1120,56 @@ function cleanIsland(src, d) { // every field checked before it reaches the game
         return o;
     });
     for (const k of ["campName", "rideLine1", "rideLine2", "ferryLine", "arrive"]) if (typeof src[k] === "string") d[k] = str(src[k], k === "campName" ? 24 : 200);
+    if (src.ui && typeof src.ui === "object") { // the island's menu look: text always readable on its background
+        const u = src.ui, ui = {};
+        for (const k of ["accent", "panel", "ink"]) if (hex(u[k])) ui[k] = hex(u[k]);
+        if (ui.panel && lum(ui.panel) > 0.06) ui.panel = shade(ui.panel, 0.05); // menus sit over the game: keep them dark
+        if (ui.panel && ui.ink && contrast(ui.ink, ui.panel) < 7) ui.ink = "#f2ecff";
+        if (ui.panel && ui.accent && contrast(ui.accent, ui.panel) < 4.5) ui.accent = shade(ui.accent, 0.62, true);
+        if (T.ISLE_FONTS.includes(u.font)) ui.font = u.font;
+        if (Number.isFinite(+u.corner)) ui.corner = Math.round(num(u.corner, 0, 28, 14));
+        d.ui = ui;
+    }
+}
+// colour helpers for the menu look: relative luminance, contrast ratio, and a colour pushed darker (or lighter) to a luminance
+const lum = h => { const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+function shade(h, target, up) { // mix toward black (or white) until the luminance reaches the target
+    const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+    for (let t = 0; t <= 1; t += 0.05) { const m = c.map(v => Math.round(up ? v + (255 - v) * t : v * (1 - t))), hx = "#" + m.map(v => v.toString(16).padStart(2, "0")).join(""); if (up ? lum(hx) >= target : lum(hx) <= target) return hx; }
+    return up ? "#ffffff" : "#000000";
+}
+// ---- an island's architecture (its camp buildings), its menu look and its shops ----
+const CAMP = { bed: ["Bed hut", "the hut where the player sleeps"], forge: ["The forge", "the forge where axes are made"], post: ["Trading post", "the trading post where materials are sold"], witch: ["Witch's hut", "the hut where potions are brewed"] };
+const shopsOn = n => world.objects.filter(o => +o.isle === n && o.act && o.act.type === "shop");
+function archRows(d, n) {
+    const camp = d.camp || {}, ui = d.ui || {}, sh = shopsOn(n);
+    const sel = (k, label) => `<div class="stRow"><label>${label}</label><select class="stSel" data-camp="${k}" style="max-width:170px">${opt("", camp[k] || "", "The usual")}${myProps.map(p => opt(p.key, camp[k], p.name)).join("")}</select></div>`;
+    const col = (k, label, dflt) => `<label style="display:flex;align-items:center;gap:5px"><input class="stIn" type="color" data-ui="${k}" value="${ui[k] || dflt}"> ${label}</label>`;
+    return `<div class="stH" id="iSecArch">ARCHITECTURE <small>the camp's own buildings</small></div>
+      ${Object.entries(CAMP).map(([k, [label]]) => sel(k, label)).join("")}
+      <div class="stHint">Any of your props can be one: build them in the Props tab, or let Ask Claude (with invent on) build them all in one style. Each stands just behind its spot, facing the fire.</div>
+      <div class="stH">MENU LOOK <small>the game's menus while you're here</small></div>
+      <div class="stChecks">${col("accent", "Titles", "#ffd040")}${col("panel", "Background", "#0e081c")}${col("ink", "Text", "#e8dcff")}</div>
+      <div class="stRow"><label>Heading font</label><select class="stSel" id="iUiFont">${opt("", ui.font || "", "The usual")}${T.ISLE_FONTS.map(f => opt(f, ui.font, f)).join("")}</select></div>
+      <div class="stRow"><label>Corners</label><span style="display:flex;align-items:center;gap:6px"><input type="range" id="iUiCorner" min="0" max="28" step="1" value="${ui.corner ?? 14}" style="width:120px"><small>${ui.corner ?? 14}px</small></span></div>
+      <div class="stBtns"><button class="stB" id="iUiReset">The game's usual look</button></div>
+      <div class="stHint">Play-test (F5) and open a menu or a shop to see it.${ui.accent || ui.panel || ui.ink ? "" : " Ask Claude picks one for each island it designs."}</div>
+      <div class="stH">SHOPS <small>${sh.length} on this island</small></div>
+      <div class="stList">${sh.map(o => `<div class="stItem" data-shopgo="${o.id}"><span>🛒 ${esc(o.act.title || "A shop")}</span><small>${(o.act.items || []).length} things</small></div>`).join("") || `<div class="stHint">No shops yet.</div>`}</div>
+      <div class="stBtns"><button class="stB go" id="iShopAdd">+ A shop by the camp</button></div>
+      <div class="stHint">Click a shop to go to it and change what it sells. Ask Claude (with invent on) opens 1-2 shops with their own keepers and buildings.</div>`;
+}
+// somewhere near the camp to stand: clear of the camp's buildings, facing the fire
+function campSpot(n) {
+    const C = T.customIsle(n); if (!C) return null;
+    const spots = [C.SMITH, C.DEPOT, C.WITCH, C.BED, { x: 0, z: -3 }];
+    for (let k = 0; k < 30; k++) {
+        const a = Math.random() * 6.283, d = 13 + Math.random() * 9, x = r3(Math.cos(a) * d), z = r3(Math.sin(a) * d);
+        if (spots.some(s => s && Math.hypot(x - s.x, z - s.z) < 5) || world.objects.some(o => +o.isle === n && Math.hypot(x - o.x, z - o.z) < 2.5) || !C.treeOk(x, z)) continue;
+        return { x, z, y: r3(C.groundY(x, z)), ry: r3(Math.atan2(-x, -z)) };
+    }
+    return null;
 }
 function featRows(d) {
     const rng = (fi, k, label, v, min, max, step, unit = "") => `<div class="stRow"><label>${label}</label><span style="display:flex;align-items:center;gap:6px"><input type="range" data-fi="${fi}" data-fk="${k}" min="${min}" max="${max}" step="${step}" value="${v}" style="width:110px"><small style="width:38px;text-align:right">${v}${unit}</small></span></div>`;
@@ -1076,9 +1220,9 @@ function renderIslands() {
     h += `<div class="stBtns" style="margin-top:10px"><button class="stB" id="iGo">Go there</button><button class="stB go" id="iTest">▶ Test the rebirth</button>${islandSel === islands.length - 1 ? `<button class="stB warn" id="iDelIsl">Delete</button>` : ""}</div>
       <div class="stClaude" style="margin-top:10px"><div class="stH">✦ ASK CLAUDE <select class="stSel" id="iModel">${opt("haiku", model, "Haiku (cheapest)")}${opt("sonnet", model, "Sonnet")}${opt("opus", model, "Opus")}</select></div>
         <textarea class="stTa" id="iAsk" placeholder="Describe an island, e.g. a cursed swamp with three sunken towers, a lava crater and fog"></textarea>
-        <div class="stChecks"><label title="A few more short requests: about 4k tokens each on Haiku"><input type="checkbox" id="iInvent"${pref("invent") !== "0" ? " checked" : ""}> Also invent new trees and animals for it</label></div>
-        <div class="stBtns"><button class="stB" id="iAskGo" style="flex:1">Design it with Claude</button></div><div class="stMsg" id="iAskMsg"></div>
-        <div class="stHint" style="margin:4px 0 0">Claude picks the land, colours, trees, animals, ground cover, the island's own materials and axes, and the story. The ticket stays yours.</div></div>
+        <div class="stChecks"><label title="About 15-25 more short requests, three at a time: roughly 2-4k tokens each on Haiku"><input type="checkbox" id="iInvent"${pref("invent") !== "0" ? " checked" : ""}> Invent everything: its architecture, shops and keepers, models, trees, animals and people</label></div>
+        <div class="stBtns"><button class="stB" id="iAskGo" style="flex:1"${askBusy === d ? " disabled" : ""}>${askBusy === d ? "Claude is shaping it…" : "Design it with Claude"}</button></div><div class="stMsg${askNote && askNote.d === d && askNote.cls ? " " + askNote.cls : ""}" id="iAskMsg">${askNote && askNote.d === d ? esc(askNote.text) : ""}</div>
+        <div class="stHint" style="margin:4px 0 0">Claude picks the land, colours, trees, animals, ground cover, the island's own materials and axes, its menu look and the story. With invent on it also builds the camp in the island's own architecture, opens shops with their own keepers, and makes models, landmarks and people. The ticket stays yours.</div></div>
       <div class="stBtns" style="margin:8px 0 0">${ISLE_JUMPS.map(([id, l]) => `<button class="stB" data-jump="${id}" style="padding:3px 7px;font-size:11px">${l}</button>`).join("")}</div>
       <div class="stH">NAME <small>island ${n} · Rebirth ${n - 1}</small></div>
       <div class="stRow"><input class="stIn" type="text" id="iName" value="${esc(d.name)}" style="flex:1"></div>
@@ -1136,6 +1280,7 @@ function renderIslands() {
         <div class="stHint" style="margin:0">${A ? `Costs ${recipeTxt(idx)}` : "Working out its recipe…"}</div></div>`; }).join("") || `<div class="stHint">No axes of its own: the forge sells ${esc(ECON[d.economy || 6])}'s.</div>`}</div>
       <div class="stBtns">${axes.length < 4 ? `<button class="stB" id="iAxeAdd">+ Axe</button>` : ""}</div>
       <div class="stHint">The island's own axes come after the forge's usual ones and cost its rarest materials. Leave damage empty to have it worked out.</div>
+      ${archRows(d, n)}
       <div class="stH">THE TICKET <small>from ${esc(isleName(n - 1))}</small></div>
       <div class="stRow"><label>Cash</label><input class="stIn" type="number" id="iCost" value="${d.rebirth && d.rebirth.cost !== undefined ? d.rebirth.cost : 25000000}" step="1000000" style="width:120px"></div>
       <div class="stRow"><label>Bring</label><span><input class="stIn" type="number" id="iItemN" value="${item[1] || 0}" min="0" step="1" style="width:56px"> <select class="stSel" id="iItem" style="max-width:120px">${opt("", item[0], "nothing")}${pm.map(k => opt(k, item[0], T.MATS[k] ? T.MATS[k].name : k)).join("")}</select></span></div>
@@ -1160,6 +1305,20 @@ function bindIslands() {
     on("iGo", "click", () => goIsle(String(n)));
     on("iTest", "click", () => { rebuildNow(islandSel); testRebirth(islandSel); });
     on("iAskGo", "click", () => askClaudeIsland(d));
+    // architecture, menu look and shops
+    all("[data-camp]", "change", s => { d.camp = { ...(d.camp || {}) }; if (s.value) d.camp[s.dataset.camp] = s.value; else delete d.camp[s.dataset.camp]; islandChanged(false); });
+    const setUi = (k, v) => { d.ui = { ...(d.ui || {}) }; if (v === "" || v === undefined) delete d.ui[k]; else d.ui[k] = v; islandChanged(false); };
+    all("[data-ui]", "input", c => setUi(c.dataset.ui, c.value));
+    on("iUiFont", "change", e => setUi("font", e.target.value));
+    on("iUiCorner", "input", e => { e.target.nextElementSibling.textContent = e.target.value + "px"; setUi("corner", +e.target.value); });
+    on("iUiReset", "click", () => { delete d.ui; islandChanged(true); });
+    all("[data-shopgo]", "click", it => { const o = world.objects.find(q => q.id === it.dataset.shopgo); if (!o) return; if (curIsle() !== n) goIsle(String(n)); select(o); focusSel(); });
+    on("iShopAdd", "click", () => {
+        if (curIsle() !== n) goIsle(String(n));
+        const s = campSpot(n); if (!s) { say("No room by the camp: place one from the Place tab instead"); return; }
+        const o = { id: newId(), isle: n, ...JSON.parse(JSON.stringify(TEMPLATES.shop)), x: s.x, y: s.y, z: s.z, rx: 0, ry: s.ry, rz: 0, s: 1 };
+        world.objects.push(o); T.placedBuild(o); changed("world"); select(o); focusSel(); renderIslands();
+    });
     on("iDelIsl", "click", () => {
         if (curIsle() === n) { say("Go to another island first"); return; }
         if (!confirm(`Delete ${d.name}? It stops being Rebirth ${n - 1}, and everything you placed on it goes too.`)) return;
@@ -1398,7 +1557,7 @@ Return JSON: {"name": "1-3 words", "r": how wide it is to bump into in metres (0
 Example, a barrel: {"name":"Barrel","r":0.5,"light":null,"parts":[{"shape":"cyl","x":0,"y":0.55,"z":0,"sx":0.9,"sy":1.1,"sz":0.9,"color":"#8a5a30","tint":true},{"shape":"cyl","x":0,"y":0.2,"z":0,"sx":0.94,"sy":0.08,"sz":0.94,"color":"#3a3a40"},{"shape":"cyl","x":0,"y":0.9,"z":0,"sx":0.94,"sy":0.08,"sz":0.94,"color":"#3a3a40"}]}`;
 }
 async function claudeBuild(kind, desc, model, into) { // → { ok, data, tokens, ms, model } or { ok: false, error }
-    const r = await S.askClaude({ prompt: makerPrompt(kind, desc), system: `You build low-poly 3D ${kind === "animals" ? "animals" : kind === "buildings" ? "buildings" : "props"} out of simple shapes for Hypergamous Tree Chopping Simulator 4. Reply with ONLY one JSON object: no prose, no code fences.`, model });
+    const r = await askQ({ prompt: makerPrompt(kind, desc), system: `You build low-poly 3D ${kind === "animals" ? "animals" : kind === "buildings" ? "buildings" : "props"} out of simple shapes for Hypergamous Tree Chopping Simulator 4. Reply with ONLY one JSON object: no prose, no code fences.`, model });
     if (!r.ok) return { ok: false, error: r.error };
     let j = null; try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
     if (!j || !Array.isArray(j.parts) || !j.parts.length) return { ok: false, error: `Claude's answer wasn't ${kind === "animals" ? "an animal" : "a prop"}. Try again or reword it.` };
@@ -1542,15 +1701,35 @@ function ppApply(rerender) { // the new look goes into the game: the preview, an
 function ppFrame() { if (!ppPreview) return; const c = ppPreview.g.position.clone().add(new THREE.Vector3(0, 1.1, 0)), f = fwd().setY(0).normalize(); cam.pos.copy(c).addScaledVector(f, -3.6).add(new THREE.Vector3(0, 0.4, 0)); lookAtPoint(c); }
 function ppNew(base) { const p = base || starterPerson(); p.key = ppKey(p.name); myPeople.push(p); ppSel = p.key; ppAt = null; T.defineCustomPerson(p); changed("people"); renderPeople(); ppShow(true); ppFrame(); }
 function placePerson(n, p) { // a resident: near the camp, facing it, ready to talk
-    const C = T.customIsle(n); if (!C) return false;
-    const spots = [C.SMITH, C.DEPOT, C.WITCH, C.BED, { x: 0, z: -3 }];
-    for (let k = 0; k < 30; k++) {
-        const a = Math.random() * 6.283, d = 13 + Math.random() * 9, x = r3(Math.cos(a) * d), z = r3(Math.sin(a) * d);
-        if (spots.some(s => s && Math.hypot(x - s.x, z - s.z) < 5) || !C.treeOk(x, z)) continue;
-        const o = { id: newId(), isle: n, kind: "npc", look: p.key, x, y: r3(C.groundY(x, z)), z, rx: 0, ry: r3(Math.atan2(-x, -z)), rz: 0, s: 1, solid: true, label: p.name.toUpperCase(), labelCol: "#ffd890", act: { type: "talk", who: p.name, lines: (p.lines || []).length ? p.lines.slice() : ["Hello!"] }, gen: true };
-        world.objects.push(o); T.placedBuild(o); changed("world"); return true;
-    }
-    return false;
+    const s = campSpot(n); if (!s) return false;
+    const o = { id: newId(), isle: n, kind: "npc", look: p.key, x: s.x, y: s.y, z: s.z, rx: 0, ry: s.ry, rz: 0, s: 1, solid: true, label: p.name.toUpperCase(), labelCol: "#ffd890", act: { type: "talk", who: p.name, lines: (p.lines || []).length ? p.lines.slice() : ["Hello!"] }, gen: true };
+    world.objects.push(o); T.placedBuild(o); changed("world"); return true;
+}
+// a shop Claude invented: its building facing the camp, and its keeper standing out front
+function placeShop(n, s, bld, keeper, act) {
+    const C = T.customIsle(n), c0 = C && islandSpot(n, { dir: s.dir, dist: Math.min(0.6, Math.max(0.25, +s.dist || 0.4)) }); if (!c0) return false;
+    const len = Math.hypot(c0.x, c0.z) || 1, ry = r3(Math.atan2(-c0.x, -c0.z));
+    if (bld) { const o = { id: newId(), isle: n, kind: "prop", prop: bld.key, x: r3(c0.x), y: r3(C.groundY(c0.x, c0.z)), z: r3(c0.z), rx: 0, ry, rz: 0, s: 1, solid: true, gen: true }; world.objects.push(o); T.placedBuild(o); }
+    const off = bld ? Math.min(6, Math.max(1, +bld.r || 2.5)) + 1.4 : 0, x = r3(c0.x - (c0.x / len) * off), z = r3(c0.z - (c0.z / len) * off);
+    const o = { id: newId(), isle: n, kind: "npc", look: keeper ? keeper.key : "villager", x, y: r3(C.groundY(x, z)), z, rx: 0, ry, rz: 0, s: 1, solid: true, label: act.title.toUpperCase(), labelCol: act.color || "#ffd890", act, gen: true };
+    world.objects.push(o); T.placedBuild(o); changed("world"); return true;
+}
+// a shop from Claude's answer, every field checked. Materials are named, so they're matched to this island's (or the game's) by name;
+// materials for sale cost more than the trading post pays for them (with the rebirth bonus a player there has), so nothing is bought to sell back
+function cleanShop(s, d, keeper) {
+    const str = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : ""), hex = v => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : "");
+    const matKey = v => { const nm = str(v, 40).toLowerCase(); if (!nm) return null; const m = (d.mats || []).find(q => q.name.toLowerCase() === nm || q.key === nm); if (m) return m.key; const e = Object.entries(T.MATS).find(([k, q]) => k === nm || q.name.toLowerCase() === nm); return e ? e[0] : null; };
+    const bonus = 1 + 0.5 * (T.CI_BASE + Math.max(0, islands.indexOf(d)) + 2), worth = k => ((T.MATS[k] && +T.MATS[k].price) || 0) * bonus; // a few rebirths past this island, to be safe
+    const items = (Array.isArray(s.items) ? s.items : []).filter(it => it && typeof it === "object" && str(it.name, 40)).slice(0, 8).map(it => {
+        const mats = {}; if (it.mats && typeof it.mats === "object") for (const [k, v] of Object.entries(it.mats)) { const mk = matKey(k); if (mk && +v > 0) mats[mk] = Math.min(999, Math.round(+v)); }
+        let cash = Math.round(Math.min(1e10, Math.max(0, +it.cash || 0)));
+        const g = it.give && typeof it.give === "object" ? it.give : {}, gm = matKey(g.mat);
+        const give = T.BUFFS[g.buff] ? { buff: g.buff, secs: Math.round(Math.min(900, Math.max(30, +g.secs || 180))) } : gm && +g.n > 0 ? { mat: gm, n: Math.min(999, Math.round(+g.n)) } : { heal: true };
+        const matsWorth = Object.entries(mats).reduce((t, [k, v]) => t + worth(k) * v, 0);
+        if (give.mat) cash = Math.max(cash, Math.ceil(worth(give.mat) * give.n * 1.5 - matsWorth)); // dearer than selling them back
+        return { name: str(it.name, 40), desc: str(it.desc, 140), icon: Array.from(str(it.icon, 8)).slice(0, 2).join("") || "✦", cash, mats, give };
+    });
+    return { type: "shop", title: str(s.title, 40) || "The Shop", who: keeper ? keeper.name : str(s.who, 30), greeting: str(s.greeting, 160), color: hex(s.color), items };
 }
 // ---- Ask Claude for a person: one short request, every field checked ----
 function cleanPerson(src, into) {
@@ -1579,7 +1758,7 @@ Return JSON: {"name": "their name, 1-3 words", "lines": 3-5 things they say, in 
    "glasses": bool, "monocle": bool, "eyepatch": bool, "scar": bool, "freckles": bool, "blush": bool, "stitches": bool, "paint": bool (war paint), "paintCol": "#rrggbb"}}}
 Make them match the description and look distinct.`;
 async function claudePerson(desc, model) {
-    const r = await S.askClaude({ prompt: personPrompt(desc), system: "You design characters for Hypergamous Tree Chopping Simulator 4, a spooky, cheerful first-person tree-chopping game. Reply with ONLY one JSON object: no prose, no code fences.", model });
+    const r = await askQ({ prompt: personPrompt(desc), system: "You design characters for Hypergamous Tree Chopping Simulator 4, a spooky, cheerful first-person tree-chopping game. Reply with ONLY one JSON object: no prose, no code fences.", model });
     if (!r.ok) return { ok: false, error: r.error };
     let j = null; try { j = JSON.parse((r.text.match(/\{[\s\S]*\}/) || [""])[0]); } catch (e) { /* not JSON */ }
     if (!j || !j.look) return { ok: false, error: "Claude's answer wasn't a person. Try again or reword it." };
@@ -1919,7 +2098,7 @@ Studio content: ${JSON.stringify(St.content)}
 Only include things players will notice in the game. Leave out "Tree Sim 4 Studio" (the developer's editor, which doesn't ship) and anything about tooling.
 Describe ONLY the changes listed above. Never invent features, fixes or numbers that aren't in that list; fewer lines is better than a made-up one.
 Reply with ONLY the bullet lines, each starting with "- ". No title line, no intro, no code fences.`;
-    const r = await S.askClaude({ prompt, system: "You write short, cheerful release notes for a spooky indie tree-chopping game. Reply with only the bullet lines.", model: pref("model") || "haiku" });
+    const r = await askQ({ prompt, system: "You write short, cheerful release notes for a spooky indie tree-chopping game. Reply with only the bullet lines.", model: pref("model") || "haiku" });
     R.drafting = false;
     if (r.ok) { const lines = r.text.split(/\r?\n/).map(l => l.trim()).filter(l => /^[-•*]\s/.test(l)).map(l => "- " + l.replace(/^[-•*]\s*/, "")); if (lines.length) R.notes = lines.join("\n"); }
     renderRelease();
@@ -1930,7 +2109,7 @@ async function shipIt() {
     $("relConfirm") && $("relConfirm").classList.remove("show");
     if (R.busy) return;
     R.busy = true; R.error = ""; R.steps = {}; renderRelease();
-    if (worldDirty || treesDirty) await saveAll(true);
+    if (worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty || peopleDirty) await saveAll(true);
     const res = await S.release({ version: R.version, notes: R.notes, title: R.title });
     R.busy = false;
     if (!res.ok) { R.error = `Stopped at "${(STEPS.find(s => s[0] === res.step) || [0, res.step])[1]}": ${res.error || "unknown error"}`; renderRelease(); return; }
@@ -1989,6 +2168,27 @@ $("stAuto").addEventListener("change", e => { pref("auto", e.target.checked ? "1
 $("stSave").addEventListener("click", () => saveAll(false));
 $("stPlay").addEventListener("click", play);
 $("stRelBtn").addEventListener("click", openRelease);
+// ⟳ Sync: bring in what's on GitHub and keep your own work (studio/sync.js merges it). Afterwards the Studio restarts,
+// because what it has in memory is from before: saving that would undo the merge
+async function openSync() {
+    if ($("stSync")) return;
+    if (worldDirty || treesDirty || islandsDirty || propsDirty || animalsDirty || peopleDirty) await saveAll(true);
+    const box = document.createElement("div"); box.className = "st"; box.id = "stSync";
+    box.style.cssText = "position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:#0a0612cc";
+    box.innerHTML = `<div style="width:min(600px,92%);max-height:86vh;overflow:auto;background:#1e1530;border:1px solid #ffd040;border-radius:12px;padding:18px 20px">
+      <div class="stH" style="margin-top:0">SYNC WITH GITHUB</div>
+      <div id="syncLog" style="font:600 13px 'Segoe UI';line-height:1.5">Saving and checking GitHub…</div><div class="stBtns" id="syncBtns" style="margin-top:12px"></div></div>`;
+    document.body.appendChild(box);
+    const r = await S.sync().catch(err => ({ ok: false, error: String(err), notes: [] }));
+    const moved = !r.nothing && (r.ok || (r.commits || []).length > 0), notes = (r.notes || []).map(n => `<div class="stItem" style="display:block">${esc(n)}</div>`).join("");
+    $("syncLog").innerHTML = (r.ok ? (r.nothing ? "" : "<b>Done.</b> Your work is kept and merged with what came in. A copy from just before is in your Documents backups folder.") : `<b style="color:#ff8a80">The sync stopped:</b> ${esc(r.error)}${moved ? "<br>Some of it came in first, and your work is merged with that." : "<br>Nothing was changed."}`)
+        + (notes ? `<div class="stList" style="margin-top:8px">${notes}</div>` : "");
+    if (moved) synced = true;
+    $("syncBtns").innerHTML = moved ? `<button class="stB go" id="syncGo" style="flex:1">Restart the Studio to load it</button>` : `<button class="stB" id="syncGo" style="flex:1">Close</button>`;
+    $("syncGo").addEventListener("click", () => { if (moved) { $("syncGo").textContent = "Restarting…"; S.restart(); } else box.remove(); });
+}
+S.onSyncStep(s => { const l = $("syncLog"); if (l) l.textContent = s; });
+$("stSyncBtn").addEventListener("click", openSync);
 
 // ---------- mouse on the 3D view ----------
 canvas.addEventListener("contextmenu", e => e.preventDefault());
@@ -2080,7 +2280,7 @@ S.wsStatus().then(st => {
     if (!st || !st.ok) return;
     if (st.fresh) { say(`Your work is now also kept in ${st.folder}, so updating the Studio never loses it`, 7000); return; }
     if (!st.diff.length) return;
-    const LABEL = { islands: "Islands", trees: "Trees", props: "Props", animals: "Animals", world: "Placed and moved things" };
+    const LABEL = { islands: "Islands", trees: "Trees", props: "Props", animals: "Animals", people: "People", world: "Placed and moved things" };
     const box = document.createElement("div"); box.className = "st"; box.id = "stWs";
     box.style.cssText = "position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:#0a0612cc";
     box.innerHTML = `<div style="width:min(560px,92%);background:#1e1530;border:1px solid #ffd040;border-radius:12px;padding:18px 20px">
@@ -2097,4 +2297,4 @@ S.wsStatus().then(st => {
     $("wsOpen").addEventListener("click", e => { e.preventDefault(); S.wsOpen(); });
 });
 say("Tree Sim 4 Studio · right-drag to look around, F5 to play", 3500);
-window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get animals() { return myAnimals; }, get people() { return myPeople; }, cleanPerson, ppNew, placePerson, get partSel() { return partSel; }, get treeGroup() { return treeGroup; }, pmNew, pmSelectPart, cleanProp, cleanAnimal, cleanIsland, migrateIsland, newIsland, islandChanged, claudeBuild, regrowHere, addAnimalToIsland, renderIslands, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };
+window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get animals() { return myAnimals; }, get people() { return myPeople; }, cleanPerson, ppNew, placePerson, cleanShop, renderInspector, get partSel() { return partSel; }, get treeGroup() { return treeGroup; }, pmNew, pmSelectPart, cleanProp, cleanAnimal, cleanIsland, migrateIsland, newIsland, islandChanged, claudeBuild, regrowHere, addAnimalToIsland, renderIslands, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };

@@ -2680,6 +2680,8 @@ function showPanels() {
     if (panel === "crew") renderCrew();
     if (panel === "relic") renderRelic();
     $("panelTalk").classList.toggle("show", panel === "talk");
+    $("panelCShop").classList.toggle("show", panel === "cshop");
+    if (panel === "cshop") renderCShop();
     $("panelBack").classList.toggle("show", panel !== null && panel !== "talk" && panel !== "dev");
     if (window.__ts4dev) window.__ts4dev.show(panel === "dev");
     if (panel === "inv") renderInv();
@@ -12344,14 +12346,18 @@ function terrain6(x, z) {
     return rampH6(x, z, h);
 }
 function groundY6(x, z) {
-    for (const D of DOCKS6) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 3 && along < D.LEN + 3 && Math.abs(side) < 3) return 0; }
+    for (const D of DOCKS6) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 0 && along < D.LEN + 3 && Math.abs(side) < 3) return Math.max(0, terrain6(x, z)); }
     return Math.max(-0.4, terrain6(x, z));
 }
 const fight6 = { on: false, phase: 1, cd: 3, atk: null, atkT: 0, minions: [], dyingT: -1, lag: 1, heart: 0, fired: false, seen: false };
 function clampIsle6(p) {
     for (const D of DOCKS6) {
         const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP);
-        if (along > 3.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; }
+        // these docks start right where the walkable ice stops (3 m in from the shore), so from the ramp you step straight onto the planks
+        if (along > -0.5 && along < D.LEN + 3 && Math.abs(side) < (along < 3.5 ? 2.4 : 6)) {
+            if (along < 3.5 && Math.hypot(p.x, p.z) < shoreAt6(p.x, p.z) - 3) continue; // still on the ice
+            const a = clamp(along, 0.3, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return;
+        }
     }
     const lim = shoreAt6(p.x, p.z) - 3, d = Math.hypot(p.x, p.z);
     if (d > lim) { p.x *= lim / d; p.z *= lim / d; }
@@ -13321,14 +13327,18 @@ function makeCI(d, n) {
     });
     C.deckY = (b, t) => lerp(b.ha, b.hb, t) + Math.sin(Math.PI * t) * b.arch;
     C.groundY = (x, z) => {
-        for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 3 && along < D.LEN + 3 && Math.abs(side) < 3) return 0; }
+        for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 0 && along < D.LEN + 3 && Math.abs(side) < 3) return Math.max(0, C.terrain(x, z)); }
         const base = Math.max(-0.4, C.terrain(x, z));
         for (const b of C.bridges) { const [sd, t] = segDist(x, z, b.ax, b.az, b.bx, b.bz); if (sd < 2) return Math.max(base, C.deckY(b, t)); }
         return base;
     };
     C.onLand = (x, z) => Math.hypot(x, z) < C.shoreAt(x, z) - 3 || isles.some(q => Math.hypot(x - q.x, z - q.z) < isleR(q, x, z) - 2.5) || C.bridges.some(b => segDist(x, z, b.ax, b.az, b.bx, b.bz)[0] < 1.5);
     C.clamp = p => {
-        for (const D of C.DOCKS) { const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP); if (along > 3.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; } }
+        for (const D of C.DOCKS) { // a dock starts right where the walkable land stops (3 m in from the shore), so from the beach you step straight onto its planks
+            const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP);
+            if (!(along > -0.5 && along < D.LEN + 3 && Math.abs(side) < (along < 3.5 ? 2.4 : 6)) || (along < 3.5 && C.onLand(p.x, p.z))) continue;
+            const a = clamp(along, 0.3, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return;
+        }
         if (C.onLand(p.x, p.z)) return;
         // off the land: back to the nearest place you can stand (the main shore, an island's shore, or a bridge, between its rails)
         let best = null, bd = 1e9; const tryP = (x, z) => { const k = (x - p.x) ** 2 + (z - p.z) ** 2; if (k < bd) { bd = k; best = [x, z]; } };
@@ -13446,22 +13456,36 @@ function buildCI(C) {
         const fl = new THREE.PointLight(0xff9a40, 18, 18, 1.6); fl.position.set(0, P + 2, -3); scene.add(fl); C.fireLight = fl;
         circles.push({ x: 0, z: -3, r: 1.3 }); C.emit.push({ x: 0, y: P + 2, z: -3, rate: 1.0, acc: 0.3 });
         const cl = label(C.LM[0].name, "#ffd890", 3.4, 0.8); cl.position.set(0, P + 4.6, -3); cl.maxD = 90;
-        const tent = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.6, 4), lamb(ciHex(d.colors && d.colors.tent, 0xc89a5a))); tent.position.set(C.BED.x - 1.5, P + 1.3, C.BED.z + 1.6); tent.rotation.y = Math.PI / 4; scene.add(tent);
+        // the island's own architecture: any camp building can be one built from parts in the Studio (d.camp: bed, forge, post, witch → prop keys).
+        // It stands just behind its spot, facing the fire, so the bed, the keepers and where you stand to use them stay clear
+        const own = k => { const B = d.camp && PROPS[d.camp[k]]; return B && B.custom ? B : null; };
+        const ownBuilding = (at, B) => {
+            const len = Math.hypot(at.x, at.z) || 1, r = clamp(B.r || 2.5, 1, 6), x = at.x + (at.x / len) * (r + 0.6), z = at.z + (at.z / len) * (r + 0.6);
+            const g = new THREE.Group(); g.position.set(x, P, z); g.rotation.y = Math.atan2(-x, -z); B.make(g); scene.add(g);
+            circles.push({ x, z, r }); return Math.max(P + 3, new THREE.Box3().setFromObject(g).max.y);
+        };
+        const stallOr = (at, k, a, b, col, roof) => { // the usual stall, or the island's own building with its keeper standing out front
+            const B = own(k); if (!B) return { g: stall3(at, a, b, col, roof), y: P + 6.2, z: -0.6 };
+            const top = ownBuilding(at, B), g = new THREE.Group(); g.position.set(at.x, P, at.z); g.rotation.y = Math.atan2(-at.x, -at.z); scene.add(g);
+            return { g, y: Math.max(P + 6.2, top + 1.2), z: 0 };
+        };
+        const hut = own("bed");
+        if (hut) ownBuilding(C.BED, hut);
+        else { const tent = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.6, 4), lamb(ciHex(d.colors && d.colors.tent, 0xc89a5a))); tent.position.set(C.BED.x - 1.5, P + 1.3, C.BED.z + 1.6); tent.rotation.y = Math.PI / 4; scene.add(tent); circles.push({ x: C.BED.x - 1.5, z: C.BED.z + 1.6, r: 1.8 }); }
         const bed = new THREE.Group(); bed.position.set(C.BED.x, P, C.BED.z); scene.add(bed); part(bed, BOX, wood, 0, 0.3, 0, 1.4, 0.3, 2.3); part(bed, BOX, lamb(0x8a2a3a), 0, 0.52, -0.3, 1.3, 0.14, 1.5);
-        circles.push({ x: C.BED.x - 1.5, z: C.BED.z + 1.6, r: 1.8 });
         const bl = label("BED", "#ffe0b0", 2, 0.6); bl.position.set(C.BED.x, P + 3.2, C.BED.z);
-        const gS = stall3(C.SMITH, "THE FORGE", "CRAFT AXES · GUNS", "#ffb060", 0x4a3020);
+        const sS = stallOr(C.SMITH, "forge", "THE FORGE", "CRAFT AXES · GUNS", "#ffb060", 0x4a3020), gS = sS.g;
         const smith = makeHumanoid({ face: "smith", skin: 0xe8b890, shirt: 0x5a3a2a, pants: 0x2a2a3a, apron: 0x3a2a1a, beard: 0x6a4a2a, hat: "cap", hatCol: 0x2a2a30, wide: 1.3, belly: true });
-        smith.g.position.set(0, 0, -0.6); gS.add(smith.g); smith.yaw = gS.rotation.y; C.npcs.push(giveHammer(smith));
-        const l1 = label("THE FORGE", "#ffb060", 3.2, 0.8); l1.position.set(C.SMITH.x, P + 6.2, C.SMITH.z);
-        const gD = stall3(C.DEPOT, "TRADING POST", "SELL MATERIALS", "#ffd040", 0x4a3020);
+        smith.g.position.set(0, 0, sS.z); gS.add(smith.g); smith.yaw = gS.rotation.y; C.npcs.push(giveHammer(smith));
+        const l1 = label("THE FORGE", "#ffb060", 3.2, 0.8); l1.position.set(C.SMITH.x, sS.y, C.SMITH.z);
+        const sD = stallOr(C.DEPOT, "post", "TRADING POST", "SELL MATERIALS", "#ffd040", 0x4a3020), gD = sD.g;
         const clerk = makeHumanoid({ face: "clerk", skin: 0xf0c8a0, shirt: 0x2a6a3a, vest: 0xf2f2f2, pants: 0x2a2a3a, hair: 0x8a5a2a, hat: "cap", hatCol: 0xf2f2f2 });
-        clerk.g.position.set(0, 0, -0.6); gD.add(clerk.g); clerk.yaw = gD.rotation.y; C.npcs.push(clerk);
-        const l2 = label("TRADING POST", "#ffd040", 3.6, 0.8); l2.position.set(C.DEPOT.x, P + 6.2, C.DEPOT.z);
-        const gW = stall3(C.WITCH, "THE WITCH", "BREWS · TONICS", "#c8a0ff", 0x3a2a5a);
+        clerk.g.position.set(0, 0, sD.z); gD.add(clerk.g); clerk.yaw = gD.rotation.y; C.npcs.push(clerk);
+        const l2 = label("TRADING POST", "#ffd040", 3.6, 0.8); l2.position.set(C.DEPOT.x, sD.y, C.DEPOT.z);
+        const sW = stallOr(C.WITCH, "witch", "THE WITCH", "BREWS · TONICS", "#c8a0ff", 0x3a2a5a), gW = sW.g;
         const witch = makeHumanoid({ face: "witch", skin: 0xc8e0b0, shirt: 0x3a2a5a, pants: 0x1a1a2a, hair: 0x2a1a3a, hat: "witch", hatCol: 0x2a1a3a });
-        witch.g.position.set(0, 0, -0.6); gW.add(witch.g); witch.yaw = gW.rotation.y; C.npcs.push(witch);
-        const l3 = label("THE WITCH", "#c8a0ff", 3.2, 0.8); l3.position.set(C.WITCH.x, P + 6.2, C.WITCH.z);
+        witch.g.position.set(0, 0, sW.z); gW.add(witch.g); witch.yaw = gW.rotation.y; C.npcs.push(witch);
+        const l3 = label("THE WITCH", "#c8a0ff", 3.2, 0.8); l3.position.set(C.WITCH.x, sW.y, C.WITCH.z);
         for (const g of [gS, gD, gW]) g.position.y = P;
     }
     // ----- docks: arrivals, and the ferry to the next island -----
@@ -13535,12 +13559,68 @@ function enterCI(C) {
     resetChests();
 }
 function updateCustomIsles(dt) {
+    isleUI(CI() ? CI().d.ui || null : null);
     const C = CI(); if (!C || !C.built) return;
     updateNpcs(dt, C.npcs);
     if (C.fireLight) C.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
     for (const [b, ph] of [[C.boatArr, 0], [C.boatNext, 1.3]]) if (b) { b.position.y = -0.15 + Math.sin(time * 1.1 + ph) * 0.07; b.rotation.z = Math.sin(time * 0.9 + ph) * 0.03; }
     if (C.man) C.man.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
 }
+// ---- a Studio island's own look for the menus and the HUD while you're on it (d.ui): colours, a heading font, rounder or squarer corners ----
+const ISLE_FONTS = ["Segoe UI", "Georgia", "Palatino Linotype", "Book Antiqua", "Trebuchet MS", "Consolas", "Courier New", "Impact", "Segoe Script", "Gabriola", "Comic Sans MS"];
+let uiOn = null;
+function isleUI(u) {
+    if (u === uiOn) return; uiOn = u;
+    const root = document.documentElement.style, hx = v => (/^#[0-9a-f]{6}$/i.test(String(v)) ? String(v) : null), rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)).join(",");
+    let st = document.getElementById("isleUI"); if (!st) { st = document.createElement("style"); st.id = "isleUI"; document.head.appendChild(st); }
+    for (const k of ["--amber", "--amber2", "--ink", "--bg", "--line"]) root.removeProperty(k);
+    st.textContent = "";
+    if (!u) return;
+    const acc = hx(u.accent), bg = hx(u.panel), ink = hx(u.ink), f = ISLE_FONTS.includes(u.font) ? u.font : null, c = u.corner === undefined || u.corner === "" ? null : clamp(+u.corner || 0, 0, 28);
+    if (acc) { root.setProperty("--amber", acc); root.setProperty("--amber2", acc); root.setProperty("--line", `rgba(${rgb(acc)}, .4)`); }
+    if (bg) root.setProperty("--bg", `rgba(${rgb(bg)}, .9)`);
+    if (ink) root.setProperty("--ink", ink);
+    st.textContent = (f ? `.panel h2, .panel h4, .talk .who, .csTx b, #isleName { font-family: "${f}", "Segoe UI", sans-serif !important; }` : "") + (c !== null ? `.panel, .flist > div, .card, .csItem, #contract { border-radius: ${c}px !important; }` : "");
+}
+// ---- shops: a placed person or building with act { type: "shop", title, who, greeting, color, items }. Each item costs cash and/or materials and gives
+// a buff for a while, materials, cash or a full heal: { name, desc, icon, cash, mats: { key: n }, give: { buff, secs } | { mat, n } | { cash } | { heal: true } } ----
+let cshop = null;
+const escH = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const cshopItems = a => (Array.isArray(a && a.items) ? a.items : []).filter(it => it && typeof it === "object").slice(0, 12);
+const itemCash = it => Math.max(0, Math.round(+it.cash || 0)), itemMats = it => Object.entries(it.mats && typeof it.mats === "object" ? it.mats : {}).filter(([k, n]) => MATS[k] && +n > 0).map(([k, n]) => [k, Math.round(+n)]);
+const canBuy = it => save.money >= itemCash(it) && itemMats(it).every(([k, n]) => (save.mats[k] || 0) >= n);
+function giveTxt(g) {
+    g = g || {}; const out = [];
+    if (BUFFS[g.buff]) out.push(`${BUFFS[g.buff].name} for ${mmss(clamp(+g.secs || 120, 10, 900))}`);
+    if (MATS[g.mat] && +g.n > 0) out.push(`+${Math.round(+g.n)} ${MATS[g.mat].name}`);
+    if (+g.cash > 0) out.push("+" + money(+g.cash));
+    if (g.heal) out.push("heals you to full");
+    return out.join(", ") || "a keepsake";
+}
+function openCShop(o) { cshop = o; openPanel("cshop"); }
+function renderCShop() {
+    const a = (cshop && cshop.act) || {}, col = /^#[0-9a-f]{6}$/i.test(String(a.color)) ? a.color : "";
+    $("csTitle").textContent = String(a.title || "THE SHOP").toUpperCase(); $("csTitle").style.color = col; $("panelCShop").style.borderColor = col;
+    $("csSay").textContent = a.greeting ? `${a.who ? a.who + ": " : ""}"${a.greeting}"` : "";
+    $("csItems").innerHTML = cshopItems(a).map((it, i) => {
+        const cost = [itemCash(it) ? money(itemCash(it)) : "", ...itemMats(it).map(([k, n]) => `${n} ${MATS[k].name} (${save.mats[k] || 0})`)].filter(Boolean).join(" + ") || "FREE";
+        return `<div class="csItem"><div class="csIc">${escH(String(it.icon || "✦").slice(0, 4))}</div><div class="csTx"><b>${escH(String(it.name || "Something").slice(0, 40))}</b><small>${escH(String(it.desc || "").slice(0, 160))}</small><i>${escH(giveTxt(it.give))}</i></div><button class="btn csBuy" data-buy="${i}"${canBuy(it) ? "" : " disabled"}>${escH(cost)}</button></div>`;
+    }).join("") || `<div class="csItem"><small>Nothing for sale yet.</small></div>`;
+    $("csFoot").textContent = `you have ${money(save.money)} · Esc to close`;
+}
+function buyCShop(i) {
+    const it = cshopItems(cshop && cshop.act)[i]; if (!it) return;
+    if (!canBuy(it)) { toast("You can't afford that yet.", "bad"); return; }
+    save.money -= itemCash(it); for (const [k, n] of itemMats(it)) save.mats[k] -= n;
+    const g = it.give || {};
+    if (BUFFS[g.buff]) giveBuff(g.buff, clamp(+g.secs || 120, 10, 900));
+    if (MATS[g.mat] && +g.n > 0) save.mats[g.mat] = (save.mats[g.mat] || 0) + Math.round(+g.n);
+    if (+g.cash > 0) save.money += Math.round(+g.cash);
+    if (g.heal) player.hp = player.maxHp;
+    sfx(660, 0.15, "triangle", 0.1, 1.4); toast(`${String(it.name || "Bought it")}: ${giveTxt(g)}`, "good");
+    writeSave(); renderCShop();
+}
+$("csItems").addEventListener("click", e => { const b = e.target.closest("[data-buy]"); if (b && !b.disabled) buyCShop(+b.dataset.buy); });
 // ---- the ferry onwards: from the Iceberg to the first Studio island, and from each Studio island to the next ----
 function rebirthReadyFrom(from) {
     if (from >= 6) { const nx = customIsle(from + 1); return !!nx && nx.ready(); }
@@ -14172,7 +14252,7 @@ function placedTick(dt) {
     if (npcs.length) updateNpcs(dt, npcs);
 }
 // walking up to something interactive
-const ACT_R = { talk: 2.8, read: 2.6, loot: 2.4, shrine: 2.8, portal: 2.2 };
+const ACT_R = { talk: 2.8, read: 2.6, loot: 2.4, shrine: 2.8, portal: 2.2, shop: 3 };
 function nearestPlaced() {
     let best = null, bd = 1e9;
     for (const rec of placed) {
@@ -14190,6 +14270,7 @@ function placedPrompt(o) {
     if (a.type === "loot") return (a.every === "day" ? done === save.day : done !== undefined) ? (a.every === "day" ? "Empty. It fills again tomorrow" : "Empty") : "[F] Open";
     if (a.type === "shrine") return done === save.day ? "The shrine is quiet until tomorrow" : `[F] ${a.verb || "Pray at the shrine"}`;
     if (a.type === "portal") return "[F] Step through";
+    if (a.type === "shop") return `[F] Shop${a.title ? " at " + a.title : ""}`;
     return "[F] Use";
 }
 function placedInteract(o) {
@@ -14216,6 +14297,7 @@ function placedInteract(o) {
         toast(String(a.message || "You feel blessed.") + (b ? ` ${BUFFS[b].name} for ${mmss(buffLeft(b))}.` : ""), "good");
         writeSave(); return;
     }
+    if (a.type === "shop") { openCShop(o); return; }
     if (a.type === "portal") {
         const to = placed.find(p => p.o.id === a.to && +p.o.isle === isle);
         if (!to) { toast("The portal flickers. It doesn't lead anywhere yet.", "bad"); return; }
@@ -14292,6 +14374,7 @@ $("gfxPick").classList.remove("show");
 // debug/test handle (used by automated checks, harmless in play)
 if (DEBUG) window.__ts4 = {
     save, player, trees, camera, renderer, gfx: { GQ, FX, sunL, grass, TSU, MODERN, hemiL, skyDome }, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,
+    docks: () => (CI() ? CI().DOCKS : isle === 6 ? DOCKS6 : []).map(D => ({ kind: D.kind, B: { x: D.B.x, z: D.B.z }, DIR: { x: D.DIR.x, z: D.DIR.z }, LEN: D.LEN })), // where this island's docks are, for walking tests
     get state() { return state; },
     get hour() { return hourNow(); },
     play() { state = "playing"; renderMenu(); },
@@ -14319,7 +14402,7 @@ if (STUDIO) {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
         CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, CONTENT_ANIMALS, defineCustomProp, dropCustomProp, PART_SHAPES,
         WILD_KINDS, ANIMAL_ROLES, ANIMAL_WAYS, defineCustomAnimal, dropCustomAnimal, makeCustomAnimal, makePartsGroup, releaseAnimals,
-        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson,
+        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson, ISLE_FONTS, openCShop,
         MOVES, builtinAt, builtinIndexOf, moveHome, placeBuiltin, ciReshape, ciSettle, terrainMesh, wildBy, ABIL, BASE_AXES, ciAxes, RECIPES, GLOW_MATS, resetIsleTrees,
         setSeeAll(v) { studioSeeAll = !!v; }, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,

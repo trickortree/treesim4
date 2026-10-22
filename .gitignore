@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.log
 .claude/
+studio/my-themes.json
+content/*.tmp

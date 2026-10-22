@@ -8,6 +8,8 @@
     "start": "electron .",
     "studio": "electron . --studio",
     "studio:shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File studio/make-shortcut.ps1",
+    "sync": "node studio/sync.js",
+    "studio:update": "node studio/sync.js && npm install && npm run studio",
     "build": "electron-builder --win"
   },
   "devDependencies": {

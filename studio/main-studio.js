@@ -35,13 +35,14 @@ function findClaude() {
     return isFile(local) ? local : null;
 }
 
-let busy = false;
+let busy = 0; // requests running now: a whole island asks for its buildings, shops and people a few at a time
 function askClaude({ prompt, system, model }) {
     return new Promise(resolve => {
         const exe = findClaude();
         if (!exe) { resolve({ ok: false, error: "Couldn't find Claude Code. Install it, or open the Claude desktop app once so its copy is downloaded." }); return; }
-        if (busy) { resolve({ ok: false, error: "Claude is still working on the last request." }); return; }
-        busy = true;
+        if (busy >= 3) { resolve({ ok: false, error: "Claude is still working on the last requests." }); return; }
+        busy++;
+        let open = true;
         const m = MODELS.includes(model) ? model : "sonnet";
         // no tools, no MCP servers, no settings or hooks: just one short answer, so it costs as little as possible
         const args = ["-p", "--output-format", "json", "--model", m, "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence", "--system-prompt", String(system || "")];
@@ -51,7 +52,7 @@ function askClaude({ prompt, system, model }) {
         const child = spawn(cmd ? `"${exe}"` : exe, cmd ? args.map(a => `"${a.replace(/"/g, '\\"')}"`) : args, { cwd: os.tmpdir(), env, windowsHide: true, shell: cmd });
         const t0 = Date.now();
         let out = "", err = "";
-        const done = r => { if (!busy) return; busy = false; clearTimeout(timer); resolve(r); };
+        const done = r => { if (!open) return; open = false; busy--; clearTimeout(timer); resolve(r); };
         const timer = setTimeout(() => { try { child.kill(); } catch (e) { /* gone */ } done({ ok: false, error: "Claude took too long (over 2.5 minutes)." }); }, 150000);
         child.stdout.on("data", d => (out += d));
         child.stderr.on("data", d => (err += d));
@@ -69,8 +70,8 @@ function askClaude({ prompt, system, model }) {
 
 // ---- your work, kept safe outside the Studio's folder: Documents\Tree Sim 4 Studio (OneDrive syncs it if your Documents are synced).
 // Every save goes there too, so downloading or updating the Studio never loses it, and on start the Studio offers to bring it back ----
-function workspace(root) {
-    const crypto = require("crypto"), WS = path.join(require("electron").app.getPath("documents"), "Tree Sim 4 Studio"), wsContent = path.join(WS, "content"), manifestF = path.join(WS, "manifest.json");
+function workspace(root, docs) { // docs: the Documents folder (npm run sync passes it; the Studio asks Electron)
+    const crypto = require("crypto"), WS = path.join(docs || require("electron").app.getPath("documents"), "Tree Sim 4 Studio"), wsContent = path.join(WS, "content"), manifestF = path.join(WS, "manifest.json");
     const hash = t => crypto.createHash("sha1").update(t).digest("hex");
     const readT = f => { try { return fs.readFileSync(f, "utf8"); } catch (e) { return null; } };
     const readManifest = () => { try { return JSON.parse(fs.readFileSync(manifestF, "utf8")); } catch (e) { return { files: {} }; } };
@@ -150,6 +151,24 @@ function setup(ipcMain, root) {
         finally { releasing = false; }
     });
     ipcMain.handle("studio:ciStatus", (e, version) => rel.ciStatus(root, String(version || "")));
+    // ⟳ Sync (studio/sync.js): bring in what's on GitHub and keep your work, then the Studio restarts to load it
+    let syncing = false;
+    ipcMain.handle("studio:sync", async e => {
+        if (syncing || releasing) return { ok: false, error: "A sync or a release is already running.", notes: [] };
+        syncing = true;
+        const step = s => { if (!e.sender.isDestroyed()) e.sender.send("studio:syncStep", s); };
+        try {
+            const r = await require("./sync.js").sync(root, { log: step });
+            if (r.deps) {
+                step("Installing new packages…");
+                const done = await new Promise(res => require("child_process").exec("npm install", { cwd: root, windowsHide: true, timeout: 600000 }, err => res(!err)));
+                if (!done) r.notes.push("Installing the new packages didn't finish: run npm install in the game folder before starting the Studio again.");
+            }
+            return r;
+        } catch (err) { return { ok: false, error: String(err && err.message || err), notes: [] }; }
+        finally { syncing = false; }
+    });
+    ipcMain.handle("studio:restart", () => { const { app } = require("electron"); app.relaunch(); app.exit(0); });
     ipcMain.handle("studio:openUrl", (e, url) => { if (/^https:\/\/github\.com\//.test(String(url))) require("electron").shell.openExternal(String(url)); });
     ipcMain.handle("studio:save", async (e, name, data) => {
         if (!CONTENT[name]) return { ok: false, error: "unknown content file: " + name };
@@ -165,4 +184,4 @@ function setup(ipcMain, root) {
     ipcMain.handle("studio:askClaude", (e, req) => askClaude(req || {}));
 }
 
-module.exports = { setup, findClaude };
+module.exports = { setup, findClaude, workspace, CONTENT, HEADERS };

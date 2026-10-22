@@ -17,5 +17,9 @@ contextBridge.exposeInMainWorld("ts4Studio", {
     release: req => ipcRenderer.invoke("studio:release", req),
     onReleaseStep: cb => ipcRenderer.on("studio:relStep", (_e, s) => cb(s)),
     ciStatus: version => ipcRenderer.invoke("studio:ciStatus", version),
+    // ⟳ Sync with GitHub
+    sync: () => ipcRenderer.invoke("studio:sync"),
+    onSyncStep: cb => ipcRenderer.on("studio:syncStep", (_e, s) => cb(s)),
+    restart: () => ipcRenderer.invoke("studio:restart"),
     openUrl: url => ipcRenderer.invoke("studio:openUrl", url)
 });
