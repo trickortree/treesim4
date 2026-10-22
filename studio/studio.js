@@ -115,6 +115,7 @@ bar.innerHTML = `<div class="logo">TREE SIM 4 STUDIO <span id="stVer" style="fon
   <button class="stB" data-gz="rotate" title="Rotate (E)">Rotate <small>E</small></button>
   <button class="stB" data-gz="scale" title="Size (R)">Size <small>R</small></button>
   <button class="stB" id="stSnap" title="Snap moves to 0.5 m, turns to 15°">Snap</button>
+  <button class="stB" id="stBuilt" title="Move, turn, resize or hide anything the game built: beds, stalls, signs, rocks…">✥ Built-ins</button>
   <div class="sep"></div>
   <label title="Time of day">🕑 <input class="stIn" id="stClock" type="range" min="0" max="24" step="0.25" style="width:110px;vertical-align:middle"></label>
   <select class="stSel" id="stWx" title="Weather"><option value="clear">Clear</option><option value="cloudy">Cloudy</option><option value="rain">Rain</option><option value="storm">Storm</option><option value="fog">Fog</option></select>
@@ -172,7 +173,7 @@ function afterSky() {
     if (fogMode === "off") { f.near = 4000; f.far = 9000; }
     else if (fogMode === "light") { f.near *= 4; f.far *= 6; }
 }
-T.setStudioHook({ frame: dt => { if (mode === "edit") fly(dt); }, afterSky });
+T.setStudioHook({ frame: dt => { if (mode === "edit") fly(dt); if (!sculptOn()) brushRing.visible = false; }, afterSky });
 
 // ---------- picking things under the mouse ----------
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
@@ -214,10 +215,11 @@ const selRec = () => (sel ? T.placedFind(sel) : null);
 let lastS = 1;
 tc.addEventListener("dragging-changed", e => {
     if (pmGizmo) { if (!e.value) { pmFromGizmo(); pmApply(true, true); } return; } // a part of the prop you're making
+    if (bsel) { if (!e.value) bFromGizmo(true); return; } // something the game built
     if (e.value) { pushUndo("drag"); lastS = +sel.s || 1; }
     else { fromGizmo(); changed(); renderInspector(); }
 });
-tc.addEventListener("objectChange", () => (pmGizmo ? pmFromGizmo() : fromGizmo()));
+tc.addEventListener("objectChange", () => (pmGizmo ? pmFromGizmo() : bsel ? bFromGizmo(false) : fromGizmo()));
 function fromGizmo() {
     const rec = selRec(); if (!rec) return;
     const g = rec.g, sx = +sel.sx || 1, sy = +sel.sy || 1, sz = +sel.sz || 1;
@@ -231,13 +233,14 @@ function fromGizmo() {
 }
 function select(o) {
     if (pmGizmo) { pmGizmo = false; partSel = -1; if (makerTab()) renderMaker(); }
+    bsel = null;
     const prev = selRec(); if (prev) prev.paused = false;
     sel = o;
     const rec = selRec();
     if (rec) { rec.paused = true; T.placedPose(rec); tc.attach(rec.g); } else tc.detach(); // it holds still while you edit it
     renderInspector(); renderObjects();
 }
-function deselect() { if (pmGizmo) { pmGizmo = false; partSel = -1; if (makerTab()) renderMaker(); } const prev = selRec(); if (prev) prev.paused = false; sel = null; tc.detach(); renderInspector(); renderObjects(); }
+function deselect() { if (pmGizmo) { pmGizmo = false; partSel = -1; if (makerTab()) renderMaker(); } bsel = null; const prev = selRec(); if (prev) prev.paused = false; sel = null; tc.detach(); renderInspector(); renderObjects(); }
 
 // ---------- undo ----------
 const undo = [], redo = [];
@@ -274,7 +277,7 @@ function changed(what = "world") {
 async function saveAll(quiet) {
     clearTimeout(saveT);
     const jobs = [];
-    if (worldDirty) jobs.push(S.save("world", { version: 1, objects: world.objects }).then(r => { if (r.ok) worldDirty = false; return r; }));
+    if (worldDirty) jobs.push(S.save("world", { version: 1, objects: world.objects, moves: T.MOVES }).then(r => { if (r.ok) worldDirty = false; return r; }));
     if (treesDirty) jobs.push(S.save("trees", trees).then(r => { if (r.ok) treesDirty = false; return r; }));
     if (islandsDirty) jobs.push(S.save("islands", islands).then(r => { if (r.ok) islandsDirty = false; return r; }));
     if (propsDirty) jobs.push(S.save("props", myProps).then(r => { if (r.ok) propsDirty = false; return r; }));
@@ -387,6 +390,7 @@ const hexOf = n => "#" + ((n >>> 0) & 0xffffff).toString(16).padStart(6, "0");
 const objName = o => (o.kind === "sign" ? (o.act && o.act.type === "read" ? "📜 " : "🪧 ") + ((o.text || "").split("\n")[0].slice(0, 22) || "Sign") : o.kind === "npc" ? "🧍 " + ((o.act && o.act.who) || o.label || "Person") : o.kind === "treespot" ? "🌲 " + ((T.TYPES[o.tree] || {}).name || "Tree spot") : (T.PROPS[o.prop] || T.PROPS.rock).name);
 function renderInspector() {
     const box = $("stInsp");
+    if (bsel) { renderBuiltinInspector(); return; }
     if (!sel) { right.classList.add("empty"); box.innerHTML = ""; return; }
     right.classList.remove("empty");
     const o = sel, P = o.kind === "prop" ? T.PROPS[o.prop] || T.PROPS.rock : null, a = o.act || {};
@@ -987,7 +991,7 @@ function featRows(d) {
         return h + `</div>`;
     }).join("");
 }
-const ISLE_JUMPS = [["iSecLand", "Shape"], ["iSecFeat", "Features"], ["iSecEco", "Ecosystem"], ["iSecEcon", "Materials & axes"], ["iSecStory", "Story"]];
+const ISLE_JUMPS = [["iSecLand", "Shape"], ["iSecSculpt", "Sculpt"], ["iSecFeat", "Features"], ["iSecEco", "Ecosystem"], ["iSecEcon", "Materials & axes"], ["iSecStory", "Story"]];
 function renderIslands() {
     const rng = (id, label, v, min, max, step, unit = "") => `<div class="stRow"><label>${label}</label><span style="display:flex;align-items:center;gap:6px"><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${v}" style="width:120px"><small id="${id}V" style="width:38px;text-align:right">${v}${unit}</small></span></div>`;
     const live = T.customIsle(T.CI_BASE + islandSel); // colours you haven't picked show the ones the game is using
@@ -1031,6 +1035,13 @@ function renderIslands() {
       <div class="stH" id="iSecLand">SHAPE</div>${rng("iRad", "Size", d.radius || 130, 70, 220, 5, "m")}${rng("iWob", "Wobbly coast", d.wobble ?? 0.12, 0, 0.35, 0.01)}
       <div class="stRow"><label>Seed</label><span><input class="stIn" type="number" id="iSeed" value="${d.seed}" step="0.1"> <button class="stB" id="iDice">🎲</button></span></div>
       <div class="stH">LAND</div>${rng("iPlat", "Camp height", d.plateau ?? 2.5, 0.6, 14, 0.1, "m")}${rng("iHills", "Hills", d.hills ?? 8, 0, 40, 1)}${rng("iHillS", "Hill size", d.hillSize || 1, 0.3, 3, 0.1)}${rng("iBeach", "Beach width", d.beach ?? 6, 2, 24, 1, "m")}${rng("iCliff", "Sea cliffs", d.cliffs || 0, 0, 1, 0.05)}${rng("iDecor", "Rocks and bushes", d.decor ?? 1, 0, 3, 0.1)}
+      <div class="stH" id="iSecSculpt">SCULPT THE GROUND <small>${(d.sculpt || []).length} brush dabs</small></div>
+      ${curIsle() === n ? `<div class="stBtns" style="margin:0">${[["", "Off"], ["raise", "⬆ Raise"], ["lower", "⬇ Lower"], ["flat", "▬ Flatten"], ["erase", "⌫ Erase"]].map(([k, l]) => `<button class="stB${sculpt.mode === k ? " on" : ""}" data-sculpt="${k}" style="padding:4px 7px;font-size:11px">${l}</button>`).join("")}</div>
+        <div class="stRow"><label>Brush size</label><span style="display:flex;align-items:center;gap:6px"><input type="range" id="iBrushR" min="2" max="30" step="1" value="${sculpt.r}" style="width:120px"><small style="width:38px;text-align:right">${sculpt.r}m</small></span></div>
+        <div class="stRow"><label>Strength</label><span style="display:flex;align-items:center;gap:6px"><input type="range" id="iBrushK" min="0.1" max="3" step="0.1" value="${sculpt.k}" style="width:120px"><small style="width:38px;text-align:right">${sculpt.k}</small></span></div>
+        <div class="stBtns"><button class="stB" id="iSculptUndo">↶ Undo last stroke</button><button class="stB warn" id="iSculptClear">Clear all</button></div>
+        <div class="stHint">Pick a brush, then hold the left mouse button on the ground and paint. Flatten levels everything to the height where you start. Right-drag still looks around.</div>`
+        : `<div class="stHint" style="margin-top:0">Press <b>Go there</b>, then paint the ground with a brush.</div>`}
       <div class="stH" id="iSecFeat">FEATURES <small>${(d.features || []).length} · click one to edit</small></div>
       <div class="stList" id="iFeats">${featRows(d) || `<div class="stHint">No features: a plain island.</div>`}</div>
       <div class="stBtns"><select class="stSel" id="iFeatType" style="flex:1">${Object.entries(FTYPES).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join("")}</select><button class="stB" id="iFeatAdd">+ Add</button></div>
@@ -1123,6 +1134,12 @@ function bindIslands() {
     range("iArrDir", v => (d.arrDir = v)); range("iNextDir", v => (d.nextDir = v));
     on("iSeed", "input", e => { d.seed = +e.target.value || 1; islandChanged(); });
     on("iDice", "click", () => { d.seed = r3(1 + Math.random() * 8); islandChanged(true); });
+    // the terrain tool
+    all("[data-sculpt]", "click", b => { sculpt.mode = b.dataset.sculpt; if (sculpt.mode) { deselect(); if (builtMode) setBuiltMode(false); } brushRing.visible = false; renderIslands(); say(sculpt.mode ? "Hold the left mouse button on the ground to paint" : "Sculpting off"); });
+    on("iBrushR", "input", e => { sculpt.r = +e.target.value; pref("brushR", sculpt.r); e.target.nextElementSibling.textContent = sculpt.r + "m"; brushRing.scale.setScalar(sculpt.r); });
+    on("iBrushK", "input", e => { sculpt.k = +e.target.value; pref("brushK", sculpt.k); e.target.nextElementSibling.textContent = sculpt.k; });
+    on("iSculptUndo", "click", undoStroke);
+    on("iSculptClear", "click", () => { if (!confirm(`Clear all the sculpting on ${d.name}?`)) return; d.sculpt = []; strokes = []; const C = T.customIsle(n); if (C) { C.setSculpt([]); T.ciReshape(C); T.ciSettle(C); } changed("islands"); renderIslands(); });
     // features
     body.querySelectorAll("[data-fopen]").forEach(it => it.addEventListener("click", e => { if (e.target.closest("[data-fdel]")) return; const i = +it.dataset.fopen; featOpen = featOpen === i ? -1 : i; renderIslands(); }));
     all("[data-fdel]", "click", b => { d.features.splice(+b.dataset.fdel, 1); featOpen = -1; islandChanged(true); });
@@ -1428,6 +1445,80 @@ function bindMaker() {
     pn("ptSx", "sx", 0.02, 20); pn("ptSy", "sy", 0.02, 20); pn("ptSz", "sz", 0.02, 20); pn("ptOp", "opacity", 0.1, 1);
 }
 
+// ---------- moving what the game built (a bed, a stall, a rock...): saved as "moves" in content/world.js ----------
+let builtMode = false, bsel = null; // bsel: { n, i, o }
+const moveOf = (n, i) => T.MOVES.find(m => +m.isle === n && m.i === i);
+function setBuiltMode(on) { builtMode = on; $("stBuilt").classList.toggle("on", on); if (!on && bsel) deselect(); if (on) sculpt.mode = ""; say(on ? "Click anything the game built to move it (W move, E turn, R size)" : "Built-ins: off", 3000); }
+function pickBuiltin(mx, my) {
+    const n = curIsle(), G = T.isleGroup(n); if (!G) return null;
+    setRay(mx, my);
+    for (const h of ray.intersectObjects(G.children, true)) { if (!h.object.visible) continue; const i = T.builtinIndexOf(n, h.object); if (i >= 0) return { n, i }; }
+    return null;
+}
+function selectBuiltin(b) {
+    if (sel || pmGizmo) deselect();
+    const o = T.builtinAt(b.n, b.i); if (!o) return;
+    T.moveHome(o, b.n); bsel = { n: b.n, i: b.i, o };
+    tc.attach(o); renderInspector();
+}
+function bFromGizmo(final) { // you dragged it: its move follows (it turns round, but never tips over)
+    if (!bsel) return;
+    const { n, i, o } = bsel, H = T.moveHome(o, n);
+    o.rotation.x = H.rot.x; o.rotation.z = H.rot.z;
+    let m = moveOf(n, i); if (!m) { m = { isle: n, i }; T.MOVES.push(m); }
+    const k0 = m.s || 1, ks = [o.scale.x / H.scale.x, o.scale.y / H.scale.y, o.scale.z / H.scale.z], k = ks.reduce((a, v) => (Math.abs(v - k0) > Math.abs(a - k0) ? v : a), k0);
+    m.x = r3(o.position.x); m.y = r3(o.position.y); m.z = r3(o.position.z); m.ry = r3(o.rotation.y); m.s = r3(Math.min(10, Math.max(0.1, k)));
+    if (gzMode === "scale") o.scale.copy(H.scale).multiplyScalar(m.s);
+    if (final) { T.placeBuiltin(n, m); changed("world"); renderInspector(); }
+}
+function renderBuiltinInspector() {
+    const box = $("stInsp"), m = moveOf(bsel.n, bsel.i) || {};
+    right.classList.remove("empty");
+    box.innerHTML = `<div class="stH">BUILT-IN THING <small>#${bsel.i} · ${esc(isleName(bsel.n))}</small></div>
+      <div class="stHint" style="margin-top:0">Part of the island the game builds. Drag the arrows: <b>W</b> move, <b>E</b> turn, <b>R</b> size. Its collisions, its floating label and its "press F" spot (a bed, a stall, the Ferryman) go with it.</div>
+      <div class="stBtns"><button class="stB" id="bHide">${m.hide ? "Show it again" : "Hide it"}</button><button class="stB warn" id="bReset">Put it back</button><button class="stB" id="bDone">Done</button></div>
+      <div class="stHint">Saved in <b>content/world.js</b> and ships on your next release.</div>`;
+    $("bHide").addEventListener("click", () => { let mm = moveOf(bsel.n, bsel.i); if (!mm) { mm = { isle: bsel.n, i: bsel.i }; T.MOVES.push(mm); } if (mm.hide) delete mm.hide; else mm.hide = true; T.placeBuiltin(bsel.n, mm); changed("world"); renderInspector(); });
+    $("bReset").addEventListener("click", () => { const { n, i } = bsel, at = T.MOVES.findIndex(q => +q.isle === n && q.i === i); if (at >= 0) T.MOVES.splice(at, 1); T.placeBuiltin(n, { isle: n, i }); changed("world"); renderInspector(); say("Back where the game put it"); });
+    $("bDone").addEventListener("click", () => deselect());
+}
+// ---------- the terrain tool: paint a Studio island's ground higher, lower or flat (saved with the island as brush dabs) ----------
+const sculpt = { mode: "", r: +pref("brushR") || 8, k: +pref("brushK") || 0.6 };
+let stroke = null, strokes = [], eraseT = 0;
+const brushRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 48), new THREE.MeshBasicMaterial({ color: 0xffd040, transparent: true, opacity: 0.85, depthTest: false, side: THREE.DoubleSide }));
+brushRing.rotation.x = -Math.PI / 2; brushRing.renderOrder = 999; brushRing.visible = false; T.scene.add(brushRing);
+const sculptIsle = () => { const d = islands[islandSel]; return d && curIsle() === T.CI_BASE + islandSel ? d : null; };
+const sculptOn = () => mode === "edit" && tab === "islands" && !!sculpt.mode && !!sculptIsle();
+function moveBrush(mx, my) {
+    const h = groundHit(mx, my);
+    brushRing.visible = !!h;
+    if (h) { brushRing.position.set(h.x, h.y + 0.15, h.z); brushRing.scale.setScalar(sculpt.r); if (stroke) dab(h); }
+}
+function dab(h, first) {
+    const d = sculptIsle(), C = T.customIsle(curIsle()); if (!d || !C || !stroke) return;
+    d.sculpt = Array.isArray(d.sculpt) ? d.sculpt : [];
+    if (sculpt.mode === "erase") { // takes away the dabs under the brush
+        if (!first && performance.now() - eraseT < 120) return; eraseT = performance.now();
+        const n0 = d.sculpt.length; d.sculpt = d.sculpt.filter(op => Math.hypot(op[0] - h.x, op[1] - h.z) > sculpt.r); if (d.sculpt.length === n0) return;
+        C.setSculpt(d.sculpt); T.ciReshape(C); strokes = []; stroke.dirty = true; return;
+    }
+    if (!first && Math.hypot(h.x - stroke.x, h.z - stroke.z) < sculpt.r * 0.3) return;
+    if (d.sculpt.length >= 4000) { say("That's as much sculpting as an island can hold: erase some first"); return; }
+    stroke.x = h.x; stroke.z = h.z;
+    const op = [r3(h.x), r3(h.z), sculpt.r, sculpt.mode === "flat" ? r3(stroke.t) : r3((sculpt.mode === "lower" ? -1 : 1) * sculpt.k * 0.3), sculpt.mode === "flat" ? 1 : 0];
+    d.sculpt.push(op); C.addSculpt(op); T.ciReshape(C, op[0], op[1], op[2]); stroke.dirty = true;
+}
+function startStroke(mx, my) { const h = groundHit(mx, my), d = sculptIsle(); if (!h || !d) return; stroke = { x: h.x, z: h.z, t: h.y, start: (d.sculpt || []).length, dirty: false }; dab(h, true); }
+function endStroke() {
+    const d = sculptIsle(), C = T.customIsle(curIsle()), s = stroke; stroke = null; if (!s || !d || !C || !s.dirty) return;
+    if (sculpt.mode !== "erase") strokes.push(s.start);
+    T.ciSettle(C); changed("islands"); renderIslands();
+}
+function undoStroke() {
+    const d = sculptIsle(), C = T.customIsle(curIsle()); if (!d || !C || !strokes.length) { say("Nothing to undo"); return; }
+    d.sculpt.length = Math.min(d.sculpt.length, strokes.pop()); C.setSculpt(d.sculpt); T.ciReshape(C); T.ciSettle(C); changed("islands"); renderIslands();
+}
+
 // ---------- play-testing ----------
 let camSaved = null;
 function play() {
@@ -1661,6 +1752,7 @@ bar.addEventListener("click", e => {
 });
 $("stIsle").addEventListener("change", e => { goIsle(e.target.value); e.target.blur(); });
 $("stSnap").addEventListener("click", () => { snap = !snap; pref("snap", snap ? "1" : "0"); applySnap(); });
+$("stBuilt").addEventListener("click", () => setBuiltMode(!builtMode));
 $("stClock").addEventListener("input", e => T.setClock(+e.target.value));
 $("stWx").addEventListener("change", e => { T.setWeather(e.target.value, false); e.target.blur(); });
 $("stFog").value = fogMode;
@@ -1682,13 +1774,16 @@ canvas.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
     if (placing) { commitPlacing(e.shiftKey); return; }
     if (tc.axis || tc.dragging) return; // the gizmo has it
+    if (sculptOn()) { startStroke(e.clientX, e.clientY); return; } // painting the ground
     if (makerTab() && pmPreview) { const i = pmPickPart(e.clientX, e.clientY); if (i >= 0) { pmSelectPart(i); return; } }
+    if (builtMode) { const b = pickBuiltin(e.clientX, e.clientY); if (b) selectBuiltin(b); else deselect(); return; }
     const o = pickPlaced(e.clientX, e.clientY);
     if (o) select(o); else deselect();
 });
 addEventListener("pointerup", e => {
     if (e.button === 2 && looking) { looking = false; tc.enabled = true; try { if (document.pointerLockElement === canvas && mode === "edit") document.exitPointerLock(); } catch (er) { /* not locked */ } for (const k in held) held[k] = false; }
     if (e.button === 1 && panning) { panning = false; tc.enabled = true; }
+    if (e.button === 0 && stroke) endStroke();
 });
 addEventListener("pointermove", e => {
     if (mode !== "edit") return;
@@ -1701,6 +1796,7 @@ addEventListener("pointermove", e => {
     if (panning) { const k = cam.speed * 0.012; cam.pos.addScaledVector(rightV(), -e.movementX * k); cam.pos.y += e.movementY * k; return; }
     mouse = { x: e.clientX, y: e.clientY };
     if (placing) movePlacing(e.clientX, e.clientY);
+    if (sculptOn()) moveBrush(e.clientX, e.clientY);
 });
 canvas.addEventListener("wheel", e => {
     if (mode !== "edit") return;

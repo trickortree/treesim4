@@ -3029,7 +3029,22 @@ addEventListener("mousemove", e => {
     player.pitch = clamp(player.pitch - my * 0.0022 * settings.sens * (settings.invert ? -1 : 1), -1.45, 1.45);
 });
 
+// a built-in thing moved in the Studio takes its "press F" spot with it: look again as if you stood by it where it used to be
 function nearest() {
+    const r = nearest0(); if (r || !MOVES.length) return r;
+    const px = player.pos.x, pz = player.pos.z;
+    for (const mv of movedNow) {
+        if (mv.n !== isle || mv.m.hide) continue;
+        const o = mv.o, H = mv.H, dr = o.rotation.y - H.rot.y, k = o.scale.x / (H.scale.x || 1), ux = px - o.position.x, uz = pz - o.position.z;
+        if (Math.hypot(ux, uz) > 10 * k + 4) continue;
+        const cs = Math.cos(-dr), sn = Math.sin(-dr);
+        player.pos.x = H.pos.x + (ux * cs + uz * sn) / k; player.pos.z = H.pos.z + (-ux * sn + uz * cs) / k;
+        let r2 = null; try { r2 = nearest0(); } finally { player.pos.x = px; player.pos.z = pz; }
+        if (r2) return r2;
+    }
+    return null;
+}
+function nearest0() {
     if (inCasino()) return nearestCasino();
     if (isle === 5 && B5.on) return nearest5();
     { const pn = nearestPlaced(); if (pn) return pn; } // things placed in the Studio: people, notes, chests, shrines, portals
@@ -5766,7 +5781,7 @@ function mineVein(v) {
 // ---- switching between islands: each island keeps its own colliders, chests and altar ----
 const worldSnap = {};
 let isle1Water = null, isle1Emit = null;
-function snapWorld(n) { worldSnap[n] = { colliders: colliders.slice(), circles: circles.slice(), occluders: occluders.slice(), chests: chests.slice(), altar }; }
+function snapWorld(n) { applyMoves(n); worldSnap[n] = { colliders: colliders.slice(), circles: circles.slice(), occluders: occluders.slice(), chests: chests.slice(), altar }; }
 function loadWorld(n) {
     const s = worldSnap[n]; if (!s) return;
     for (const [arr, src] of [[colliders, s.colliders], [circles, s.circles], [occluders, s.occluders], [chests, s.chests]]) { arr.length = 0; arr.push(...src); }
@@ -13197,8 +13212,15 @@ function makeCI(d, n) {
         }
         h = lerp(P, h, sstep(18, 34, dd));                                                            // a flat camp
         for (const q of lakes) { const dl = Math.hypot(x - q.x, z - q.z); h = lerp(h, P - 1.6, sstep(q.r + 7, q.r - 1, dl)); }
-        return ramp(x, z, h);
+        return ramp(x, z, sculptAt(x, z, h));
     };
+    // sculpting from the Studio's terrain tool: brush dabs [x, z, radius, amount, flatten?], applied in order on top of everything above.
+    // They're kept in a grid of 16 m cells, so the ground only checks the dabs near it
+    C.sculpt = []; C.sgrid = new Map();
+    C.addSculpt = op => { C.sculpt.push(op); const [x, z, r] = op; for (let cx = Math.floor((x - r) / 16); cx <= Math.floor((x + r) / 16); cx++) for (let cz = Math.floor((z - r) / 16); cz <= Math.floor((z + r) / 16); cz++) { const key = cx * 4096 + cz; let a = C.sgrid.get(key); if (!a) C.sgrid.set(key, (a = [])); a.push(op); } };
+    C.setSculpt = list => { C.sculpt = []; C.sgrid = new Map(); for (const op of (Array.isArray(list) ? list : []).slice(0, 4000)) if (Array.isArray(op) && op.length >= 5 && op.slice(0, 4).every(v => Number.isFinite(+v))) C.addSculpt([+op[0], +op[1], clamp(+op[2], 1, 40), clamp(+op[3], -60, 80), op[4] ? 1 : 0]); };
+    const sculptAt = (x, z, h) => { const a = C.sgrid.get(Math.floor(x / 16) * 4096 + Math.floor(z / 16)); if (!a) return h; for (const [ox, oz, r, v, t] of a) { const dx = x - ox, dz = z - oz, d2 = dx * dx + dz * dz, r2 = r * r; if (d2 >= r2) continue; const w = (1 - d2 / r2) ** 2; h = t ? h + (v - h) * w * 0.35 : h + v * w; } return h; };
+    C.setSculpt(d.sculpt);
     C.groundY = (x, z) => { for (const D of C.DOCKS) { const { along, side } = dockLocal(x, z, D.B, D.DIR, D.PERP); if (along > 3 && along < D.LEN + 3 && Math.abs(side) < 3) return 0; } return Math.max(-0.4, C.terrain(x, z)); };
     C.clamp = p => {
         for (const D of C.DOCKS) { const { along, side } = dockLocal(p.x, p.z, D.B, D.DIR, D.PERP); if (along > 3.5 && along < D.LEN + 3 && Math.abs(side) < 6) { const a = Math.min(along, D.LEN - 0.7), s = clamp(side, -1.65, 1.65); p.x = D.B.x + D.DIR.x * a + D.PERP.x * s; p.z = D.B.z + D.DIR.z * a + D.PERP.z * s; return; } }
@@ -13292,6 +13314,7 @@ function buildCI(C) {
         for (let i = 0; i < wp.count; i++) { const x = wp.getX(i), z = wp.getZ(i), k = clamp(C.seaDist(x, z) / 40, 0, 1); cc.copy(sh).lerp(mid, clamp(k * 2, 0, 1)).lerp(dp, clamp(k * 2 - 1, 0, 1)); wc.push(cc.r, cc.g, cc.b); }
         wg.setAttribute("color", new THREE.Float32BufferAttribute(wc, 3)); C.waterGeo = wg;
     }
+    C.cs = {}; for (const k in cols) C.cs[k] = new THREE.Color(cols[k]);
     for (const q of C.lakes) { const w = new THREE.Mesh(new THREE.CircleGeometry(q.r + 0.6, 40), new THREE.MeshLambertMaterial({ color: cols.shallow, emissive: 0x05121a, transparent: true, opacity: 0.85 })); w.rotation.x = -Math.PI / 2; w.position.set(q.x, P - 0.5, q.z); scene.add(w); }
     for (const q of C.F) if (q.type === "crater" && q.lava) { const y = P + q.h * 0.2 + 0.15, w = new THREE.Mesh(new THREE.CircleGeometry(q.r * 0.55, 32), glowM(0xff6a1a)); w.rotation.x = -Math.PI / 2; w.position.set(q.x, y, q.z); scene.add(w); const pl = new THREE.PointLight(0xff7a2a, 20, q.r * 2.5, 1.6); pl.position.set(q.x, y + 3, q.z); scene.add(pl); } // a crater full of lava
     for (const lm of C.LM) if (lm.f) { const q = lm.f, l = label(lm.name, lm.col, 3.3, 0.8); l.position.set(q.x, q.type === "lake" ? P + 4 : q.type === "islet" ? q.h + 5 : C.terrain(q.x, q.z) + 8, q.z); if (q.type !== "lake") { l.maxD = 400; l.blurK = 0.3; } }
@@ -13480,6 +13503,75 @@ function ciDropLast() {
     return true;
 }
 for (const d of Array.isArray(CONTENT_ISLANDS) ? CONTENT_ISLANDS : []) if (d && typeof d === "object") ciList.push(makeCI(d, CI_BASE + ciList.length));
+// ---- the Studio's terrain tool reshapes a Studio island's ground live: only the part under the brush is worked out again ----
+function ciReshape(C, x0, z0, r) {
+    const m = terrainMesh[C.n]; if (!m || !C.cs) return;
+    const g = m.geometry, pos = g.attributes.position, col = g.attributes.color, c = new THREE.Color(), cs = C.cs, all = r === undefined;
+    for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i); if (all || (Math.abs(x - x0) < r + 2 && Math.abs(z - z0) < r + 2)) pos.setY(i, C.terrain(x, z)); }
+    g.computeVertexNormals();
+    const nor = g.attributes.normal;
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), z = pos.getZ(i); if (!all && (Math.abs(x - x0) > r + 3 || Math.abs(z - z0) > r + 3)) continue;
+        const y = pos.getY(i), ny = nor.getY(i), dd = Math.hypot(x, z), inside = C.shoreAt(x, z) - dd; // the same colours buildCI bakes
+        if (y < -0.3) c.copy(cs.sand).multiplyScalar(0.55);
+        else if (ny < 0.72) c.copy(cs.rock);
+        else if (y > C.snowline) c.copy(cs.snow);
+        else if (inside < C.beach + 3 && y < C.P * 0.6 + 0.6) c.copy(cs.sand);
+        else if (dd < SAFE_R + 1) c.copy(cs.camp);
+        else c.copy(cs.grass).lerp(cs.grass2, clamp(fbm2(x * 0.05, z * 0.05, 2), 0, 1));
+        col.setXYZ(i, c.r, c.g, c.b);
+    }
+    pos.needsUpdate = true; col.needsUpdate = true; g.computeBoundingSphere();
+}
+function ciSettle(C, x0, z0, r) { // trees and the map catch up with the new ground
+    if (isle === C.n) for (const t of trees) if (!t.gone && (r === undefined || Math.hypot(t.x - x0, t.z - z0) < r + 2)) { t.gy = groundY(t.x, t.z); t.g.position.y = t.gy - 0.25; }
+    C.mapBg = null;
+}
+// ---- built-in things moved in the Studio (content/world.js "moves"): any part of an island the game builds, by its place in the
+// island's group. Its collisions and floating labels go with it, and nearest() finds its "press F" spot where it is now ----
+const MOVES = CONTENT_WORLD && Array.isArray(CONTENT_WORLD.moves) ? CONTENT_WORLD.moves : [];
+const movedNow = [];
+function builtinAt(n, i) {
+    const G = isleGroup(n); if (!G) return null;
+    if (G.userData.builtN === undefined) G.userData.builtN = G.children.length; // what the game built, before animals and placed things join
+    return i >= 0 && i < G.userData.builtN ? G.children[i] : null;
+}
+function builtinIndexOf(n, obj) { // the movable built-in thing a picked mesh belongs to, or -1
+    const G = isleGroup(n); if (!G) return -1;
+    if (G.userData.builtN === undefined) G.userData.builtN = G.children.length;
+    let o = obj; while (o && o.parent !== G) o = o.parent;
+    const i = o ? G.children.indexOf(o) : -1;
+    if (i < 0 || i >= G.userData.builtN || o.userData.placed || o === terrainMesh[n]) return -1;
+    const s = new THREE.Box3().setFromObject(o).getBoundingSphere(new THREE.Sphere());
+    return s.radius > 30 ? -1 : i; // not the ground, the sea, or a whole island's worth of rocks
+}
+function moveHome(o, n) { // where the game put it, and the collisions and labels that belong to it
+    if (o.userData.home) return o.userData.home;
+    const box = new THREE.Box3().setFromObject(o), inBox = (x, z) => x > box.min.x - 0.6 && x < box.max.x + 0.6 && z > box.min.z - 0.6 && z < box.max.z + 0.6;
+    return (o.userData.home = { pos: o.position.clone(), rot: o.rotation.clone(), scale: o.scale.clone(),
+        cols: colliders.filter(b => inBox((b[0] + b[1]) / 2, (b[2] + b[3]) / 2)).map(b => ({ b, h: b.slice() })),
+        circs: circles.filter(q => inBox(q.x, q.z)).map(q => ({ q, h: { x: q.x, z: q.z } })),
+        labels: labelList.filter(l => l.isle === n && inBox(l.position.x, l.position.z)).map(l => ({ l, h: l.position.clone() })) });
+}
+function placeBuiltin(n, m) {
+    const o = builtinAt(n, m.i); if (!o) return null;
+    const H = moveHome(o, n), dx = (m.x ?? H.pos.x) - H.pos.x, dy = (m.y ?? H.pos.y) - H.pos.y, dz = (m.z ?? H.pos.z) - H.pos.z, dr = (m.ry ?? H.rot.y) - H.rot.y, k = clamp(+m.s || 1, 0.1, 10);
+    o.position.set(H.pos.x + dx, H.pos.y + dy, H.pos.z + dz); o.rotation.set(H.rot.x, H.rot.y + dr, H.rot.z); o.scale.copy(H.scale).multiplyScalar(k);
+    o.visible = !m.hide;
+    const cs = Math.cos(dr), sn = Math.sin(dr), tr = (x, z) => { const ux = (x - H.pos.x) * k, uz = (z - H.pos.z) * k; return [H.pos.x + dx + ux * cs + uz * sn, H.pos.z + dz - ux * sn + uz * cs]; };
+    for (const { b, h } of H.cols) {
+        if (m.hide) { b[0] = b[1] = b[2] = b[3] = 1e6; continue; }
+        const p = [tr(h[0], h[2]), tr(h[1], h[2]), tr(h[0], h[3]), tr(h[1], h[3])];
+        b[0] = Math.min(...p.map(q => q[0])); b[1] = Math.max(...p.map(q => q[0])); b[2] = Math.min(...p.map(q => q[1])); b[3] = Math.max(...p.map(q => q[1]));
+    }
+    for (const { q, h } of H.circs) { const [x, z] = tr(h.x, h.z); q.x = m.hide ? 1e6 : x; q.z = z; }
+    for (const { l, h } of H.labels) { const [x, z] = tr(h.x, h.z); l.position.set(x, m.hide ? -1e4 : h.y + dy, z); }
+    const at = movedNow.findIndex(q => q.o === o); if (at >= 0) movedNow.splice(at, 1);
+    if (m.x !== undefined || m.hide || m.ry !== undefined || m.s !== undefined) movedNow.push({ n, o, H, m });
+    return o;
+}
+function applyMoves(n) { builtinAt(n, -1); for (const m of MOVES) if (+m.isle === n) placeBuiltin(n, m); }
+applyMoves(1); // Pine Island is already built
 // ---- the Studio islands' own axes (added right after the game's, see pushIslandAxes) get their recipes and borrowed abilities.
 // The Studio calls this again whenever it rebuilds an island ----
 function ciAxes() {
@@ -14067,7 +14159,8 @@ if (STUDIO) {
     Object.assign(window.__ts4, {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
         CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, CONTENT_ANIMALS, defineCustomProp, dropCustomProp, PART_SHAPES,
-        WILD_KINDS, ANIMAL_ROLES, ANIMAL_WAYS, defineCustomAnimal, dropCustomAnimal, makeCustomAnimal, makePartsGroup, releaseAnimals, wildBy, ABIL, BASE_AXES, ciAxes, RECIPES, GLOW_MATS, resetIsleTrees,
+        WILD_KINDS, ANIMAL_ROLES, ANIMAL_WAYS, defineCustomAnimal, dropCustomAnimal, makeCustomAnimal, makePartsGroup, releaseAnimals,
+        MOVES, builtinAt, builtinIndexOf, moveHome, placeBuiltin, ciReshape, ciSettle, terrainMesh, wildBy, ABIL, BASE_AXES, ciAxes, RECIPES, GLOW_MATS, resetIsleTrees,
         setSeeAll(v) { studioSeeAll = !!v; }, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,
         setStudioHook(h) { studioHook = h; }, get wx() { return wx; }
