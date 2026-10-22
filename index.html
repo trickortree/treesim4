@@ -161,6 +161,11 @@
   #rideCap { position: fixed; left: 0; right: 0; bottom: 18%; text-align: center; z-index: 3; font: 800 clamp(18px, 3vw, 34px) "Segoe UI", sans-serif; letter-spacing: 6px; color: #fff; text-shadow: 0 3px 0 #000, 0 0 24px rgba(0,0,0,.9); opacity: 0; transition: opacity .8s; pointer-events: none; }
   #rideCap.show { opacity: 1; }
   #panelRelic { width: min(520px, 94vw); border-color: rgba(255,208,64,.7); }
+  /* the Hi-Lo Wing and the Keno Lounge */
+  .warSide { text-align: center; } .warSide .bjLbl { margin-bottom: 6px; }
+  .diceRow { display: flex; align-items: center; gap: 14px; } .diceRow span { font-size: 110px; line-height: 1; color: #f4ecd8; text-shadow: 0 4px 0 #5a3214; } .diceRow b { font: 900 54px Consolas; color: #ffd040; min-width: 70px; text-align: center; }
+  .coinBig { width: 150px; height: 150px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 900 72px Consolas; color: #8a6a1a; background: radial-gradient(circle at 35% 30%, #ffe890, #d8a840 60%, #8a6a1a); border: 5px solid #b8862a; box-shadow: 0 6px 24px rgba(255,200,64,.35); }
+  .coinBig.spin { animation: coinSpin .25s linear infinite; } @keyframes coinSpin { from { transform: rotateY(0); } to { transform: rotateY(360deg); } }
   /* a Studio island's shops */
   #panelCShop { width: min(640px, 94vw); max-height: 86vh; overflow: auto; }
   #panelCShop h2 { padding-right: 90px; }
