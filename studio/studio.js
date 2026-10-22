@@ -408,7 +408,7 @@ const objName = o => (o.kind === "sign" ? (o.act && o.act.type === "read" ? "�
 function renderInspector() {
     const box = $("stInsp");
     if (bsel) { renderBuiltinInspector(); return; }
-    if (!sel) { right.classList.add("empty"); box.innerHTML = ""; return; }
+    if (!sel) { if (builtMode) { renderBuiltCard(); return; } right.classList.add("empty"); box.innerHTML = ""; return; }
     right.classList.remove("empty");
     const o = sel, P = o.kind === "prop" ? T.PROPS[o.prop] || T.PROPS.rock : null, a = o.act || {};
     const title = o.kind === "sign" ? "SIGN" : o.kind === "npc" ? "PERSON" : o.kind === "treespot" ? "TREE SPOT" : esc(P.name).toUpperCase();
@@ -904,6 +904,11 @@ function rebuildIsle(i, wait = 450, rerender) { // rebuilding is heavy, so not o
     clearTimeout(isleTs[i]);
     isleTs[i] = setTimeout(() => { rebuildNow(i); renderIsleSelect(); if (rebuildRender && tab === "islands" && i === islandSel) { rebuildRender = false; renderIslands(); } }, wait); // then prices and recipes show
 }
+// a change the game reads as it goes (ride lines, the ticket, the menu look...): saved, and the island's ticket and ride lines worked out again, with no rebuild
+function islandSaved(i = islandSel) {
+    const d = islands[i]; if (!d) return;
+    changed("islands"); const C = T.customIsle(T.CI_BASE + i); if (C) T.ciMeta(C);
+}
 function islandChanged(rerender, i = islandSel) {
     const d = islands[i]; if (!d) return;
     changed("islands"); rebuildIsle(i, 450, rerender);
@@ -1371,13 +1376,13 @@ function bindIslands() {
     on("iAskGo", "click", () => askClaudeIsland(d));
     // architecture, menu look and shops
     all("[data-camp]", "change", s => { d.camp = { ...(d.camp || {}) }; if (s.value) d.camp[s.dataset.camp] = s.value; else delete d.camp[s.dataset.camp]; islandChanged(false); });
-    const setUi = (k, v) => { d.ui = { ...(d.ui || {}) }; if (v === "" || v === undefined) delete d.ui[k]; else d.ui[k] = v; islandChanged(false); };
+    const setUi = (k, v) => { d.ui = { ...(d.ui || {}) }; if (v === "" || v === undefined) delete d.ui[k]; else d.ui[k] = v; islandSaved(); }; // the game picks up a new look by itself
     all("[data-ui]", "input", c => setUi(c.dataset.ui, c.value));
     on("iUiFont", "change", e => setUi("font", e.target.value));
     on("iUiCorner", "input", e => { e.target.nextElementSibling.textContent = e.target.value + "px"; setUi("corner", +e.target.value); });
-    on("iUiReset", "click", () => { delete d.ui; islandChanged(true); });
+    on("iUiReset", "click", () => { delete d.ui; islandSaved(); renderIslands(); });
     // the casino's look
-    const setCas = (fn, rerender) => { d.casino = JSON.parse(JSON.stringify(d.casino || {})); fn(d.casino); islandChanged(rerender); };
+    const setCas = (fn, rerender) => { d.casino = JSON.parse(JSON.stringify(d.casino || {})); fn(d.casino); if (T.casinoHome() === n) islandChanged(rerender); else { islandSaved(); if (rerender) renderIslands(); } }; // the casino isn't here: nothing to rebuild
     on("iCasName", "change", e => setCas(c => { const v = e.target.value.trim().slice(0, 26).toUpperCase(); if (v) c.name = v; else delete c.name; }));
     on("iCasTag", "change", e => setCas(c => { const v = e.target.value.trim().slice(0, 28).toUpperCase(); if (v) c.tagline = v; else delete c.tagline; }));
     on("iCasRoof", "change", e => setCas(c => (c.roofKind = e.target.value)));
@@ -1414,8 +1419,9 @@ function bindIslands() {
         if (islands.length) T.ciSet(islands.length - 1, islands[islands.length - 1]);
         changed("islands"); changed("world"); renderIsleSelect(); renderIslands();
     });
-    const txt = (id, fn) => on(id, "input", e => { fn(e.target.value); islandChanged(); });
-    txt("iName", v => (d.name = v.slice(0, 40) || "Island")); on("iName", "change", () => renderIslands());
+    // text: saved as you type. Only a name painted on the island's signs (its name, its camp's) rebuilds it, once, when you leave the box
+    const txt = (id, fn, painted) => { on(id, "input", e => { fn(e.target.value); islandSaved(); }); if (painted) on(id, "change", () => { islandChanged(true); if (painted === "name" && islandSel > 0) T.ciSet(islandSel - 1, islands[islandSel - 1]); renderIsleSelect(); }); };
+    txt("iName", v => (d.name = v.slice(0, 40) || "Island"), "name"); // the island before shows it on its ferry sign
     txt("iSub", v => (d.sub = v.slice(0, 80)));
     body.querySelectorAll("[data-theme]").forEach(b => b.addEventListener("click", e => {
         const del = e.target.closest("[data-deltheme]");
@@ -1495,15 +1501,15 @@ function bindIslands() {
     // axes
     on("iAxeAdd", "click", () => { d.axes = d.axes || []; const name = d.name.split(" ")[0] + " Axe"; d.axes.push({ key: uniqueKey2("x_", name, k => axeTaken(k, d) || d.axes.some(q => q.key === k)), name, steel: "#4a4a5a", edge: "#9fe8ff", glow: "#1a3a5a", ability: 14 + (d.axes.length % 4) }); islandChanged(true); });
     all("[data-xdel]", "click", b => { d.axes.splice(+b.dataset.xdel, 1); islandChanged(true); });
-    body.querySelectorAll("[data-xname]").forEach(c => c.addEventListener("input", () => { d.axes[+c.dataset.xname].name = c.value.slice(0, 28) || "Axe"; islandChanged(); }));
+    body.querySelectorAll("[data-xname]").forEach(c => { c.addEventListener("input", () => { d.axes[+c.dataset.xname].name = c.value.slice(0, 28) || "Axe"; islandSaved(); }); c.addEventListener("change", () => islandChanged()); }); // the forge shows it: once, when you leave the box
     body.querySelectorAll("[data-xcol]").forEach(c => c.addEventListener("input", () => { const [j, k] = c.dataset.xcol.split(":"); d.axes[+j][k] = c.value; islandChanged(); }));
     all("[data-xab]", "change", c => { d.axes[+c.dataset.xab].ability = +c.value; islandChanged(); });
     body.querySelectorAll("[data-xdmg]").forEach(c => c.addEventListener("input", () => { const v = Math.round(+c.value); if (v > 0) d.axes[+c.dataset.xdmg].dmg = v; else delete d.axes[+c.dataset.xdmg].dmg; islandChanged(); }));
     // the ticket and the story
-    on("iCost", "input", e => { d.rebirth = { ...(d.rebirth || {}), cost: Math.max(0, Math.round(+e.target.value || 0)) }; islandChanged(); });
-    const setItem = () => { const k = $("iItem").value, v = Math.max(0, Math.round(+$("iItemN").value || 0)); d.rebirth = { ...(d.rebirth || {}), items: k && v ? { [k]: v } : {} }; islandChanged(); };
+    on("iCost", "input", e => { d.rebirth = { ...(d.rebirth || {}), cost: Math.max(0, Math.round(+e.target.value || 0)) }; islandSaved(); });
+    const setItem = () => { const k = $("iItem").value, v = Math.max(0, Math.round(+$("iItemN").value || 0)); d.rebirth = { ...(d.rebirth || {}), items: k && v ? { [k]: v } : {} }; islandSaved(); };
     on("iItem", "change", setItem); on("iItemN", "input", setItem);
-    txt("iCamp", v => (d.campName = v.slice(0, 24))); txt("iRide1", v => (d.rideLine1 = v.slice(0, 120))); txt("iRide2", v => (d.rideLine2 = v.slice(0, 120)));
+    txt("iCamp", v => (d.campName = v.slice(0, 24)), "camp"); txt("iRide1", v => (d.rideLine1 = v.slice(0, 120))); txt("iRide2", v => (d.rideLine2 = v.slice(0, 120)));
     txt("iFerryLine", v => (d.ferryLine = v.slice(0, 160))); txt("iArrive", v => (d.arrive = v.slice(0, 200)));
 }
 
@@ -1934,7 +1940,21 @@ function bindPeople() {
 // ---------- moving what the game built (a bed, a stall, a rock...): saved as "moves" in content/world.js ----------
 let builtMode = false, bsel = null; // bsel: { n, i, o }
 const moveOf = (n, i) => T.MOVES.find(m => +m.isle === n && m.i === i);
-function setBuiltMode(on) { builtMode = on; $("stBuilt").classList.toggle("on", on); if (!on && bsel) deselect(); if (on) sculpt.mode = ""; say(on ? "Click anything the game built to move it (W move, E turn, R size)" : "Built-ins: off", 3000); }
+// with Built-ins on and nothing picked: what's been moved on this island, and a way to put all of it back
+function renderBuiltCard() {
+    const box = $("stInsp"), n = curIsle(), mine = T.MOVES.filter(m => +m.isle === n);
+    right.classList.remove("empty");
+    box.innerHTML = `<div class="stH">BUILT-INS <small>${esc(isleName(n))}</small></div>
+      <div class="stHint" style="margin-top:0">Click anything the game built to move, turn, size or hide it, or change its floating names. What you placed can still be clicked too.</div>
+      <div class="stHint">${mine.length ? `${mine.length} thing${mine.length === 1 ? " is" : "s are"} moved or changed on this island.` : "Nothing on this island has been moved."}</div>
+      ${mine.length ? `<div class="stBtns"><button class="stB warn" id="bResetAll">Put everything back</button></div><div class="stHint">Everything the game built here goes back where the game put it, with its usual names.</div>` : ""}`;
+    const b = $("bResetAll"); if (b) b.addEventListener("click", () => {
+        if (!confirm(`Put back all ${mine.length} moved or changed things on ${isleName(n)}?`)) return;
+        for (const m of mine) { T.MOVES.splice(T.MOVES.indexOf(m), 1); T.placeBuiltin(n, { isle: n, i: m.i, at: m.at, sig: m.sig }); }
+        changed("world"); renderInspector(); say(`Everything on ${isleName(n)} is back where the game put it`, 3000);
+    });
+}
+function setBuiltMode(on) { builtMode = on; $("stBuilt").classList.toggle("on", on); if (!on && bsel) deselect(); if (!sel && !bsel) renderInspector(); if (on) sculpt.mode = ""; say(on ? "Click anything the game built to move it (W move, E turn, R size)" : "Built-ins: off", 3000); }
 function pickBuiltin(mx, my) {
     const n = curIsle(), G = T.isleGroup(n); if (!G) return null;
     setRay(mx, my);
@@ -1951,7 +1971,8 @@ function selectBuiltin(b) {
 function bFromGizmo(final) { // you dragged it: its move follows (it turns round, but never tips over)
     if (!bsel) return;
     const { n, i, o } = bsel, H = T.moveHome(o, n);
-    o.rotation.x = H.rot.x; o.rotation.z = H.rot.z;
+    const f = new THREE.Vector3(0, 0, 1).applyQuaternion(o.quaternion); // its heading from where it faces: past 90° the gizmo's angles flip, and keeping only the y one stopped it there
+    o.rotation.set(H.rot.x, Math.abs(f.x) + Math.abs(f.z) > 1e-6 ? Math.atan2(f.x, f.z) : o.rotation.y, H.rot.z);
     let m = moveOf(n, i); if (!m) { m = { isle: n, i }; T.MOVES.push(m); }
     const k0 = m.s || 1, ks = [o.scale.x / H.scale.x, o.scale.y / H.scale.y, o.scale.z / H.scale.z], k = ks.reduce((a, v) => (Math.abs(v - k0) > Math.abs(a - k0) ? v : a), k0);
     m.x = r3(o.position.x); m.y = r3(o.position.y); m.z = r3(o.position.z); m.ry = r3(o.rotation.y); m.s = r3(Math.min(10, Math.max(0.1, k)));
@@ -2422,4 +2443,4 @@ S.wsStatus().then(st => {
     $("wsOpen").addEventListener("click", e => { e.preventDefault(); S.wsOpen(); });
 });
 say("Tree Sim 4 Studio · right-drag to look around, F5 to play", 3500);
-window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get animals() { return myAnimals; }, get people() { return myPeople; }, cleanPerson, ppNew, placePerson, cleanShop, renderInspector, get partSel() { return partSel; }, get treeGroup() { return treeGroup; }, pmNew, pmSelectPart, cleanProp, cleanAnimal, cleanIsland, migrateIsland, newIsland, islandChanged, claudeBuild, regrowHere, addAnimalToIsland, renderIslands, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };
+window.__ts4studio = { world, get trees() { return trees; }, get islands() { return islands; }, get props() { return myProps; }, get animals() { return myAnimals; }, get people() { return myPeople; }, cleanPerson, ppNew, placePerson, cleanShop, renderInspector, selectBuiltin, bFromGizmo, get partSel() { return partSel; }, get treeGroup() { return treeGroup; }, pmNew, pmSelectPart, cleanProp, cleanAnimal, cleanIsland, migrateIsland, newIsland, islandChanged, claudeBuild, regrowHere, addAnimalToIsland, renderIslands, cam, select, goIsle, play, stop, saveAll, startPlacing, commitPlacing, groundHit };
