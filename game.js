@@ -3052,7 +3052,7 @@ function nearest0() {
     if (isle === 5 && B5.on) return nearest5();
     { const pn = nearestPlaced(); if (pn) return pn; } // things placed in the Studio: people, notes, chests, shrines, portals
     if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
-    if (casino && casino.isle === isle && Math.hypot(player.pos.x - casino.door.x, player.pos.z - casino.door.z) < 3.4) return { k: "casino" };
+    if (casino && casino.isle === isle && isle === casinoHome() && Math.hypot(player.pos.x - casino.door.x, player.pos.z - casino.door.z) < 3.4) return { k: "casino" };
     if (CI()) return CI().nearest();
     if (isle === 6) return nearest6();
     if (isle === 5) return nearest5();
@@ -8766,6 +8766,58 @@ const CASINO_STYLE = {
     5: { at: () => ({ x: Math.cos(-0.75) * 60, z: Math.sin(-0.75) * 60 }), gy: (x, z) => groundY5(x, z), base: 0xe8e0d0, wall: 0xf4f0e8, trim: 0xd8a840, glow: 0x5ae8ff, dim: 0x1a6a8a, roof: 0x1a4a6a, sign: "#5ae8ff", rock: 0xc8b898, lm: "#7af0ff" }
 };
 let casino = null;
+// with Studio islands it moves on by itself: it stands on the last one, re-skinned by that island's d.casino (or, without one, in the island's own colours)
+const casinoHome = () => (ciList.length ? CI_BASE + ciList.length - 1 : 6);
+const ROOF_KINDS = ["spire", "dome", "crown", "flat"];
+function ciCasinoStyle(C) {
+    if (!C) return null;
+    const c = C.d.casino || {}, ui = C.d.ui || {}, hx = v => (/^#[0-9a-f]{6}$/i.test(String(v)) ? String(v) : null), num = (v, dflt) => (hx(v) ? hexN(v) : dflt);
+    const col = k => new THREE.Color(C.cols[k] !== undefined ? C.cols[k] : 0x808080).getHex(), mix = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), t).getHex();
+    const neon = hx(c.sign) || hx(ui.accent) || "#ffd060";
+    return {
+        at: () => C.CAS, gy: (x, z) => C.groundY(x, z),
+        base: num(c.base, mix(col("rock"), 0, 0.35)), wall: num(c.wall, mix(col("camp"), 0xffffff, 0.25)), trim: num(c.trim, 0xd8a840), roof: num(c.roof, mix(col("rock"), 0, 0.55)),
+        glow: num(c.glow, hexN(neon)), dim: num(c.dim, mix(hexN(neon), 0, 0.75)), rock: num(c.rock, col("rock")), sign: neon, lm: neon,
+        name: String(c.name || "THE CASINO").toUpperCase().slice(0, 26), tagline: String(c.tagline || "OPEN 24/7").toUpperCase().slice(0, 28), roofKind: ROOF_KINDS.includes(c.roofKind) ? c.roofKind : "spire",
+        hall: { ...(c.hall && typeof c.hall === "object" ? c.hall : {}), name: c.name, sign: neon }
+    };
+}
+// where it stands on a Studio island: somewhere flat on the side its look asks for (d.casino.dir), clear of the camp, the docks, bridges, lakes and what's been
+// placed there. The ground under it is levelled into a pad, and nothing grows on it
+function ciCasinoSpot(C) {
+    const n = C.n, c = C.d.casino || {}, a0 = (Number.isFinite(+c.dir) && c.dir !== "" ? +c.dir : 215) * Math.PI / 180, busy = placed.filter(r => +r.o.isle === n).map(r => r.o);
+    let best = null, bs = 1e9;
+    for (let k = 0; k < 37 && !(best && bs < 1.5); k++) {
+        const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.17;
+        for (const f of [0.5, 0.42, 0.6, 0.36, 0.68]) {
+            const r = C.shoreR(a) * f, x = Math.cos(a) * r, z = Math.sin(a) * r;
+            if (Math.hypot(x, z) < 46 || !C.treeOk(x, z) || busy.some(o => Math.hypot(o.x - x, o.z - z) < 18)) continue;
+            let lo = 1e9, hi = -1e9, land = true;
+            for (let s = 0; s < 9 && land; s++) { const sx = x + (s ? Math.cos(s * 0.785) * 15 : 0), sz = z + (s ? Math.sin(s * 0.785) * 15 : 0), h = C.terrain(sx, sz); if (!C.onLand(sx, sz) || h < 0.3) land = false; lo = Math.min(lo, h); hi = Math.max(hi, h); }
+            if (land && hi - lo + k * 0.04 < bs) { bs = hi - lo + k * 0.04; best = { x, z }; }
+        }
+    }
+    if (!best) return null;
+    const t0 = C.terrain, ok0 = C.treeOk, ph = Math.max(0.6, t0(best.x, best.z));
+    C.terrain = (x, z) => { const h = t0(x, z), dc = Math.hypot(x - best.x, z - best.z); return dc > 21 ? h : lerp(h, ph, sstep(21, 13, dc)); };
+    C.treeOk = (x, z) => ok0(x, z) && Math.hypot(x - best.x, z - best.z) > 17;
+    return (C.CAS = best);
+}
+// inside, the hall takes the look too: tinted wallpaper and carpet, its trim and chandeliers, and its name over the doors
+let csHall = null;
+function skinHall(sk) {
+    if (!csHall) return; sk = sk || {};
+    const c = (v, d) => new THREE.Color(/^#[0-9a-f]{6}$/i.test(String(v)) ? v : d), tk = [sk.walls, sk.carpet, sk.trim].join("|");
+    if (csHall.texKey !== tk) { // the wallpaper and carpet redrawn in its colours
+        csHall.texKey = tk; const wt = wallTex(sk), ft = carpetTex(sk), old = new Set();
+        for (const [kind, m] of csSkinMats) { if (m.map) old.add(m.map); m.map = kind === "wall" ? wt : ft; m.needsUpdate = true; }
+        for (const t of old) t.dispose();
+    }
+    csHall.gold.color.copy(c(sk.trim, "#d8a840")); csHall.gold.emissive.copy(csHall.gold.color).multiplyScalar(0.25);
+    for (const L of csLights) L.color.copy(c(sk.light, "#ffd8a0"));
+    const txt = `★ WELCOME TO ${String(sk.name || "THE CASINO").toUpperCase().slice(0, 26)} ★`, col = /^#[0-9a-f]{6}$/i.test(String(sk.sign)) ? sk.sign : "#ffd040", key = txt + col;
+    if (csHall.key !== key) { csHall.key = key; const m = csHall.welcome.material; if (m.map) m.map.dispose(); m.map = casinoTex([[txt, Math.min(92, Math.floor(740 / (0.56 * txt.length))), col, 96]], 768, 192); m.needsUpdate = true; }
+}
 const OCTA = new THREE.OctahedronGeometry(1, 0);
 function casinoTex(lines, w, h, bg) {
     const cv = document.createElement("canvas"); cv.width = w; cv.height = h; const g = cv.getContext("2d");
@@ -8775,7 +8827,9 @@ function casinoTex(lines, w, h, bg) {
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 function buildCasino(n) {
-    const S = CASINO_STYLE[n]; if (!S || n !== 6) return; // the casino only stands on the newest island
+    if (n !== casinoHome()) return; // the casino only stands on the newest island
+    const S = n >= CI_BASE ? ciCasinoStyle(customIsle(n)) : CASINO_STYLE[n]; if (!S || !S.at()) return;
+    if (casino && casino.isle !== n) for (const o of casino.parts || []) o.visible = false; // it has moved on: the old tower goes
     const prev = addTgt, prevB = curBuild; addTgt = isleGroup(n); curBuild = n;
     const p = S.at(), x = p.x, z = p.z, face = Math.atan2(-x, -z), gy = S.gy(x, z) - 0.4;
     const g = new THREE.Group(); g.position.set(x, gy, z); g.rotation.y = face; scene.add(g);
@@ -8794,15 +8848,18 @@ function buildCasino(n) {
         }
         y += h;
     });
-    part(g, CONE6, roof, 0, y + 3, 0, 4.8, 6, 4.8, 0, H6);
-    part(g, CYL6, trim, 0, y + 6.6, 0, 0.12, 2.2, 0.12);
-    part(g, OCTA, glow, 0, y + 7.9, 0, 0.45, 0.65, 0.45);
+    const rk = S.roofKind || "spire"; // the top: a spire, an onion dome, a crown of points, or flat with battlements
+    if (rk === "dome") { part(g, SPH, roof, 0, y + 0.6, 0, 4.3, 3.8, 4.3); part(g, CYL6, trim, 0, y + 4.9, 0, 0.12, 1.8, 0.12); part(g, OCTA, glow, 0, y + 6.1, 0, 0.45, 0.65, 0.45); }
+    else if (rk === "crown") { part(g, CYL6, roof, 0, y + 0.8, 0, 4.4, 1.6, 4.4, 0, H6); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; part(g, CONE6, trim, Math.sin(a) * 3.5, y + 2.7, Math.cos(a) * 3.5, 0.7, 2.3, 0.7); part(g, OCTA, glow, Math.sin(a) * 3.5, y + 4.2, Math.cos(a) * 3.5, 0.25, 0.35, 0.25); } part(g, OCTA, glow, 0, y + 3.4, 0, 0.7, 1, 0.7); }
+    else if (rk === "flat") { part(g, CYL6, roof, 0, y + 0.3, 0, 4.6, 0.6, 4.6, 0, H6); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; part(g, BOX, trim, Math.sin(a) * 3.85, y + 1, Math.cos(a) * 3.85, 2.3, 0.9, 0.35, 0, a); } part(g, OCTA, glow, 0, y + 1.8, 0, 0.6, 0.9, 0.6); }
+    else { part(g, CONE6, roof, 0, y + 3, 0, 4.8, 6, 4.8, 0, H6); part(g, CYL6, trim, 0, y + 6.6, 0, 0.12, 2.2, 0.12); part(g, OCTA, glow, 0, y + 7.9, 0, 0.45, 0.65, 0.45); }
     // the boarded-up door, with a COMING SOON banner across it
     const fz = 7 * 0.866;
     part(g, BOX, new THREE.MeshBasicMaterial({ color: 0xffd890 }), 0, 1.9 + 2.2, fz + 0.02, 3, 4.4, 0.25); // open doors, warm light pouring out
     { const L = new THREE.PointLight(0xffc070, 16, 14, 1.6); L.position.set(0, 3.4, fz + 2); g.add(L); }
     part(g, BOX, trim, 0, 1.9 + 4.55, fz + 0.1, 3.6, 0.3, 0.3);
-    const banner = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.1), new THREE.MeshBasicMaterial({ map: casinoTex([["OPEN 24/7", 64, "#ffd060", 64]], 512, 128, "#2a0e06") })); banner.position.set(0, 7.0, fz + 0.12); g.add(banner);
+    const tagline = S.tagline || "OPEN 24/7", name = S.name || "THE CASINO";
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 1.1), new THREE.MeshBasicMaterial({ map: casinoTex([[tagline, Math.min(64, Math.floor(480 / (0.56 * tagline.length))), "#ffd060", 64]], 512, 128, "#2a0e06") })); banner.position.set(0, 7.0, fz + 0.12); g.add(banner);
     const signMat = new THREE.MeshBasicMaterial({ map: casinoTex([["CASINO", 120, S.sign, 96]], 512, 192), transparent: true, depthWrite: false, color: 0xd8b8a8 });
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 2.1), signMat); sign.position.set(0, 1.9 + 9 + 3.8, 6 * 0.866 + 0.12); g.add(sign);
     for (const s of [-1, 1]) part(g, OCTA, trim, s * 3.4, 1.9 + 9 + 3.8, 6 * 0.866 + 0.15, 0.4, 0.6, 0.12); // diamond emblems either side of the sign
@@ -8826,12 +8883,13 @@ function buildCasino(n) {
     circles.push({ x, z, r: 10.2 });
     for (const [lx, lz, r] of [[-6.2, 9.4, 1], [-4.6, 10.6, 0.8], [3.5, 13, 0.6]]) { const w2 = toW(lx, lz); circles.push({ x: w2.x, z: w2.z, r }); }
     const door = { x: x + Math.sin(face) * 11.4, z: z + Math.cos(face) * 11.4 };
-    const lm = { name: "THE CASINO", x, z, r: 13, col: S.lm };
+    const lm = { name, x, z, r: 13, col: S.lm };
     // a floating nametag over the tower, visible from across the island
-    const tag = label("THE CASINO", S.lm, 4.4, 1.0); tag.position.set(x, gy + 43, z); tag.maxD = 260; tag.blurK = 0.35;
-    const tag2 = label("OPEN 24/7", "#ffffff", 3, 0.7); tag2.position.set(x, gy + 39.5, z); tag2.maxD = 200; tag2.blurK = 0.35;
+    const tag = label(name, S.lm, 4.4, 1.0); tag.position.set(x, gy + 43, z); tag.maxD = 260; tag.blurK = 0.35;
+    const tag2 = label(tagline, "#ffffff", 3, 0.7); tag2.position.set(x, gy + 39.5, z); tag2.maxD = 200; tag2.blurK = 0.35;
     if (n === 4) LM4.push(lm);
-    casino = casinos[n] = { isle: n, x, z, door, signMat };
+    if (n >= CI_BASE) customIsle(n).LM.push(lm);
+    casino = casinos[n] = { isle: n, x, z, door, signMat, name: S.name, skin: S.hall, parts: [g, tag, tag2] };
     addTgt = prev; curBuild = prevB;
 }
 function updateCasino() {
@@ -8868,8 +8926,15 @@ function drawSym(g, s, cx, cy, size) {
 
 // ---- textures ----
 function csCanvas(w, h, fn) { const cv = document.createElement("canvas"); cv.width = w; cv.height = h; fn(cv.getContext("2d"), w, h); const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t; }
-const carpetTex = () => { const t = csCanvas(128, 128, (g, w) => { g.fillStyle = "#5a0c18"; g.fillRect(0, 0, w, w); g.strokeStyle = "#b8862a"; g.lineWidth = 3; g.beginPath(); g.moveTo(64, 4); g.lineTo(124, 64); g.lineTo(64, 124); g.lineTo(4, 64); g.closePath(); g.stroke(); g.fillStyle = "#3a0610"; g.beginPath(); g.moveTo(64, 30); g.lineTo(98, 64); g.lineTo(64, 98); g.lineTo(30, 64); g.closePath(); g.fill(); g.fillStyle = "#d8a840"; for (const [x, y] of [[64, 64], [0, 0], [128, 0], [0, 128], [128, 128]]) { g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); } }); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(11, 10); t.magFilter = THREE.NearestFilter; return t; };
-const wallTex = () => { const t = csCanvas(64, 128, (g, w, h) => { g.fillStyle = "#3a0e16"; g.fillRect(0, 0, w, h); g.fillStyle = "#4a141c"; g.fillRect(0, 0, 32, h); g.fillStyle = "rgba(216,168,64,.55)"; for (let y = 12; y < h; y += 32) { g.beginPath(); g.moveTo(16, y - 8); g.lineTo(24, y); g.lineTo(16, y + 8); g.lineTo(8, y); g.closePath(); g.fill(); } }); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 1); t.magFilter = THREE.NearestFilter; return t; };
+// the carpet and wallpaper in the casino's colours: the usual crimson and gold, or a re-skin's wallpaper, carpet and trim colours (made rich and dark)
+const csPal = sk => {
+    const ok = v => /^#[0-9a-f]{6}$/i.test(String(v)), dk = (v, t) => "#" + new THREE.Color(v).multiplyScalar(t).getHexString();
+    const tr = sk && ok(sk.trim) ? sk.trim : "#d8a840", w = sk && ok(sk.walls) ? sk.walls : null, c = sk && ok(sk.carpet) ? sk.carpet : null;
+    return { cBase: c ? dk(c, 0.42) : "#5a0c18", cIn: c ? dk(c, 0.26) : "#3a0610", cLine: tr === "#d8a840" ? "#b8862a" : dk(tr, 0.85), cDot: tr, wBase: w ? dk(w, 0.3) : "#3a0e16", wStripe: w ? dk(w, 0.38) : "#4a141c", wDia: tr };
+};
+const carpetTex = sk => { const P = csPal(sk), t = csCanvas(128, 128, (g, w) => { g.fillStyle = P.cBase; g.fillRect(0, 0, w, w); g.strokeStyle = P.cLine; g.lineWidth = 3; g.beginPath(); g.moveTo(64, 4); g.lineTo(124, 64); g.lineTo(64, 124); g.lineTo(4, 64); g.closePath(); g.stroke(); g.fillStyle = P.cIn; g.beginPath(); g.moveTo(64, 30); g.lineTo(98, 64); g.lineTo(64, 98); g.lineTo(30, 64); g.closePath(); g.fill(); g.fillStyle = P.cDot; for (const [x, y] of [[64, 64], [0, 0], [128, 0], [0, 128], [128, 128]]) { g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); } }); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(11, 10); t.magFilter = THREE.NearestFilter; return t; };
+const wallTex = sk => { const P = csPal(sk), t = csCanvas(64, 128, (g, w, h) => { g.fillStyle = P.wBase; g.fillRect(0, 0, w, h); g.fillStyle = P.wStripe; g.fillRect(0, 0, 32, h); g.globalAlpha = 0.55; g.fillStyle = P.wDia; for (let y = 12; y < h; y += 32) { g.beginPath(); g.moveTo(16, y - 8); g.lineTo(24, y); g.lineTo(16, y + 8); g.lineTo(8, y); g.closePath(); g.fill(); } }); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 1); t.magFilter = THREE.NearestFilter; return t; };
+const csSkinMats = []; // [kind, material]: the hall's and the wing's wallpaper and carpet, redrawn by skinHall
 const RED_N = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
 const WHEEL_ORDER = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
 const numCol = n => (n === 0 ? "#1a9a4a" : RED_N.has(n) ? "#c8202a" : "#141418");
@@ -8917,8 +8982,9 @@ function buildCasinoHall() {
     const prev = addTgt, prevB = curBuild; addTgt = null; curBuild = CASINO_ISLE;
     const W = CS_X1 - CS_X0, D = CS_Z1 - CS_Z0, cz = (CS_Z0 + CS_Z1) / 2;
     const gold = new THREE.MeshLambertMaterial({ color: 0xd8a840, emissive: 0x3a2a08, flatShading: true }), darkWood = lamb(0x2a140c), marble = lamb(0xe8e0d8);
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ map: carpetTex() })); floor.rotation.x = -Math.PI / 2; floor.position.set(CSX, 0.01, cz); scene.add(floor);
+    const floorM = new THREE.MeshLambertMaterial({ map: carpetTex() }), floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorM); floor.rotation.x = -Math.PI / 2; floor.position.set(CSX, 0.01, cz); scene.add(floor);
     const wt = wallTex(), wallM = new THREE.MeshLambertMaterial({ map: wt });
+    csSkinMats.push(["wall", wallM], ["floor", floorM]);
     for (const [x, z, w, d, ry] of [[CSX, CS_Z0, W, 0, 0], [CS_X0, cz, D, 0, Math.PI / 2], [CS_X1, cz, D, 0, -Math.PI / 2]]) {
         const m = new THREE.Mesh(new THREE.PlaneGeometry(w, CS_H), wallM); m.position.set(x, CS_H / 2, z); m.rotation.y = ry; scene.add(m);
     }
@@ -8957,7 +9023,7 @@ function buildCasinoHall() {
     sign("BLACKJACK", "#5ad8ff", CS_X1 - 0.12, 5.4, 2, -Math.PI / 2, 6.5);
     sign("BAR", "#ffb040", CS_X1 - 0.12, 5.4, 12.5, -Math.PI / 2, 3.2);
     sign("EXIT", "#6aff8a", CSX, 5.1, CS_Z0 + 0.14, 0, 3, 1.1);
-    sign("★ WELCOME TO THE CASINO ★", "#ffd040", CSX, 6.1, CS_Z0 + 0.14, 0, 12, 1.2);
+    csHall = { wall: wallM, floor: floorM, gold, welcome: sign("★ WELCOME TO THE CASINO ★", "#ffd040", CSX, 6.1, CS_Z0 + 0.14, 0, 12, 1.2), key: "" }; // re-skinned by each island's casino (skinHall)
 
     // slot machines along the west wall, each with its own screen
     const cabCols = [0x6a1aa0, 0xa01a3a, 0x1a6aa0, 0xa07a1a, 0x1aa06a, 0xa01a8a];
@@ -9065,6 +9131,7 @@ function drawSlotScreen(sm) {
 let casinoCd = 0;
 function enterCasino() {
     if (!casinoBuilt) buildCasinoHall();
+    skinHall(casino && casino.skin);
     sfx(260, 0.2, "triangle", 0.08, 1.5); setTimeout(() => sfx(390, 0.3, "triangle", 0.07, 1.4), 120);
     fadeTo(() => {
         player.pos.set(CSX, 1.7, CS_Z0 + 2.2); player.vel.set(0, 0, 0); player.yaw = Math.PI; player.pitch = -0.05;
@@ -9923,8 +9990,9 @@ function liveScreen(w, h, cw, ch, x, y, z, ry) { const cv = document.createEleme
 function buildCasinoWing() {
     const gold = new THREE.MeshLambertMaterial({ color: 0xd8a840, emissive: 0x3a2a08, flatShading: true }), darkWood = lamb(0x2a140c);
     const W = CS_X1 - CS_X0, D = WING_Z1 - CS_Z1, cz = (CS_Z1 + WING_Z1) / 2;
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ map: carpetTex() })); floor.rotation.x = -Math.PI / 2; floor.position.set(CSX, 0.01, cz); scene.add(floor);
+    const floorWM = new THREE.MeshLambertMaterial({ map: carpetTex() }), floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorWM); floor.rotation.x = -Math.PI / 2; floor.position.set(CSX, 0.01, cz); scene.add(floor);
     const wallM = new THREE.MeshLambertMaterial({ map: wallTex() });
+    csSkinMats.push(["wall", wallM], ["floor", floorWM]);
     const plane = (w, h, x, y, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallM); m.position.set(x, y, z); m.rotation.y = ry; scene.add(m); };
     plane(W, CS_H, CSX, CS_H / 2, WING_Z1, Math.PI); plane(D, CS_H, CS_X0, CS_H / 2, cz, Math.PI / 2); plane(D, CS_H, CS_X1, CS_H / 2, cz, -Math.PI / 2);
     // the shared wall, both faces, with two arches in it
@@ -13415,6 +13483,7 @@ function buildCI(C) {
     const n = C.n, d = C.d, cols = C.cols, P = C.P, prevB = curBuild, prevAdd = addTgt;
     C.built = true; curBuild = n; addTgt = C.G;
     colliders.length = 0; circles.length = 0; occluders.length = 0; chests.length = 0; altar = null;
+    if (n === casinoHome() && !C.CAS) ciCasinoSpot(C); // the newest island gets the casino: its spot is levelled before the land is baked
     // ----- the land: baked once, coloured by height and slope -----
     {
         const size = Math.ceil(C.extent * 2), segs = clamp(Math.round(size / 1.6), 120, 240);
@@ -13543,6 +13612,7 @@ function buildCI(C) {
     }
     for (let i = 0; i < 8; i++) { let guard = 0; while (guard++ < 60) { const a = srand() * 6.283, dd = srange(36, C.shoreR(a) - 14), x = Math.cos(a) * dd, z = Math.sin(a) * dd; if (!okSpot(x, z)) continue; const c = makeChest(x, z, srand() * 6, i % 4 === 0); const y = C.terrain(x, z); c.g.position.y = y; c.beacon.position.y = y + 2.7; break; } }
     for (const rec of placed) if (+rec.o.isle === n && rec.g.parent !== C.G) C.G.add(rec.g); // signs and props placed here in the Studio
+    buildCasino(n);
     addTgt = prevAdd; curBuild = prevB;
 }
 function enterCI(C) {
@@ -13580,7 +13650,7 @@ function isleUI(u) {
     if (acc) { root.setProperty("--amber", acc); root.setProperty("--amber2", acc); root.setProperty("--line", `rgba(${rgb(acc)}, .4)`); }
     if (bg) root.setProperty("--bg", `rgba(${rgb(bg)}, .9)`);
     if (ink) root.setProperty("--ink", ink);
-    st.textContent = (f ? `.panel h2, .panel h4, .talk .who, .csTx b, #isleName { font-family: "${f}", "Segoe UI", sans-serif !important; }` : "") + (c !== null ? `.panel, .flist > div, .card, .csItem, #contract { border-radius: ${c}px !important; }` : "");
+    st.textContent = (f ? `.panel h2, .panel h4, .talk .who, .shTx b, #isleName { font-family: "${f}", "Segoe UI", sans-serif !important; }` : "") + (c !== null ? `.panel, .flist > div, .card, .shItem, #contract { border-radius: ${c}px !important; }` : "");
 }
 // ---- shops: a placed person or building with act { type: "shop", title, who, greeting, color, items }. Each item costs cash and/or materials and gives
 // a buff for a while, materials, cash or a full heal: { name, desc, icon, cash, mats: { key: n }, give: { buff, secs } | { mat, n } | { cash } | { heal: true } } ----
@@ -13600,13 +13670,13 @@ function giveTxt(g) {
 function openCShop(o) { cshop = o; openPanel("cshop"); }
 function renderCShop() {
     const a = (cshop && cshop.act) || {}, col = /^#[0-9a-f]{6}$/i.test(String(a.color)) ? a.color : "";
-    $("csTitle").textContent = String(a.title || "THE SHOP").toUpperCase(); $("csTitle").style.color = col; $("panelCShop").style.borderColor = col;
-    $("csSay").textContent = a.greeting ? `${a.who ? a.who + ": " : ""}"${a.greeting}"` : "";
-    $("csItems").innerHTML = cshopItems(a).map((it, i) => {
+    $("shTitle").textContent = String(a.title || "THE SHOP").toUpperCase(); $("shTitle").style.color = col; $("panelCShop").style.borderColor = col;
+    $("shSay").textContent = a.greeting ? `${a.who ? a.who + ": " : ""}"${a.greeting}"` : "";
+    $("shItems").innerHTML = cshopItems(a).map((it, i) => {
         const cost = [itemCash(it) ? money(itemCash(it)) : "", ...itemMats(it).map(([k, n]) => `${n} ${MATS[k].name} (${save.mats[k] || 0})`)].filter(Boolean).join(" + ") || "FREE";
-        return `<div class="csItem"><div class="csIc">${escH(String(it.icon || "✦").slice(0, 4))}</div><div class="csTx"><b>${escH(String(it.name || "Something").slice(0, 40))}</b><small>${escH(String(it.desc || "").slice(0, 160))}</small><i>${escH(giveTxt(it.give))}</i></div><button class="btn csBuy" data-buy="${i}"${canBuy(it) ? "" : " disabled"}>${escH(cost)}</button></div>`;
-    }).join("") || `<div class="csItem"><small>Nothing for sale yet.</small></div>`;
-    $("csFoot").textContent = `you have ${money(save.money)} · Esc to close`;
+        return `<div class="shItem"><div class="shIc">${escH(String(it.icon || "✦").slice(0, 4))}</div><div class="shTx"><b>${escH(String(it.name || "Something").slice(0, 40))}</b><small>${escH(String(it.desc || "").slice(0, 160))}</small><i>${escH(giveTxt(it.give))}</i></div><button class="btn shBuy" data-buy="${i}"${canBuy(it) ? "" : " disabled"}>${escH(cost)}</button></div>`;
+    }).join("") || `<div class="shItem"><small>Nothing for sale yet.</small></div>`;
+    $("shFoot").textContent = `you have ${money(save.money)} · Esc to close`;
 }
 function buyCShop(i) {
     const it = cshopItems(cshop && cshop.act)[i]; if (!it) return;
@@ -13620,7 +13690,7 @@ function buyCShop(i) {
     sfx(660, 0.15, "triangle", 0.1, 1.4); toast(`${String(it.name || "Bought it")}: ${giveTxt(g)}`, "good");
     writeSave(); renderCShop();
 }
-$("csItems").addEventListener("click", e => { const b = e.target.closest("[data-buy]"); if (b && !b.disabled) buyCShop(+b.dataset.buy); });
+$("shItems").addEventListener("click", e => { const b = e.target.closest("[data-buy]"); if (b && !b.disabled) buyCShop(+b.dataset.buy); });
 // ---- the ferry onwards: from the Iceberg to the first Studio island, and from each Studio island to the next ----
 function rebirthReadyFrom(from) {
     if (from >= 6) { const nx = customIsle(from + 1); return !!nx && nx.ready(); }
@@ -13707,6 +13777,7 @@ function ciSet(i, d) {
     const n = CI_BASE + i, old = ciList[i], here = isle === n;
     for (const T of Object.values(TYPES)) if (!T.custom && T.isl && T.isl.includes(n)) T.isl = T.isl.filter(q => q !== n);
     if (old) { scene.remove(old.G); ciRemoveLabels(n); delete worldSnap[n]; terrainMesh[n] = null; }
+    if (casino && casino.isle === n) casino = null; // its tower went with the old build: the new one puts it back
     ciList[i] = makeCI(d, n); ciAxes();
     if (here) { ciList[i].G.visible = true; enterCI(ciList[i]); }
     return ciList[i];
@@ -13716,6 +13787,7 @@ function ciDropLast() {
     const n = CI_BASE + i, old = ciList[i];
     for (const T of Object.values(TYPES)) if (!T.custom && T.isl && T.isl.includes(n)) T.isl = T.isl.filter(q => q !== n);
     scene.remove(old.G); ciRemoveLabels(n); delete worldSnap[n]; terrainMesh[n] = null; ciList.pop(); ciAxes();
+    if (casino && casino.isle === n) casino = null;
     return true;
 }
 for (const d of Array.isArray(CONTENT_ISLANDS) ? CONTENT_ISLANDS : []) if (d && typeof d === "object") ciList.push(makeCI(d, CI_BASE + ciList.length));
@@ -13821,7 +13893,7 @@ const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
     ...PROMPTS5, ferry6: () => "[F] Talk to the Ferryman", ferryC: () => "[F] Talk to the Ferryman", placed: n => placedPrompt(n.o),
-    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => "[F] Enter the Casino", ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
+    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => `[F] Enter ${casino && casino.name ? casino.name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : "the Casino"}`, ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
@@ -13848,7 +13920,7 @@ function hud(dt) {
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
     if (isle >= 2) { const mh = isleMats().filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
     else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = inCasino() ? "THE CASINO · SAFE" : isle === 6 ? (inSafe() ? "IGLOO CAMP" : fight6.on || yetiDist() < DEN6.r ? "THE YETI'S DEN" : Math.hypot(player.pos.x - LAKE6.x, player.pos.z - LAKE6.z) < LAKE6.r ? "FROZEN LAKE" : "THE ICEBERG") : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : race5.on ? "RACING" : "AT SEA") : swim5() ? "SWIMMING" : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    el.zone.textContent = inCasino() ? `${(casino && casino.name) || "THE CASINO"} · SAFE` : isle === 6 ? (inSafe() ? "IGLOO CAMP" : fight6.on || yetiDist() < DEN6.r ? "THE YETI'S DEN" : Math.hypot(player.pos.x - LAKE6.x, player.pos.z - LAKE6.z) < LAKE6.r ? "FROZEN LAKE" : "THE ICEBERG") : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : race5.on ? "RACING" : "AT SEA") : swim5() ? "SWIMMING" : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
     { // active potions and blessings, with time left
         const bh = Object.keys(BUFFS).filter(buffOn).map(k => `<span style="color:${BUFFS[k].col};border-color:${BUFFS[k].col}">${BUFFS[k].icon} ${BUFFS[k].name} ${mmss(buffLeft(k))}</span>`).join("") + (save.phoenix > 0 ? `<span style="color:#ffb060;border-color:#ffb060">🔥 PHOENIX ×${save.phoenix}</span>` : "");
         const be = $("buffs"); if (be.dataset.h !== bh) { be.innerHTML = bh; be.dataset.h = bh; }
@@ -14402,7 +14474,7 @@ if (STUDIO) {
         scene, camera, renderer, canvas, keys, isleGroup, TYPES, TREE_STYLE, TREE_SHAPES, MATS, MATS_BY_ISLE, AXES, ARCH_BY, MUTS,
         CONTENT_TREES, CONTENT_WORLD, CONTENT_ISLANDS, CONTENT_PROPS, CONTENT_ANIMALS, defineCustomProp, dropCustomProp, PART_SHAPES,
         WILD_KINDS, ANIMAL_ROLES, ANIMAL_WAYS, defineCustomAnimal, dropCustomAnimal, makeCustomAnimal, makePartsGroup, releaseAnimals,
-        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson, ISLE_FONTS, openCShop,
+        CONTENT_PEOPLE, PERSON_OPTS, FACE_EXTRAS, defineCustomPerson, dropCustomPerson, ISLE_FONTS, openCShop, casinoHome, ROOF_KINDS, getCasino: () => casino, enterCasino,
         MOVES, builtinAt, builtinIndexOf, moveHome, placeBuiltin, ciReshape, ciSettle, terrainMesh, wildBy, ABIL, BASE_AXES, ciAxes, RECIPES, GLOW_MATS, resetIsleTrees,
         setSeeAll(v) { studioSeeAll = !!v; }, PROP_CATS, NPC_LOOKS, BUFFS, CI_BASE, ciList, customIsle, ciSet, ciDropLast, enterCI, get isleNow() { return isle; }, defineCustomTree, dropCustomTree, isCustomKey, makeTree, setClock(h) { clockT = (h / 24) * DAY_LEN; }, getClock: () => hourNow(),
         PROPS, placed, placedBuild, placedPose, placedRemove, placedRebuild, placedFind, startPlaying, lockPointer, renderMenu,
