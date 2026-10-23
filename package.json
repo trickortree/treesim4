@@ -29,6 +29,7 @@
     "files": [
       "index.html",
       "game.js",
+      "admin.js",
       "intro.js",
       "updater.js",
       "preload.js",

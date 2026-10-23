@@ -2762,8 +2762,9 @@ function showPanels() {
     if (panel === "pets") renderPets();
     if (panel !== "spin" && spin && !spin.done) finishSpin();
     if (panel === "cshop") renderCShop();
-    $("panelBack").classList.toggle("show", panel !== null && panel !== "talk" && panel !== "dev");
+    $("panelBack").classList.toggle("show", panel !== null && panel !== "talk" && panel !== "dev" && panel !== "admin");
     if (window.__ts4dev) window.__ts4dev.show(panel === "dev");
+    if (adminPanel) adminPanel.show(panel === "admin");
     if (panel === "inv") renderInv();
     if (panel === "map") drawMap();
     if (panel === "shop") renderShop();
@@ -3064,6 +3065,7 @@ addEventListener("keydown", e => {
     if ($("intro")) return; // studio intro is playing
     if (e.target && e.target.closest && e.target.closest("input, textarea, select")) { if (e.code === "Escape") e.target.blur(); return; } // typing into a field, not playing
     if (settingsOpen()) { if (e.code === "Escape") openSettings(false); return; } // the settings screen eats keys until it's closed
+    if (!DEBUG && e.code === "Backquote") { e.preventDefault(); toggleAdmin(); return; } // the admin panel, for Tree only
     if (DEBUG && e.code === "Backquote") { e.preventDefault(); if (state === "playing") togglePanel("dev"); else if (window.__ts4dev) window.__ts4dev.toggle(); return; }
     keys[e.code] = true;
     if (state === "dead" && (e.code === "Space" || e.code === "KeyR" || e.code === "Enter")) { respawn(); return; }
@@ -15007,6 +15009,7 @@ function mpMsg(m) {
     else if (m.t === "sys") mpLine("", m.text);
     else if (m.t === "kicked" || m.t === "banned" || m.t === "replaced") mp.manual = true; // the close that follows says why, and no reconnecting
     else if (m.t === "nameTaken") mpNameTaken(m);
+    else if ((m.t === "adminOk" || m.t === "adminErr") && adminMod) adminMod.onMsg(m);
     else if (m.t === "adminTag") { if (m.id === mp.id) mp.admin = true; else { const o = mp.others.get(m.id); if (o) mpTagAdmin(o); } }
     else if (m.t === "leave") { const o = mp.others.get(m.id); if (o) { mpLine("", `${o.name} left`); mpRemove(m.id); } }
     else if (m.t === "st") { const o = mp.others.get(m.id); if (o) mpApply(o, m); }
@@ -15224,6 +15227,23 @@ function mpJoinGo() {
     mpConnect(name, pass);
 }
 function mpJoinClick() { const n = mpSavedName(); if (n) { startPlaying(); mpConnect(n); } else mpShowJoin(); }
+// the admin card (admin.js): on the PC with the admin key the dev panel shows it; in the installed game ` opens it as its own
+// panel once the server says you're Tree (the key, or your other PC's Tree slot)
+let adminMod = null, adminPanel = null;
+async function loadAdmin() {
+    if (!adminMod) {
+        adminMod = await import("./admin.js");
+        adminMod.setup({ mp, mpSend, mpUrl, mpIsleName, isle: () => isle, say: (t, k = "good") => toast(t, k), key: mpAdminKey,
+            goTo(x, z, fx, fz) { player.pos.set(x, groundY(x, z) + 1.7, z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(-(fx - x), -(fz - z)); player.pitch = 0; } });
+    }
+    return adminMod;
+}
+async function toggleAdmin() {
+    if (!mp.admin || state !== "playing") return;
+    const A = await loadAdmin();
+    if (!adminPanel) adminPanel = A.panel();
+    togglePanel("admin");
+}
 // the server said no to the name: back to the menu with the name box up, saying why
 function mpNameTaken(m) {
     mp.manual = true; mp.connecting = false; updateMpHud();
@@ -15322,7 +15342,7 @@ $("gfxPick").classList.remove("show");
 
 // debug/test handle (used by automated checks, harmless in play)
 if (DEBUG) window.__ts4 = {
-    mp: { mp, mpConnect, mpLeave, mpState, mpLook, mpCheckOnline, mpShowJoin, mpJoinGo, mpOpenChat, mpCloseChat, renderMpList, mpUrl, mpSend, mpIsleName, anns, annAdd, annRemove },
+    mp: { mp, mpConnect, mpLeave, mpState, mpLook, mpCheckOnline, mpShowJoin, mpJoinGo, mpOpenChat, mpCloseChat, renderMpList, mpUrl, mpSend, mpIsleName, anns, annAdd, annRemove, loadAdmin },
     pets: { PETS, CASES, RAR, PERKS, list: () => pets, openCase, startSpin, finishSpin, togglePet, spawnPets, petK, petAdd, petValue, casePrice, slyCart, placeDealer, rollPet, getSpin: () => spin },
     save, player, trees, camera, renderer, gfx: { GQ, FX, sunL, grass, TSU, MODERN, hemiL, skyDome }, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,
     docks: () => (CI() ? CI().DOCKS : isle === 6 ? DOCKS6 : []).map(D => ({ kind: D.kind, B: { x: D.B.x, z: D.B.z }, DIR: { x: D.DIR.x, z: D.DIR.z }, LEN: D.LEN })), // where this island's docks are, for walking tests

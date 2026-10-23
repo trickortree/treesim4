@@ -42,13 +42,6 @@ const css = `
 .dvApply:disabled { opacity: .35; cursor: default; color: #8a7aa8 !important; border-color: #44365f !important; }
 .dvApply:not(:disabled) { background: linear-gradient(#ffd040, #ffb020); color: #1a0e00; border-color: #ffd040; }
 .dvCard.dvAdm { border-color: #ffd04066; background: #221830; }
-.dvText { width: 100%; background: #0e0818; color: #fff; border: 1px solid #3a2c55; border-radius: 8px; padding: 8px 10px; font: 14px "Segoe UI"; outline: none; margin-bottom: 7px; user-select: text; }
-.dvText:focus { border-color: #ffd040; }
-.dvAdRow { display: flex; align-items: center; gap: 6px; background: #261c3a; border-radius: 9px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
-.dvAdRow b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .dvAdRow b.adm { color: #ffd040; }
-.dvAdRow span { font: 11px Consolas; color: #a89cc4; white-space: nowrap; } .dvAdRow .dvB { padding: 4px 8px; font-size: 11px; }
-.dvAdRow b.quick { color: #8adcff; }
-.dvAnnN:disabled { opacity: .35; }
 `;
 document.head.appendChild(Object.assign(document.createElement("style"), { textContent: css }));
 
@@ -71,31 +64,7 @@ el.id = "devPanel";
 el.innerHTML = `
   <div class="dvHead"><div class="dvTitle">TREESIM4 DEV</div><div class="dvStatus"><span class="dvDot" id="dvDot"></span><span id="dvStat"></span><button class="dvX" data-close id="dvClose">✕</button></div></div>
   <div class="dvBody">
-    <div class="dvCard dvAdm">
-      <div class="dvH">ADMIN · PUBLIC SERVER <small id="dvAdStat"></small></div>
-      <div id="dvAdNoKey" style="display:none"><input class="dvText" id="dvAdKey" type="password" placeholder="Paste your admin key (from admin.key.js on your main PC)" spellcheck="false" autocomplete="off"><div class="dvBtns"><button class="dvB" id="dvAdKeySave">Save key on this PC</button></div></div>
-      <div id="dvAdBox">
-        <div class="dvBtns" style="margin-bottom:8px"><button class="dvB on" data-annkind="quick">⚡ Quick · whoever's on now</button><button class="dvB" data-annkind="full">📢 Announcement · everyone + menu</button></div>
-        <input class="dvText" id="dvAnn" maxlength="200" spellcheck="true" autocomplete="off">
-        <div class="dvRow"><label>Stays up</label><span style="display:flex;gap:6px;align-items:center"><input class="dvIn dvAnnN" id="dvAnnN" value="15" style="width:64px;font-size:14px"><select class="dvSel" id="dvAnnU"><option value="1">seconds</option><option value="60">minutes</option><option value="3600">hours</option><option value="86400">days</option><option value="0">until I take it down</option></select></span></div>
-        <div class="dvBtns" style="margin-bottom:8px"><button class="dvB" data-anndur="10">10s</button><button class="dvB" data-anndur="30">30s</button><button class="dvB" data-anndur="60">1m</button><button class="dvB" data-anndur="300">5m</button><button class="dvB" data-anndur="3600">1h</button><button class="dvB" data-anndur="86400">1 day</button><button class="dvB" data-anndur="604800">1 week</button><button class="dvB" data-anndur="0">until I take it down</button></div>
-        <div class="dvBtns" style="margin-bottom:10px"><button class="dvB on" id="dvAnnGo">Post it</button></div>
-        <div class="dvH" style="margin:4px 0 7px">UP NOW <small><button class="dvB warn" id="dvAnnAll" style="padding:3px 8px">take them all down</button></small></div>
-        <div id="dvAnnList"></div>
-        <input class="dvText" id="dvMotd" maxlength="200" placeholder="Message of the day (empty = the default)" spellcheck="true" autocomplete="off">
-        <div class="dvBtns" style="margin-bottom:10px"><button class="dvB" id="dvMotdGo">Set message of the day</button></div>
-        <div class="dvH" style="margin:4px 0 7px">PLAYERS <small id="dvAdCount"></small></div>
-        <div id="dvAdPlayers"></div>
-        <div class="dvH" style="margin:10px 0 7px">BANS <small><button class="dvB warn" id="dvUnbanAll" style="padding:3px 8px">lift every ban</button></small></div>
-        <div id="dvAdBans"></div>
-        <div class="dvH" style="margin:10px 0 7px">NAMES <small>a name stays with whoever used it for 30 days</small></div>
-        <div style="display:flex;gap:6px"><input class="dvText" id="dvFreeName" maxlength="16" placeholder="Free up a name someone's holding..." spellcheck="false" autocomplete="off" style="margin:0"><button class="dvB" id="dvFreeGo">Free it</button></div>
-        <div class="dvH" style="margin:10px 0 7px">TREE ON 2 PCS <small id="dvTreeInfo"></small></div>
-        <div style="display:flex;gap:6px;margin-bottom:7px"><input class="dvText" id="dvTreePass" type="password" maxlength="64" placeholder="Tree password for your other PC (6+ characters)" autocomplete="off" style="margin:0"><button class="dvB" id="dvTreePassGo">Set</button></div>
-        <div id="dvTreeDevs"></div>
-      </div>
-      <div class="dvHint">only you have the key: it's in admin.key.js (git ignores it) and on the server as ADMIN_KEY</div>
-    </div>
+    <div class="dvCard dvAdm" id="dvAdminBox"></div>
     <div class="dvCard">
       <div class="dvH">CASH</div>
       <div class="dvRow"><label>Money</label><input class="dvIn money" id="dvMoney" spellcheck="false"></div>
@@ -233,101 +202,12 @@ function buildGo() {
 }
 function teleport(x, z, faceX = 0, faceZ = 0) { T.setPos(x, z, Math.atan2(-(faceX - x), -(faceZ - z)), 0); T.player.vel.set(0, 0, 0); }
 
-// ---------- admin: your own line to the public server (server/worker.js checks the key on every command) ----------
+// ---------- admin: the public server's admin card (admin.js, which the installed game uses too) ----------
 let KEY_FILE = "";
-try { KEY_FILE = (await import("./admin.key.js")).default || ""; } catch (e) { /* no admin.key.js on this PC: paste the key instead */ }
-const adKey = () => { if (KEY_FILE) return KEY_FILE; try { return localStorage.getItem("ts4_admin_key") || ""; } catch (e) { return ""; } };
+try { KEY_FILE = (await import("./admin.key.js")).default || ""; } catch (e) { /* no admin.key.js on this PC: paste the key into the card instead */ }
 // the game sends the key when it joins, so "Tree" (your reserved name) is yours, even in the installed game on this PC
 if (KEY_FILE) { T.mp.mp.key = KEY_FILE; try { if (localStorage.getItem("ts4_admin_key") !== KEY_FILE) localStorage.setItem("ts4_admin_key", KEY_FILE); } catch (e) { /* no storage */ } }
-const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", anns: [], tree: null, myK: "", kind: "quick", tagged: null, armed: "" };
-// this PC's id as the server shows it (the end of a hash of the game's token), so its Tree slot can say "this PC"
-async function myPcK() {
-    try {
-        const t = localStorage.getItem("ts4_mp_tok"); if (!t) return "";
-        const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
-        return [...new Uint8Array(d)].slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("").slice(-4);
-    } catch (e) { return ""; }
-}
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-function adOpen() {
-    if (!adKey() || (AD.ws && AD.ws.readyState <= 1)) return;
-    let ws; try { ws = new WebSocket(T.mp.mpUrl()); } catch (e) { return; }
-    AD.ws = ws; AD.err = "";
-    ws.onopen = () => adSend("list");
-    ws.onmessage = e => {
-        let m; try { m = JSON.parse(e.data); } catch (err) { return; }
-        if (m.t === "adminOk") {
-            const now = performance.now();
-            Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, tree: m.tree || null, anns: (m.anns || []).map(a => ({ ...a, until: a.left ? now + a.left : 0 })) });
-            if (m.text) say(m.text); drawAdmin();
-            myPcK().then(k => { if (k !== AD.myK) { AD.myK = k; drawAdmin(); } });
-        }
-        else if (m.t === "adminErr") { AD.ok = false; AD.err = m.text; say(m.text, "bad"); drawAdmin(); }
-    };
-    ws.onclose = () => { if (AD.ws === ws) { AD.ws = null; AD.ok = false; drawAdmin(); } };
-}
-function adSend(op, o = {}) {
-    if (AD.ws && AD.ws.readyState === 1) AD.ws.send(JSON.stringify({ t: "admin", key: adKey(), op, ...o }));
-    else adOpen();
-}
-function drawAdmin() {
-    const has = !!adKey();
-    $("dvAdNoKey").style.display = has ? "none" : ""; $("dvAdBox").style.display = has ? "" : "none";
-    $("dvAdStat").textContent = !has ? "no key on this PC" : AD.err ? AD.err : AD.ok ? `connected · ${AD.players.length} online` : AD.ws ? "connecting..." : "offline";
-    if (!has) return;
-    setHTML("dvAnnList", AD.anns.length ? AD.anns.map(a => `<div class="dvAdRow"><b class="${a.kind === "full" ? "adm" : "quick"}" title="${esc(a.text)}">${a.kind === "full" ? "📢" : "⚡"} ${esc(a.text)}</b><span data-annleft="${esc(a.id)}"></span><button class="dvB warn" data-ad="annDel" data-id="${esc(a.id)}">Take down</button></div>`).join("") : `<div class="dvHint" style="margin:0 0 4px">nothing up right now</div>`);
-    $("dvAnnAll").style.display = AD.anns.length > 1 ? "" : "none";
-    const TR = AD.tree;
-    $("dvTreeInfo").textContent = TR ? `${TR.devs.length} of ${TR.slots} PCs · password ${TR.pass ? "set" : "not set"}` : "";
-    setHTML("dvTreeDevs", TR && TR.devs.length ? TR.devs.map(d => `<div class="dvAdRow"><b>${d.k === AD.myK ? "This PC" : "PC ····" + esc(d.k)}</b><span>${d.by === "key" ? "your key" : "password"} · last on ${new Date(d.seen).toLocaleDateString()}</span><button class="dvB warn" data-ad="treeFree" data-k="${esc(d.k)}">Free</button></div>`).join("")
-        : `<div class="dvHint" style="margin:0 0 4px">no PCs yet: this one takes a slot the next time you join as Tree</div>`);
-    annLeft();
-    $("dvMotd").placeholder = "Message of the day: " + (AD.motd || "the default");
-    $("dvAdCount").textContent = AD.players.length ? "" : "nobody's on";
-    const me = T.mp.mp, here = T.getIsle();
-    setHTML("dvAdPlayers", AD.players.map(p => `<div class="dvAdRow"><b class="${p.admin ? "adm" : ""}">${p.admin ? "[ADMIN] " : ""}${esc(p.name)}${me.on && p.id === me.id ? " (you)" : ""}</b><span>${esc(T.mp.mpIsleName(p.isle))}</span>`
-        + (me.on && p.id === me.id ? "" : `<button class="dvB" data-ad="goto" data-id="${esc(p.id)}" ${me.on && p.isle === here ? "" : "disabled style=\"opacity:.35\""}>Go to</button><button class="dvB" data-ad="mute" data-id="${esc(p.id)}">${p.muted ? "Unmute" : "Mute"}</button><button class="dvB warn" data-ad="kick" data-id="${esc(p.id)}">Kick</button><button class="dvB warn" data-ad="ban" data-id="${esc(p.id)}">${AD.armed === p.id ? "Sure?" : "Ban"}</button>`) + `</div>`).join(""));
-    setHTML("dvAdBans", AD.bans.length ? AD.bans.map(b => `<div class="dvAdRow"><b>${esc(b.name)}</b><span>${new Date(b.at).toLocaleDateString()}</span><button class="dvB" data-ad="unban" data-k="${esc(b.k)}">Unban</button></div>`).join("") : `<div class="dvHint" style="margin:0 0 4px">no bans</div>`);
-    $("dvUnbanAll").style.display = AD.bans.length ? "" : "none";
-}
-// lists only redraw when they change, so a click never lands on a button that's being replaced
-function setHTML(id, h) { const e = $(id); if (e.dataset.h !== h) { e.dataset.h = h; e.innerHTML = h; } }
-// how long each announcement has left, counted down every second while the panel is open
-const fmtLeft = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return t >= 86400 ? `${Math.floor(t / 86400)}d ${Math.floor(t % 86400 / 3600)}h` : t >= 3600 ? `${Math.floor(t / 3600)}h ${Math.floor(t % 3600 / 60)}m` : t >= 60 ? `${Math.floor(t / 60)}m ${t % 60}s` : `${t}s`; };
-function annLeft() {
-    const now = performance.now();
-    for (const sp of el.querySelectorAll("[data-annleft]")) { const a = AD.anns.find(q => q.id === sp.dataset.annleft); if (a) sp.textContent = a.until ? fmtLeft(a.until - now) : "until you take it down"; }
-}
-setInterval(() => { if (el.classList.contains("show")) annLeft(); }, 1000);
-// quick ones are for whoever's on right now (15 seconds unless you say); full ones reach everyone and the menu (an hour unless you say)
-function annKind(kind) {
-    AD.kind = kind;
-    for (const b of el.querySelectorAll("[data-annkind]")) b.classList.toggle("on", b.dataset.annkind === kind);
-    $("dvAnn").placeholder = kind === "full" ? "Announcement for everyone, on the server and the main menu..." : "Quick announcement for whoever's on right now...";
-    annDur(kind === "full" ? 3600 : 15);
-}
-function annDur(secs) {
-    const u = !secs ? 0 : secs % 86400 === 0 ? 86400 : secs % 3600 === 0 ? 3600 : secs % 60 === 0 ? 60 : 1;
-    $("dvAnnU").value = String(u); if (u) $("dvAnnN").value = secs / u;
-    $("dvAnnN").disabled = !u;
-}
-$("dvAnnU").addEventListener("change", () => { $("dvAnnN").disabled = $("dvAnnU").value === "0"; });
-annKind("quick");
-function adAction(d, b) {
-    if (d.ad === "goto") { const p = AD.players.find(q => q.id === d.id); if (p) { teleport(p.x + 2.5, p.z, p.x, p.z); say("next to " + p.name); } return; }
-    if (d.ad === "ban" && AD.armed !== d.id) { AD.armed = d.id; drawAdmin(); setTimeout(() => { if (AD.armed === d.id) { AD.armed = ""; drawAdmin(); } }, 3000); return; }
-    AD.armed = "";
-    if (d.ad === "unban") adSend("unban", { k: d.k });
-    else if (d.ad === "treeFree") adSend("treeFree", { k: d.k });
-    else adSend(d.ad, { id: d.id });
-}
-// your own player gets [ADMIN] over their head whenever you're on the server
-setInterval(() => {
-    const M = T.mp.mp;
-    if (adKey() && M.on && M.ws && AD.tagged !== M.ws) { AD.tagged = M.ws; T.mp.mpSend({ t: "admin", key: adKey(), op: "tag" }); }
-    if (el.classList.contains("show") && AD.ok) adSend("list");
-}, 3000);
-for (const [id, go] of [["dvTreePass", "dvTreePassGo"], ["dvFreeName", "dvFreeGo"], ["dvAnn", "dvAnnGo"], ["dvAnnN", "dvAnnGo"], ["dvMotd", "dvMotdGo"], ["dvAdKey", "dvAdKeySave"]]) $(id).addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); $(go).click(); } });
+const adminUI = (await T.mp.loadAdmin()).mount($("dvAdminBox"), () => el.classList.contains("show"));
 
 // ---------- buttons ----------
 $("dvWx").innerHTML = ["clear", "cloudy", "rain", "storm", "fog"].map(w => `<button class="dvB" data-wx="${w}" style="padding:5px 8px">${w}</button>`).join("");
@@ -346,23 +226,8 @@ el.addEventListener("click", e => {
     else if (d.hour) { T.setClock(+d.hour); say("time set"); }
     else if (d.wx) { T.setWeather(d.wx); }
     else if (d.speed) T.setSpeed(+d.speed);
-    else if (d.ad) adAction(d, b);
-    else if (d.annkind) annKind(d.annkind);
-    else if (d.anndur !== undefined) annDur(+d.anndur);
     else switch (b.id) {
         case "dvClose": show(false); break;
-        case "dvAnnGo": {
-            const v = $("dvAnn").value.trim(); if (!v) { $("dvAnn").focus(); return; }
-            const u = +$("dvAnnU").value, secs = u ? Math.round(parseFloat($("dvAnnN").value) * u) : 0;
-            if (u && !(secs >= 3)) { say("say how long it stays up (3 seconds or more)", "bad"); $("dvAnnN").focus(); return; }
-            adSend("announce", { text: v, kind: AD.kind, secs }); $("dvAnn").value = ""; break;
-        }
-        case "dvAnnAll": adSend("annDel", { id: "*" }); break;
-        case "dvTreePassGo": { const v = $("dvTreePass").value; if (v.length < 6) { say("the Tree password needs 6 characters or more", "bad"); $("dvTreePass").focus(); return; } adSend("treePass", { pass: v }); $("dvTreePass").value = ""; break; }
-        case "dvFreeGo": { const v = $("dvFreeName").value.trim(); if (!v) { $("dvFreeName").focus(); return; } adSend("freeName", { name: v }); $("dvFreeName").value = ""; break; }
-        case "dvMotdGo": adSend("motd", { text: $("dvMotd").value.trim() }); $("dvMotd").value = ""; break;
-        case "dvUnbanAll": adSend("unban", { k: "*" }); break;
-        case "dvAdKeySave": { const v = $("dvAdKey").value.trim(); if (!v) return; try { localStorage.setItem("ts4_admin_key", v); } catch (e) { /* no storage */ } $("dvAdKey").value = ""; adOpen(); drawAdmin(); break; }
         case "dvApply": apply(); break;
         case "dvUndo": load(); say("edits thrown away", ""); break;
         case "dvMatAll": showAllMats = !showAllMats; load(); break;
@@ -445,8 +310,8 @@ el.addEventListener("click", e => {
 function show(on) {
     const was = el.classList.contains("show");
     el.classList.toggle("show", !!on);
-    if (on && !was) { load(); buildGo(); status(); adOpen(); drawAdmin(); }
-    if (!on && was && AD.ws) { const w = AD.ws; AD.ws = null; AD.ok = false; try { w.close(1000, "panel closed"); } catch (e) { /* gone */ } }
+    if (on && !was) { load(); buildGo(); status(); }
+    adminUI.show(on);
 }
 window.__ts4dev = { show, toggle() { show(!el.classList.contains("show")); } };
 if (T.panel === "dev") show(true);

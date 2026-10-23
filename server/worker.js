@@ -154,7 +154,7 @@ export class Lobby extends DurableObject {
                 }
                 for (const p of out) { this.send(p.w, { t: "replaced" }); this.gone(p.w, 4006); }
             }
-            a.name = name; a.h = h; a.admin = you; a.v = v;
+            a.name = name; a.h = h; a.admin = you; a.boss = you; a.v = v;
             a.look = cleanLook(m.look);
             a.st = cleanState(m.st || {}) || null;
             a.isle = a.st ? a.st.isle : int(m.isle, 1, 99, 1);
@@ -214,7 +214,8 @@ export class Lobby extends DurableObject {
 
     // ---------- admin: every message carries the key, so nothing depends on the connection surviving a sleep ----------
     async admin(ws, a, m) {
-        if (!(await keyOk(this.env, m.key))) {
+        // the key, or a connection that joined as Tree (with the key, or from a Tree slot)
+        if (!(a.joined && a.boss) && !(await keyOk(this.env, m.key))) {
             a.bad = (a.bad || 0) + 1; ws.serializeAttachment(a);
             this.send(ws, { t: "adminErr", op: m.op, text: "Wrong admin key." });
             if (a.bad >= 3) try { ws.close(4004, "bad key"); } catch (e) { /* gone */ }
@@ -257,6 +258,7 @@ export class Lobby extends DurableObject {
             return reply(text ? "Message of the day set." : "Message of the day back to the default.");
         }
         const p = this.players().find(q => q.a.id === m.id);
+        if (p && p.a.boss && (op === "kick" || op === "ban" || op === "mute")) return reply("That's you, on another PC.");
         if (op === "kick" || op === "ban") {
             if (!p) return reply("They already left.");
             if (op === "ban" && p.a.ip) {
