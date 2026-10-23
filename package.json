@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -59,7 +59,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.0.0 (PETS & THE PUBLIC SERVER)\n\nTHE WHOLE NEW SYSTEM IS HERE!\n\n- JOIN PUBLIC SERVER: a new button on the main menu. Everyone on your island sees you walk, swing your axe and lead your pets, with your name over your head. Press T to chat, hold Tab to see who's online. Your progress stays your own.\n- ANNOUNCEMENTS: news from the admin shows up as a banner in game and on the main menu.\n- PETS: psst... Sly's Black Market is a shady cart beside the enchanting table on every island. Buy a Burlap Sack, a Smuggler's Crate or a Reaper's Coffer and spin for one of 24 pets in five rarities (2.5% chance of a SHINY).\n- Pets follow you and each has a perk: axe damage, more logs, more cash, speed, mutation luck, log reach, or biting the tree you're chopping. Duplicates add stars. Press P to see your pets. A third pet slot opens at Rebirth 8.\n- REBIRTH 8: MIDWEST ISLAND. Talk to the Ferryman on Mega Town to sail there.\n- NEW TREES on Midwest Island: the Dune Stalker, Terracotta Sentinel, Mesa Stonewood, Dust Storm Snag and Tumbleweed."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.0.1 (CHAT & NAMES)\n\nFixes and upgrades for the public server.\n\n- CHAT: pressing T no longer pauses the game. Type away while the world keeps going, and old messages fade instead of sticking on screen.\n- YOUR NAME IS YOURS: you pick a name once and JOIN goes straight in after that (\"change name\" under the button). Nobody else can be on with your name, and it stays yours as long as you play at least once a month.\n- ANNOUNCEMENTS: news from the admin stacks at the top of your screen (up to 5), each with a bar showing how long it's up. The bigger ones show on the main menu too."
     }
   }
 }
