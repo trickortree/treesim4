@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -60,7 +60,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.0.2 (NAME BOX FIXES)\n\nA small update for the public server.\n\n- The name box says clearly why a name can't be used, and the admin can now play from two PCs."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.0.3 (ADMIN TOOLS)\n\nA small update for the public server.\n\n- The admin can now look after the server from inside the game, so announcements and help can come from anywhere."
     }
   }
 }
