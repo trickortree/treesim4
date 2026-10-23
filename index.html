@@ -189,13 +189,26 @@
   #mpList div { display: flex; justify-content: space-between; gap: 20px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.06); font: 14px "Segoe UI"; color: #c8ccd4; } #mpList div.here { color: #fff; } #mpList span { font: 12px Consolas; color: #aab0bc; }
   #mpBadge { position: fixed; top: 14px; left: 50%; transform: translateX(-50%) translateY(34px); z-index: 12; display: none; padding: 4px 12px; border-radius: 999px; background: rgba(20,60,30,.75); border: 1px solid #8aff9a; color: #8aff9a; font: 800 11px Consolas; letter-spacing: 2px; pointer-events: none; }
   #mpBadge.show { display: block; }
-  .mpl.adm b { color: #ffd040; } .mpl.adm b::before { content: "[ADMIN] "; color: #ff8a3a; } .mpl.ann { color: #ffe9a0; font-weight: 700; font-style: normal; background: rgba(90,50,0,.6); border-left: 3px solid #ffd040; }
+  .mpl.adm b { color: #ffd040; } .mpl.adm b::before { content: "[ADMIN] "; color: #ff8a3a; }
   #menuNews { display: none; max-width: min(520px, 90vw); text-align: center; font: 700 13px "Segoe UI"; color: #ffe9a0; background: rgba(90,50,0,.45); border: 1px solid #ffd04088; border-radius: 8px; padding: 6px 12px; overflow-wrap: anywhere; }
   #menuNews.show { display: block; }
-  #mpAnnounce { position: fixed; top: 84px; left: 50%; transform: translate(-50%, -16px); z-index: 30; width: min(620px, 92vw); box-sizing: border-box; padding: 14px 22px 16px; border-radius: 14px; text-align: center;
-    background: linear-gradient(180deg, rgba(70,40,0,.94), rgba(40,20,0,.94)); border: 2px solid #ffd040; box-shadow: 0 0 40px rgba(255,200,60,.35), 0 16px 40px rgba(0,0,0,.6); opacity: 0; pointer-events: none; transition: opacity .35s, transform .35s; }
-  #mpAnnounce.show { opacity: 1; transform: translate(-50%, 0); }
-  #mpAnnounce h4 { margin: 0 0 6px; font: 900 12px "Segoe UI"; letter-spacing: 4px; color: #ffd040; } #mpAnnounce p { margin: 0; font: 700 19px/1.35 "Segoe UI"; color: #fff; text-shadow: 0 2px 4px #000; overflow-wrap: anywhere; }
+  #menuName { display: none; background: none; border: 0; padding: 2px 6px; cursor: pointer; font: 12px Consolas; letter-spacing: 1px; color: #c8ccd4; text-decoration: underline; text-underline-offset: 3px; }
+  #menuName.show { display: block; } #menuName:hover { color: #fff; }
+  #mpJoinErr { display: none; margin: -6px 0 12px; font: 600 13px/1.4 "Segoe UI"; color: #ffb0a0; }
+  #mpJoinErr.show { display: block; }
+  #menuNews div + div { margin-top: 5px; padding-top: 5px; border-top: 1px solid #ffd04033; }
+  #mpAnns { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 30; width: min(560px, 90vw); display: flex; flex-direction: column; pointer-events: none; transition: opacity .3s; }
+  #mpAnns.off { opacity: 0; }
+  .annCard { position: relative; display: flex; align-items: center; gap: 12px; overflow: hidden; box-sizing: border-box; max-height: 110px; margin-bottom: 6px; padding: 7px 14px 9px; border: 2px solid; border-radius: 10px;
+    transition: max-height .4s, opacity .4s, margin .4s, padding .4s, border-width .4s, transform .4s; }
+  .annCard.new, .annCard.out, .annCard.hide { max-height: 0; opacity: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; border-width: 0; }
+  .annCard.new { transform: translateY(14px); } .annCard.out { transform: translateY(-14px); }
+  .annCard.full { background: linear-gradient(180deg, rgba(70,40,0,.93), rgba(40,20,0,.93)); border-color: #ffd040; box-shadow: 0 0 24px rgba(255,200,60,.25), 0 8px 22px rgba(0,0,0,.45); }
+  .annCard.quick { background: linear-gradient(180deg, rgba(10,40,64,.93), rgba(6,22,40,.93)); border-color: #6ad0ff; box-shadow: 0 8px 22px rgba(0,0,0,.45); }
+  .annH { flex: none; font: 900 10px "Segoe UI"; letter-spacing: 2px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+  .full .annH { color: #1a0e00; background: #ffd040; } .quick .annH { color: #04121e; background: #6ad0ff; }
+  .annT { flex: 1; min-width: 0; font: 700 15px/1.3 "Segoe UI"; color: #fff; text-shadow: 0 1px 3px #000; overflow-wrap: anywhere; }
+  .annCard i { position: absolute; left: 0; bottom: 0; width: 100%; height: 3px; transform-origin: left; } .full i { background: #ffd040; } .quick i { background: #6ad0ff; }
   /* 2.0.0: Sly's Black Market, opening a case, and your pets */
   #panelMarket { width: min(860px, 95vw); border-color: rgba(138,255,154,.55); }
   #panelMarket h2 span, #panelPets h2 span { font-size: 13px; letter-spacing: 2px; color: #8aff9a; opacity: .85; margin-left: 10px; }
@@ -706,7 +719,7 @@
   <div id="menuHead"></div>
   <div id="menuStats"></div>
   <button id="menuBtn" class="btn">PLAY</button>
-  <div class="menuJoinRow"><button id="menuJoin" class="btn join">JOIN PUBLIC SERVER</button><small id="menuOnline"></small><div id="menuNews"></div></div>
+  <div class="menuJoinRow"><button id="menuJoin" class="btn join">JOIN PUBLIC SERVER</button><small id="menuOnline"></small><button id="menuName"></button><div id="menuNews"></div></div>
   <div id="menuControls"></div>
   <div class="menuRow"><button id="menuLeave" class="btn ghost" style="display:none">LEAVE SERVER</button><button id="menuSettings" class="btn ghost">SETTINGS</button><button id="menuQuit" class="btn ghost">QUIT</button></div>
   <div class="ver" id="ver">TREE CHOP STUDIOS</div>
@@ -721,12 +734,12 @@
   </div>
 </div>
 
-<div id="mpJoin"><div class="mjBox"><button class="xbtn" id="mpJoinX">✕</button><h2>JOIN THE PUBLIC SERVER</h2><p>Other players on your island will see you, your axe and your pets. Your progress stays your own.</p><label>YOUR NAME</label><input id="mpName" maxlength="16" spellcheck="false" autocomplete="off"><button id="mpJoinGo" class="btn">JOIN</button></div></div>
+<div id="mpJoin"><div class="mjBox"><button class="xbtn" id="mpJoinX">✕</button><h2>JOIN THE PUBLIC SERVER</h2><p>Other players on your island will see you, your axe and your pets. Your progress stays your own.</p><label>YOUR NAME</label><input id="mpName" maxlength="16" spellcheck="false" autocomplete="off"><div id="mpJoinErr"></div><button id="mpJoinGo" class="btn">JOIN</button></div></div>
 <div id="mpChat"></div>
 <input id="mpInput" maxlength="140" placeholder="Say something... (Enter to send, Esc to cancel)" spellcheck="false" autocomplete="off">
 <div id="mpList"></div>
 <div id="mpBadge"></div>
-<div id="mpAnnounce"><h4>📢 ANNOUNCEMENT</h4><p id="mpAnnText"></p></div>
+<div id="mpAnns"></div>
 
 <div id="death"><h1>YOU DIED</h1><div id="deathLost"></div><small>click or press space to wake up in the safehouse</small></div>
 

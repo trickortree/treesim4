@@ -29,7 +29,24 @@ function cleanState(m) {
         sw: m.sw ? 1 : 0, axe: int(m.axe, 0, 99), isle: int(m.isle, 1, 99, 1), pets, shiny };
 }
 const pub = a => ({ id: a.id, name: a.name, isle: a.isle, look: a.look, st: a.st, admin: a.admin ? 1 : 0 });
-const NEWS_FOR = 15 * 60 * 1000; // an announcement still shows on the menu and to new arrivals for 15 minutes
+// Announcements come in two kinds, each up for as long as the admin says (or until taken down):
+//  - "quick": only for whoever is on the server right now.
+//  - "full": everyone, including players who join while it's up, and the main menu.
+// Games from 2.0.1 on say v: 2 in their hi and get the new messages (ann, annDel); 2.0.0 games get the old announce/news ones.
+const ANN_KEEP = 50, ANN_MAX_SECS = 365 * 86400;
+const annWire = (x, now = Date.now()) => ({ id: x.id, kind: x.kind, text: x.text, left: x.until ? Math.max(0, x.until - now) : 0, dur: x.until ? x.until - x.at : 0 });
+// Names: nobody can be on the server under a name someone else is using, and a name stays with the game that used it
+// (by a random token the game keeps) for 30 days after it was last used. "Tree" (the admin's name) and staff-sounding
+// names need the admin key. A 2.0.0 game can't pick another name, so instead it plays as a Woodcutter.
+const NAME_KEEP = 30 * 86400 * 1000;
+const nameKey = n => String(n).toLowerCase().replace(/[^a-z0-9]/g, "");
+const leet = k => k.replace(/0/g, "o").replace(/1/g, "i").replace(/3/g, "e").replace(/4/g, "a").replace(/5/g, "s").replace(/7/g, "t");
+const reserved = n => { const k = nameKey(n); return [k, leet(k)].some(x => /^(tre{2,}\d*|admin|administrator|owner|server|mod|moderator|staff|dev|developer)$/.test(x)); };
+async function tokHash(t) {
+    if (typeof t !== "string" || t.length < 16 || t.length > 80) return "";
+    const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+    return [...new Uint8Array(d)].slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
+}
 async function keyOk(env, key) {
     if (!env.ADMIN_KEY || typeof key !== "string" || key.length > 200) return false;
     const a = new TextEncoder().encode(key), b = new TextEncoder().encode(env.ADMIN_KEY);
@@ -56,7 +73,7 @@ export class Lobby extends DurableObject {
         const url = new URL(req.url);
         if (url.pathname === "/status") {
             const ps = this.players();
-            return Response.json({ online: ps.length, max: MAX_PLAYERS, names: ps.map(p => p.a.name).slice(0, MAX_PLAYERS), motd: await this.motd(), news: await this.news() }, { headers: CORS });
+            return Response.json({ online: ps.length, max: MAX_PLAYERS, names: ps.map(p => p.a.name).slice(0, MAX_PLAYERS), motd: await this.motd(), news: await this.news(), anns: (await this.anns()).filter(x => x.kind === "full").slice(-5).map(x => annWire(x)) }, { headers: CORS });
         }
         const pair = new WebSocketPair(), [client, server] = Object.values(pair);
         this.ctx.acceptWebSocket(server);
@@ -77,7 +94,14 @@ export class Lobby extends DurableObject {
     }
 
     async motd() { return (await this.ctx.storage.get("motd")) || MOTD; }
-    async news() { const n = await this.ctx.storage.get("news"); return n && Date.now() - n.at < NEWS_FOR ? n : null; }
+    // the announcements that are still up (expired ones are dropped as they're read)
+    async anns() {
+        const all = (await this.ctx.storage.get("anns")) || [], now = Date.now(), up = all.filter(x => !x.until || x.until > now);
+        if (up.length !== all.length) await this.ctx.storage.put("anns", up);
+        return up;
+    }
+    // what a 2.0.0 game understands: the newest full announcement that's up
+    async news() { const f = (await this.anns()).filter(x => x.kind === "full").pop(); return f ? { text: f.text, at: f.at } : null; }
     everyone(obj) { const msg = JSON.stringify(obj); for (const p of this.players()) this.send(p.w, msg); }
 
     send(w, obj) { try { w.send(typeof obj === "string" ? obj : JSON.stringify(obj)); } catch (e) { /* it's going away */ } }
@@ -92,14 +116,30 @@ export class Lobby extends DurableObject {
         if (++a.n > 25) { ws.serializeAttachment(a); return; }
         if (m.t === "admin") return this.admin(ws, a, m);
         if (m.t === "hi" && !a.joined) {
-            a.name = cleanName(m.name) || "Woodcutter";
+            let name = cleanName(m.name) || "Woodcutter";
+            const v = int(m.v, 1, 99, 1), admin = await keyOk(this.env, m.key), h = await tokHash(m.tok), k = nameKey(name), now = Date.now();
+            const holder = this.players().find(p => p.w !== ws && nameKey(p.a.name) === k), mine = admin && reserved(name);
+            let why = "";
+            if (reserved(name) && !admin) why = "reserved";
+            else if (holder && !mine && !(h && holder.a.h === h)) why = "online";
+            else if (!mine) { const rec = await this.ctx.storage.get("name:" + k); if (rec && rec.h !== h && now - rec.seen < NAME_KEEP) why = "owned"; }
+            if (why && v >= 2) { this.send(ws, { t: "nameTaken", name, why }); try { ws.close(4005, "name taken"); } catch (e) { /* gone */ } return; }
+            if (why) name = "Woodcutter" + (1000 + Math.floor(Math.random() * 9000));
+            else {
+                if (h && !mine) await this.ctx.storage.put("name:" + k, { h, name, seen: now });
+                // the same game joining again (a reconnect, or another window): the old connection makes way
+                if (holder) { this.send(holder.w, { t: "replaced" }); this.gone(holder.w, 4006); }
+            }
+            a.name = name; a.h = h; a.admin = admin; a.v = v;
             a.look = cleanLook(m.look);
             a.st = cleanState(m.st || {}) || null;
             a.isle = a.st ? a.st.isle : int(m.isle, 1, 99, 1);
             a.joined = true;
             ws.serializeAttachment(a);
             const others = this.players().filter(p => p.w !== ws);
-            this.send(ws, { t: "welcome", id: a.id, motd: await this.motd(), news: await this.news(), players: others.map(p => pub(p.a)) });
+            const full = (await this.anns()).filter(x => x.kind === "full");
+            this.send(ws, { t: "welcome", id: a.id, name: a.name, admin: a.admin ? 1 : 0, motd: await this.motd(), players: others.map(p => pub(p.a)),
+                ...(a.v >= 2 ? { anns: full.map(x => annWire(x)) } : { news: full.length ? { text: full[full.length - 1].text, at: full[full.length - 1].at } : null }) });
             const j = JSON.stringify({ t: "join", ...pub(a) });
             for (const p of others) this.send(p.w, j);
             return;
@@ -138,7 +178,7 @@ export class Lobby extends DurableObject {
         }
         const reply = async (text = "") => {
             const bans = (await this.ctx.storage.get("bans")) || {};
-            this.send(ws, { t: "adminOk", op: m.op, text, motd: await this.motd(), news: await this.news(), bans: Object.entries(bans).map(([k, b]) => ({ k: k.slice(-4), name: b.name, at: b.at })),
+            this.send(ws, { t: "adminOk", op: m.op, text, motd: await this.motd(), anns: (await this.anns()).map(x => annWire(x)), bans: Object.entries(bans).map(([k, b]) => ({ k: k.slice(-4), name: b.name, at: b.at })),
                 players: this.players().map(p => ({ id: p.a.id, name: p.a.name, isle: p.a.isle, admin: p.a.admin ? 1 : 0, muted: p.a.muted ? 1 : 0, x: p.a.st ? p.a.st.x : 0, z: p.a.st ? p.a.st.z : 0 })) });
         };
         const op = m.op;
@@ -150,11 +190,21 @@ export class Lobby extends DurableObject {
         }
         if (op === "announce") {
             const text = cleanText(m.text).slice(0, 200); if (!text) return reply("Nothing to announce.");
-            await this.ctx.storage.put("news", { text, at: Date.now() });
-            this.everyone({ t: "announce", text });
-            return reply(`Announced to ${this.players().length} player(s).`);
+            const kind = m.kind === "full" ? "full" : "quick", secs = int(m.secs, 0, ANN_MAX_SECS, 15), now = Date.now();
+            const x = { id: crypto.randomUUID().slice(0, 8), kind, text, at: now, until: secs ? now + Math.max(3, secs) * 1000 : 0 };
+            await this.ctx.storage.put("anns", [...(await this.anns()), x].slice(-ANN_KEEP));
+            const neu = JSON.stringify({ t: "ann", ...annWire(x, now) }), old = JSON.stringify({ t: "announce", text });
+            const ps = this.players(); for (const p of ps) this.send(p.w, p.a.v >= 2 ? neu : old);
+            return reply(`${kind === "full" ? "Announcement" : "Quick announcement"} sent to ${ps.length} player(s).`);
         }
-        if (op === "clearNews") { await this.ctx.storage.delete("news"); return reply("Announcement cleared."); }
+        if (op === "annDel" || op === "clearNews") { // take one down (id), or all of them (id "*"; clearNews is the 1.13 dev panel's name for that)
+            const all = await this.anns(), gone = op === "clearNews" || m.id === "*" ? all : all.filter(x => x.id === m.id);
+            if (!gone.length) return reply("That one's already down.");
+            await this.ctx.storage.put("anns", all.filter(x => !gone.includes(x)));
+            const msg = JSON.stringify({ t: "annDel", ids: gone.map(x => x.id) });
+            for (const p of this.players()) if (p.a.v >= 2) this.send(p.w, msg);
+            return reply(gone.length === 1 ? "Taken down." : `Took down ${gone.length} announcements.`);
+        }
         if (op === "motd") {
             const text = cleanText(m.text).slice(0, 200);
             if (text) await this.ctx.storage.put("motd", text); else await this.ctx.storage.delete("motd");
@@ -179,6 +229,13 @@ export class Lobby extends DurableObject {
             p.a.muted = !p.a.muted; p.w.serializeAttachment(p.a);
             this.send(p.w, { t: "sys", text: p.a.muted ? "The admin muted you." : "The admin unmuted you." });
             return reply(`${p.a.name} ${p.a.muted ? "muted" : "unmuted"}.`);
+        }
+        if (op === "freeName") { // lets someone else have a name a player is holding on to
+            const k = nameKey(cleanName(m.name)); if (!k) return reply("Which name?");
+            const rec = await this.ctx.storage.get("name:" + k);
+            if (!rec) return reply(`Nobody owns "${cleanName(m.name)}".`);
+            await this.ctx.storage.delete("name:" + k);
+            return reply(`"${rec.name}" is free now.`);
         }
         if (op === "unban") {
             const bans = (await this.ctx.storage.get("bans")) || {};

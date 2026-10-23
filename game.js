@@ -2967,13 +2967,13 @@ function renderMenu() {
             : `<div class="hint">Chop trees, carry logs home, send them down the chute. At night, rarer trees come out.</div>`;
         $("menuBtn").textContent = save.seconds > 5 ? "CONTINUE" : "PLAY";
         $("menuQuit").style.display = "none";
-        $("menuJoin").style.display = ""; $("menuOnline").style.display = "";
+        $("menuJoin").style.display = ""; $("menuOnline").style.display = ""; $("menuNews").style.display = ""; $("menuName").style.display = "";
     } else if (state === "paused") {
         $("menuHead").innerHTML = `<div class="logo small">PAUSED</div><div class="tag">the trees are waiting.</div>`;
         $("menuStats").innerHTML = `<div><span>Day</span><b>${save.day}</b></div><div><span>Logs</span><b>${save.logs}</b></div><div><span>Cash</span><b>${money(save.money)}</b></div><div><span>Felled</span><b>${save.felled}</b></div><div><span>Deaths</span><b>${save.deaths}</b></div><div><span>Time</span><b>${fmtTime(save.seconds)}</b></div>`;
         $("menuBtn").textContent = "RESUME";
         $("menuQuit").style.display = "";
-        $("menuJoin").style.display = "none"; $("menuOnline").style.display = "none";
+        $("menuJoin").style.display = "none"; $("menuOnline").style.display = "none"; $("menuNews").style.display = "none"; $("menuName").style.display = "none";
         if ($("menuLeave")) $("menuLeave").style.display = mp.on || mp.connecting ? "" : "none";
     }
     $("menuControls").innerHTML = CONTROLS.map(c => `<div><kbd>${c[0]}</kbd><span>${c[1]}</span></div>`).join("");
@@ -3056,7 +3056,7 @@ $("death").addEventListener("mousedown", respawn);
 document.addEventListener("pointerlockchange", () => {
     locked = document.pointerLockElement === canvas;
     lookSkip = 3;
-    if (!locked && state === "playing" && !panel) { showPanels(); endFishing(); state = "paused"; mouseDown = false; renderMenu(); }
+    if (!locked && state === "playing" && !panel && !mp.typing) { showPanels(); endFishing(); state = "paused"; mouseDown = false; renderMenu(); } // typing in chat frees the mouse without pausing
 });
 
 // ---------- input ----------
@@ -14942,6 +14942,16 @@ function mpLook(name) {
 }
 const mpIsleName = n => (customIsle(n) ? customIsle(n).name : ["", "Pine Island", "the Highland Isle", "Mooncap Isle", "Ashfall Isle", "the Archipelago", "the Iceberg"][n] || "island " + n);
 function mpSavedName() { try { return localStorage.getItem("ts4_mp_name") || ""; } catch (e) { return ""; } }
+// this game's own random token: the server keeps your name for you with it, so nobody else can take it
+function mpTok() {
+    try {
+        let t = localStorage.getItem("ts4_mp_tok");
+        if (!t) { t = [...crypto.getRandomValues(new Uint8Array(18))].map(b => b.toString(16).padStart(2, "0")).join(""); localStorage.setItem("ts4_mp_tok", t); }
+        return t;
+    } catch (e) { return ""; }
+}
+// the admin's key, only ever on the admin's own PC (the dev panel puts it here); it lets them use their reserved name
+function mpAdminKey() { if (mp.key) return mp.key; try { return localStorage.getItem("ts4_admin_key") || ""; } catch (e) { return ""; } }
 function mpState() {
     const eq = save.pets.eq.slice(0, 3);
     return { x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, pitch: player.pitch, sw: swing.t < 0.55 ? 1 : 0, axe: save.equipped, isle,
@@ -14955,14 +14965,16 @@ function mpConnect(name) {
     let ws;
     try { ws = new WebSocket(mpUrl()); } catch (e) { mp.connecting = false; toast("Couldn't reach the public server.", "bad"); updateMpHud(); return; }
     mp.ws = ws;
-    ws.onopen = () => { if (mp.ws !== ws) return; ws.send(JSON.stringify({ t: "hi", name, look: mpLook(name), st: mpState() })); };
+    ws.onopen = () => { if (mp.ws !== ws) return; ws.send(JSON.stringify({ t: "hi", v: 2, name, tok: mpTok(), key: mpAdminKey() || undefined, look: mpLook(name), st: mpState() })); };
     ws.onmessage = e => { if (mp.ws !== ws) return; let m; try { m = JSON.parse(e.data); } catch (err) { return; } mpMsg(m); };
     ws.onclose = e => {
         if (mp.ws !== ws) return;
         const was = mp.on; mp.on = false; mp.connecting = false; mp.ws = null; mpClearOthers(); updateMpHud();
         if (mp.manual) return;
         if (e.code === 1013) { toast("The public server is full. Try again in a bit.", "bad"); return; }
-        if (e.code === 4001 || e.code === 4003 || e.code === 4004) { mp.manual = true; mpLine("", e.code === 4003 ? "You're banned from the public server." : e.code === 4001 ? "The admin kicked you from the public server." : "Disconnected."); return; }
+        if (e.code === 4005) return; // the name was taken: the name box is already up
+        if (e.code === 4006) { mp.manual = true; annClear(); mpLine("", "You joined from somewhere else, so this game left the server."); return; }
+        if (e.code === 4001 || e.code === 4003 || e.code === 4004) { mp.manual = true; annClear(); mpLine("", e.code === 4003 ? "You're banned from the public server." : e.code === 4001 ? "The admin kicked you from the public server." : "Disconnected."); return; }
         if (mp.retry < 5) {
             mp.retry++;
             if (mp.retry === 1) toast(was ? "Lost the public server. Reconnecting..." : "Couldn't reach the public server. Trying again...", "bad");
@@ -14973,22 +14985,28 @@ function mpConnect(name) {
 function mpLeave() {
     mp.manual = true;
     if (mp.ws) try { mp.ws.close(1000, "leaving"); } catch (e) { /* gone */ }
-    mp.ws = null; mp.on = false; mp.connecting = false; mpClearOthers(); updateMpHud();
+    mp.ws = null; mp.on = false; mp.connecting = false; mpClearOthers(); annClear(); updateMpHud();
     mpLine("", "You left the public server.");
 }
 function mpMsg(m) {
     if (m.t === "welcome") {
         mp.on = true; mp.connecting = false; mp.retry = 0; mp.id = m.id; mp.last = "";
+        if (m.name) { mp.name = m.name; try { localStorage.setItem("ts4_mp_name", m.name); } catch (e) { /* fine */ } } // yours now: no asking next time
+        mp.admin = !!m.admin;
         mpClearOthers();
         for (const p of m.players || []) mpAdd(p);
         mpLine("", m.motd || "Connected.");
         toast(`Connected to the public server · ${mp.others.size + 1} online`, "good");
         sfx(660, 0.12, "triangle", 0.08, 1.4); setTimeout(() => sfx(990, 0.18, "triangle", 0.08, 1.4), 110);
-        if (m.news) mpAnnounce(m.news.text, true);
+        for (const a of m.anns || []) annAdd(a, true);
+        if (m.news) annAdd({ id: "news", kind: "full", text: m.news.text, left: 8000, dur: 8000 }, true); // a server from before 2.0.1
     } else if (m.t === "join") { mpAdd(m); mpLine("", `${m.name} joined${m.isle === isle ? "" : " (on " + mpIsleName(m.isle) + ")"}`); }
-    else if (m.t === "announce") mpAnnounce(m.text);
+    else if (m.t === "ann") annAdd(m);
+    else if (m.t === "annDel") for (const id of m.ids || []) annRemove(id);
+    else if (m.t === "announce") annAdd({ id: "a" + performance.now(), kind: "quick", text: m.text, left: 10000, dur: 10000 }); // a server from before 2.0.1
     else if (m.t === "sys") mpLine("", m.text);
-    else if (m.t === "kicked" || m.t === "banned") mp.manual = true; // the close that follows says why, and no reconnecting
+    else if (m.t === "kicked" || m.t === "banned" || m.t === "replaced") mp.manual = true; // the close that follows says why, and no reconnecting
+    else if (m.t === "nameTaken") mpNameTaken(m);
     else if (m.t === "adminTag") { if (m.id === mp.id) mp.admin = true; else { const o = mp.others.get(m.id); if (o) mpTagAdmin(o); } }
     else if (m.t === "leave") { const o = mp.others.get(m.id); if (o) { mpLine("", `${o.name} left`); mpRemove(m.id); } }
     else if (m.t === "st") { const o = mp.others.get(m.id); if (o) mpApply(o, m); }
@@ -15009,15 +15027,39 @@ function mpAdd(p) {
 }
 // the admin: a gold name with [ADMIN] over their head
 function mpTagAdmin(o) { o.admin = true; o.lb.el.textContent = "[ADMIN] " + o.name; o.lb.el.style.color = o.lb.el.style.borderColor = "#ffd040"; }
-// an announcement from the admin: a banner at the top for a while, and a line in the chat
-let mpAnnT = 0;
-function mpAnnounce(text, quiet) {
-    $("mpAnnText").textContent = text; $("mpAnnounce").classList.add("show");
-    clearTimeout(mpAnnT); mpAnnT = setTimeout(() => $("mpAnnounce").classList.remove("show"), quiet ? 6000 : 10000);
-    const line = document.createElement("div"); line.className = "mpl ann"; line.textContent = "📢 " + text;
-    const box = $("mpChat"); box.appendChild(line); while (box.children.length > 8) box.firstChild.remove();
-    setTimeout(() => line.classList.add("old"), 20000);
-    if (!quiet) { sfx(520, 0.16, "triangle", 0.1, 1.5); setTimeout(() => sfx(780, 0.16, "triangle", 0.1, 1.5), 140); setTimeout(() => sfx(1040, 0.26, "triangle", 0.1, 1.5), 280); }
+// announcements from the admin: cards stacked at the top, newest at the bottom, up to 5 at once. When a sixth comes the
+// oldest slides off and the rest move up. Each stays as long as the admin said (the bar shows what's left) or until it's taken down.
+// "full" ones reach everyone, including anyone who joins while they're up, and show on the main menu; "quick" ones only reach who's on now.
+const ANN_SHOW = 5, anns = new Map(); // id -> { kind, text, until, dur, el, bar }
+function annAdd(a, quiet) {
+    if (!a || !a.text || anns.has(a.id)) return;
+    const full = a.kind === "full", el = document.createElement("div");
+    el.className = "annCard new " + (full ? "full" : "quick");
+    const hd = document.createElement("div"); hd.className = "annH"; hd.textContent = full ? "📢 NEWS" : "⚡ QUICK";
+    const tx = document.createElement("div"); tx.className = "annT"; tx.textContent = a.text;
+    el.append(hd, tx);
+    const bar = a.left > 0 ? el.appendChild(document.createElement("i")) : null;
+    $("mpAnns").appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("new")));
+    anns.set(a.id, { kind: a.kind, text: a.text, until: a.left > 0 ? performance.now() + a.left : 0, dur: a.dur || a.left, el, bar });
+    annLayout();
+    if (quiet) return;
+    if (full) { sfx(520, 0.16, "triangle", 0.1, 1.5); setTimeout(() => sfx(780, 0.16, "triangle", 0.1, 1.5), 140); setTimeout(() => sfx(1040, 0.26, "triangle", 0.1, 1.5), 280); }
+    else { sfx(880, 0.08, "triangle", 0.07, 1.3); setTimeout(() => sfx(1180, 0.12, "triangle", 0.07, 1.3), 90); }
+}
+function annRemove(id) {
+    const a = anns.get(id); if (!a) return;
+    anns.delete(id); a.el.classList.add("out"); setTimeout(() => a.el.remove(), 450);
+    annLayout();
+}
+function annClear() { for (const id of [...anns.keys()]) annRemove(id); }
+// only the newest 5 are on screen; taking one down brings the next older one back
+function annLayout() { const list = [...anns.values()]; list.forEach((a, i) => a.el.classList.toggle("hide", i < list.length - ANN_SHOW)); }
+function annTick() {
+    if (!anns.size) return;
+    const now = performance.now();
+    for (const [id, a] of anns) { if (a.until && now >= a.until) annRemove(id); else if (a.bar) a.bar.style.transform = `scaleX(${Math.max(0, (a.until - now) / a.dur)})`; }
+    $("mpAnns").classList.toggle("off", state !== "playing" || (!!panel && panel !== "dev"));
 }
 function mpApply(o, s) {
     o.isle = s.isle || o.isle; o.tx = s.x; o.ty = s.y; o.tz = s.z; o.tyaw = s.yaw; o.pitch = s.pitch || 0;
@@ -15050,6 +15092,11 @@ function mpRemove(id) {
     mp.others.delete(id);
 }
 function mpClearOthers() { for (const id of [...mp.others.keys()]) mpRemove(id); }
+// every frame, whatever the game is doing: announcements count down (and hide behind menus), and chat never stays open behind one
+function mpHudTick() {
+    annTick();
+    if (mp.typing && (state !== "playing" || !mp.on || panel)) mpCloseChat(false);
+}
 function mpTick(dt) {
     if (!mp.on) return;
     // tell the server where you are, 8 times a second while you move (and every 2 s anyway)
@@ -15124,6 +15171,7 @@ function mpCloseChat(send) {
     mp.typing = false; inp.classList.remove("show"); inp.blur(); $("mpChat").classList.remove("typing");
     if (state === "playing" && !panel) { try { lockPointer(); } catch (e) { /* click to re-lock */ } }
 }
+$("mpInput").addEventListener("blur", () => { if (mp.typing) mpCloseChat(false); }); // clicking back into the game cancels the message
 $("mpInput").addEventListener("keydown", e => {
     if (e.code === "Enter" || e.code === "NumpadEnter") { e.preventDefault(); mpCloseChat(true); }
     else if (e.code === "Escape") { e.preventDefault(); mpCloseChat(false); }
@@ -15149,30 +15197,48 @@ async function mpCheckOnline() {
     if (!mpUrl()) { el.textContent = "coming soon"; return; }
     el.textContent = "checking...";
     const news = $("menuNews");
+    mpNameLine();
     try {
         const r = await fetch(mpHttp() + "/status", { cache: "no-store" }); const j = await r.json(); el.textContent = `${j.online} online now`;
-        news.textContent = j.news ? "📢 " + j.news.text : ""; news.classList.toggle("show", !!j.news);
+        // the full announcements that are up, newest at the bottom (a server from before 2.0.1 only says the newest)
+        const list = (j.anns || (j.news ? [j.news] : [])).slice(-ANN_SHOW);
+        news.replaceChildren(...list.map(a => Object.assign(document.createElement("div"), { textContent: "📢 " + a.text })));
+        news.classList.toggle("show", list.length > 0);
     } catch (e) { el.textContent = "can't reach the server"; news.classList.remove("show"); }
 }
-function mpShowJoin() {
+// the name box: only the first time (after that your name is saved and JOIN goes straight in), when you change it, or when it's taken
+function mpShowJoin(name, err) {
     $("mpJoin").classList.add("show");
-    const inp = $("mpName"); inp.value = mpSavedName() || `Woodcutter${Math.floor(1000 + Math.random() * 9000)}`;
+    $("mpJoinErr").textContent = err || ""; $("mpJoinErr").classList.toggle("show", !!err);
+    const inp = $("mpName"); inp.value = name || mpSavedName() || (mpAdminKey() ? "Tree" : `Woodcutter${Math.floor(1000 + Math.random() * 9000)}`);
     setTimeout(() => { inp.focus(); inp.select(); }, 0);
 }
 function mpJoinGo() {
     const name = $("mpName").value.replace(/[^A-Za-z0-9 _\-]/g, "").trim().slice(0, 16);
     if (!name) { $("mpName").focus(); return; }
-    try { localStorage.setItem("ts4_mp_name", name); } catch (e) { /* fine */ }
     $("mpJoin").classList.remove("show");
     startPlaying();
     mpConnect(name);
 }
-$("menuJoin").addEventListener("click", mpShowJoin);
+function mpJoinClick() { const n = mpSavedName(); if (n) { startPlaying(); mpConnect(n); } else mpShowJoin(); }
+// the server said no to the name: back to the menu with the name box up, saying why
+function mpNameTaken(m) {
+    mp.manual = true; mp.connecting = false; updateMpHud();
+    try { if (mpSavedName() === m.name) localStorage.removeItem("ts4_mp_name"); } catch (e) { /* fine */ }
+    if (state === "playing") { if (document.pointerLockElement) document.exitPointerLock(); state = "paused"; showPanels(); renderMenu(); }
+    mpNameLine();
+    mpShowJoin(m.name, m.why === "reserved" ? `"${m.name}" is reserved. Pick another name.` : m.why === "online" ? `Someone called ${m.name} is on the server right now. Pick another name.` : `${m.name} belongs to another player. Pick another name.`);
+}
+// under JOIN on the title screen: who you'll join as, and a way to change it
+function mpNameLine() { const n = mpSavedName(); $("menuName").textContent = n ? `joining as ${n} · change name` : ""; $("menuName").classList.toggle("show", !!n); }
+$("menuName").addEventListener("click", () => mpShowJoin());
+$("menuJoin").addEventListener("click", mpJoinClick);
 $("mpJoinGo").addEventListener("click", mpJoinGo);
 $("mpJoinX").addEventListener("click", () => $("mpJoin").classList.remove("show"));
 $("mpName").addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); mpJoinGo(); } else if (e.code === "Escape") $("mpJoin").classList.remove("show"); e.stopPropagation(); });
 $("menuLeave").addEventListener("click", () => mpLeave());
 setInterval(() => { if (mp.on) mpSend({ t: "ping", ts: Date.now() }); }, 20000); // keeps the connection open while you sit in a menu
+setInterval(() => { if (state === "title") mpCheckOnline(); }, 20000); // the title screen's online count and announcements stay fresh
 mpCheckOnline();
 updateMpHud();
 
@@ -15190,6 +15256,7 @@ function frameBody(now) {
     last = now;
     let dt = real;
     if (hitstop > 0) { hitstop -= real; dt *= 0.08; }
+    mpHudTick();
     if (state === "playing") {
         if (panel !== "inv" && panel !== "map") { update(dt); updatePets(dt); }
         if (panel === "spin") spinTick(real);
@@ -15243,7 +15310,7 @@ $("gfxPick").classList.remove("show");
 
 // debug/test handle (used by automated checks, harmless in play)
 if (DEBUG) window.__ts4 = {
-    mp: { mp, mpConnect, mpLeave, mpState, mpLook, mpCheckOnline, mpShowJoin, mpJoinGo, mpOpenChat, mpCloseChat, renderMpList, mpUrl, mpSend, mpAnnounce, mpIsleName },
+    mp: { mp, mpConnect, mpLeave, mpState, mpLook, mpCheckOnline, mpShowJoin, mpJoinGo, mpOpenChat, mpCloseChat, renderMpList, mpUrl, mpSend, mpIsleName, anns, annAdd, annRemove },
     pets: { PETS, CASES, RAR, PERKS, list: () => pets, openCase, startSpin, finishSpin, togglePet, spawnPets, petK, petAdd, petValue, casePrice, slyCart, placeDealer, rollPet, getSpin: () => spin },
     save, player, trees, camera, renderer, gfx: { GQ, FX, sunL, grass, TSU, MODERN, hemiL, skyDome }, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,
     docks: () => (CI() ? CI().DOCKS : isle === 6 ? DOCKS6 : []).map(D => ({ kind: D.kind, B: { x: D.B.x, z: D.B.z }, DIR: { x: D.DIR.x, z: D.DIR.z }, LEN: D.LEN })), // where this island's docks are, for walking tests

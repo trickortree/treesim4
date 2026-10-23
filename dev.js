@@ -47,7 +47,8 @@ const css = `
 .dvAdRow { display: flex; align-items: center; gap: 6px; background: #261c3a; border-radius: 9px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
 .dvAdRow b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .dvAdRow b.adm { color: #ffd040; }
 .dvAdRow span { font: 11px Consolas; color: #a89cc4; white-space: nowrap; } .dvAdRow .dvB { padding: 4px 8px; font-size: 11px; }
-.dvNews { font: 600 12px "Segoe UI"; color: #ffe9a0; background: #3a2a10; border-left: 3px solid #ffd040; border-radius: 6px; padding: 6px 9px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.dvAdRow b.quick { color: #8adcff; }
+.dvAnnN:disabled { opacity: .35; }
 `;
 document.head.appendChild(Object.assign(document.createElement("style"), { textContent: css }));
 
@@ -74,15 +75,21 @@ el.innerHTML = `
       <div class="dvH">ADMIN · PUBLIC SERVER <small id="dvAdStat"></small></div>
       <div id="dvAdNoKey" style="display:none"><input class="dvText" id="dvAdKey" type="password" placeholder="Paste your admin key (from admin.key.js on your main PC)" spellcheck="false" autocomplete="off"><div class="dvBtns"><button class="dvB" id="dvAdKeySave">Save key on this PC</button></div></div>
       <div id="dvAdBox">
-        <div id="dvAdNews"></div>
-        <input class="dvText" id="dvAnn" maxlength="200" placeholder="Announcement everyone on the server sees..." spellcheck="true" autocomplete="off">
-        <div class="dvBtns" style="margin-bottom:10px"><button class="dvB on" id="dvAnnGo">📢 Announce</button><button class="dvB" id="dvAnnClear">Clear announcement</button></div>
+        <div class="dvBtns" style="margin-bottom:8px"><button class="dvB on" data-annkind="quick">⚡ Quick · whoever's on now</button><button class="dvB" data-annkind="full">📢 Announcement · everyone + menu</button></div>
+        <input class="dvText" id="dvAnn" maxlength="200" spellcheck="true" autocomplete="off">
+        <div class="dvRow"><label>Stays up</label><span style="display:flex;gap:6px;align-items:center"><input class="dvIn dvAnnN" id="dvAnnN" value="15" style="width:64px;font-size:14px"><select class="dvSel" id="dvAnnU"><option value="1">seconds</option><option value="60">minutes</option><option value="3600">hours</option><option value="86400">days</option><option value="0">until I take it down</option></select></span></div>
+        <div class="dvBtns" style="margin-bottom:8px"><button class="dvB" data-anndur="10">10s</button><button class="dvB" data-anndur="30">30s</button><button class="dvB" data-anndur="60">1m</button><button class="dvB" data-anndur="300">5m</button><button class="dvB" data-anndur="3600">1h</button><button class="dvB" data-anndur="86400">1 day</button><button class="dvB" data-anndur="604800">1 week</button><button class="dvB" data-anndur="0">until I take it down</button></div>
+        <div class="dvBtns" style="margin-bottom:10px"><button class="dvB on" id="dvAnnGo">Post it</button></div>
+        <div class="dvH" style="margin:4px 0 7px">UP NOW <small><button class="dvB warn" id="dvAnnAll" style="padding:3px 8px">take them all down</button></small></div>
+        <div id="dvAnnList"></div>
         <input class="dvText" id="dvMotd" maxlength="200" placeholder="Message of the day (empty = the default)" spellcheck="true" autocomplete="off">
         <div class="dvBtns" style="margin-bottom:10px"><button class="dvB" id="dvMotdGo">Set message of the day</button></div>
         <div class="dvH" style="margin:4px 0 7px">PLAYERS <small id="dvAdCount"></small></div>
         <div id="dvAdPlayers"></div>
         <div class="dvH" style="margin:10px 0 7px">BANS <small><button class="dvB warn" id="dvUnbanAll" style="padding:3px 8px">lift every ban</button></small></div>
         <div id="dvAdBans"></div>
+        <div class="dvH" style="margin:10px 0 7px">NAMES <small>a name stays with whoever used it for 30 days</small></div>
+        <div style="display:flex;gap:6px"><input class="dvText" id="dvFreeName" maxlength="16" placeholder="Free up a name someone's holding..." spellcheck="false" autocomplete="off" style="margin:0"><button class="dvB" id="dvFreeGo">Free it</button></div>
       </div>
       <div class="dvHint">only you have the key: it's in admin.key.js (git ignores it) and on the server as ADMIN_KEY</div>
     </div>
@@ -227,7 +234,9 @@ function teleport(x, z, faceX = 0, faceZ = 0) { T.setPos(x, z, Math.atan2(-(face
 let KEY_FILE = "";
 try { KEY_FILE = (await import("./admin.key.js")).default || ""; } catch (e) { /* no admin.key.js on this PC: paste the key instead */ }
 const adKey = () => { if (KEY_FILE) return KEY_FILE; try { return localStorage.getItem("ts4_admin_key") || ""; } catch (e) { return ""; } };
-const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", news: null, tagged: null, armed: "" };
+// the game sends the key when it joins, so "Tree" (your reserved name) is yours, even in the installed game on this PC
+if (KEY_FILE) { T.mp.mp.key = KEY_FILE; try { if (localStorage.getItem("ts4_admin_key") !== KEY_FILE) localStorage.setItem("ts4_admin_key", KEY_FILE); } catch (e) { /* no storage */ } }
+const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", anns: [], kind: "quick", tagged: null, armed: "" };
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 function adOpen() {
     if (!adKey() || (AD.ws && AD.ws.readyState <= 1)) return;
@@ -236,7 +245,11 @@ function adOpen() {
     ws.onopen = () => adSend("list");
     ws.onmessage = e => {
         let m; try { m = JSON.parse(e.data); } catch (err) { return; }
-        if (m.t === "adminOk") { Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, news: m.news }); if (m.text) say(m.text); drawAdmin(); }
+        if (m.t === "adminOk") {
+            const now = performance.now();
+            Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, anns: (m.anns || []).map(a => ({ ...a, until: a.left ? now + a.left : 0 })) });
+            if (m.text) say(m.text); drawAdmin();
+        }
         else if (m.t === "adminErr") { AD.ok = false; AD.err = m.text; say(m.text, "bad"); drawAdmin(); }
     };
     ws.onclose = () => { if (AD.ws === ws) { AD.ws = null; AD.ok = false; drawAdmin(); } };
@@ -250,15 +263,40 @@ function drawAdmin() {
     $("dvAdNoKey").style.display = has ? "none" : ""; $("dvAdBox").style.display = has ? "" : "none";
     $("dvAdStat").textContent = !has ? "no key on this PC" : AD.err ? AD.err : AD.ok ? `connected · ${AD.players.length} online` : AD.ws ? "connecting..." : "offline";
     if (!has) return;
-    $("dvAdNews").innerHTML = AD.news ? `<div class="dvNews">📢 showing now: ${esc(AD.news.text)}</div>` : "";
+    setHTML("dvAnnList", AD.anns.length ? AD.anns.map(a => `<div class="dvAdRow"><b class="${a.kind === "full" ? "adm" : "quick"}" title="${esc(a.text)}">${a.kind === "full" ? "📢" : "⚡"} ${esc(a.text)}</b><span data-annleft="${esc(a.id)}"></span><button class="dvB warn" data-ad="annDel" data-id="${esc(a.id)}">Take down</button></div>`).join("") : `<div class="dvHint" style="margin:0 0 4px">nothing up right now</div>`);
+    $("dvAnnAll").style.display = AD.anns.length > 1 ? "" : "none";
+    annLeft();
     $("dvMotd").placeholder = "Message of the day: " + (AD.motd || "the default");
     $("dvAdCount").textContent = AD.players.length ? "" : "nobody's on";
     const me = T.mp.mp, here = T.getIsle();
-    $("dvAdPlayers").innerHTML = AD.players.map(p => `<div class="dvAdRow"><b class="${p.admin ? "adm" : ""}">${p.admin ? "[ADMIN] " : ""}${esc(p.name)}${me.on && p.id === me.id ? " (you)" : ""}</b><span>${esc(T.mp.mpIsleName(p.isle))}</span>`
-        + (me.on && p.id === me.id ? "" : `<button class="dvB" data-ad="goto" data-id="${esc(p.id)}" ${me.on && p.isle === here ? "" : "disabled style=\"opacity:.35\""}>Go to</button><button class="dvB" data-ad="mute" data-id="${esc(p.id)}">${p.muted ? "Unmute" : "Mute"}</button><button class="dvB warn" data-ad="kick" data-id="${esc(p.id)}">Kick</button><button class="dvB warn" data-ad="ban" data-id="${esc(p.id)}">${AD.armed === p.id ? "Sure?" : "Ban"}</button>`) + `</div>`).join("");
-    $("dvAdBans").innerHTML = AD.bans.length ? AD.bans.map(b => `<div class="dvAdRow"><b>${esc(b.name)}</b><span>${new Date(b.at).toLocaleDateString()}</span><button class="dvB" data-ad="unban" data-k="${esc(b.k)}">Unban</button></div>`).join("") : `<div class="dvHint" style="margin:0 0 4px">no bans</div>`;
+    setHTML("dvAdPlayers", AD.players.map(p => `<div class="dvAdRow"><b class="${p.admin ? "adm" : ""}">${p.admin ? "[ADMIN] " : ""}${esc(p.name)}${me.on && p.id === me.id ? " (you)" : ""}</b><span>${esc(T.mp.mpIsleName(p.isle))}</span>`
+        + (me.on && p.id === me.id ? "" : `<button class="dvB" data-ad="goto" data-id="${esc(p.id)}" ${me.on && p.isle === here ? "" : "disabled style=\"opacity:.35\""}>Go to</button><button class="dvB" data-ad="mute" data-id="${esc(p.id)}">${p.muted ? "Unmute" : "Mute"}</button><button class="dvB warn" data-ad="kick" data-id="${esc(p.id)}">Kick</button><button class="dvB warn" data-ad="ban" data-id="${esc(p.id)}">${AD.armed === p.id ? "Sure?" : "Ban"}</button>`) + `</div>`).join(""));
+    setHTML("dvAdBans", AD.bans.length ? AD.bans.map(b => `<div class="dvAdRow"><b>${esc(b.name)}</b><span>${new Date(b.at).toLocaleDateString()}</span><button class="dvB" data-ad="unban" data-k="${esc(b.k)}">Unban</button></div>`).join("") : `<div class="dvHint" style="margin:0 0 4px">no bans</div>`);
     $("dvUnbanAll").style.display = AD.bans.length ? "" : "none";
 }
+// lists only redraw when they change, so a click never lands on a button that's being replaced
+function setHTML(id, h) { const e = $(id); if (e.dataset.h !== h) { e.dataset.h = h; e.innerHTML = h; } }
+// how long each announcement has left, counted down every second while the panel is open
+const fmtLeft = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return t >= 86400 ? `${Math.floor(t / 86400)}d ${Math.floor(t % 86400 / 3600)}h` : t >= 3600 ? `${Math.floor(t / 3600)}h ${Math.floor(t % 3600 / 60)}m` : t >= 60 ? `${Math.floor(t / 60)}m ${t % 60}s` : `${t}s`; };
+function annLeft() {
+    const now = performance.now();
+    for (const sp of el.querySelectorAll("[data-annleft]")) { const a = AD.anns.find(q => q.id === sp.dataset.annleft); if (a) sp.textContent = a.until ? fmtLeft(a.until - now) : "until you take it down"; }
+}
+setInterval(() => { if (el.classList.contains("show")) annLeft(); }, 1000);
+// quick ones are for whoever's on right now (15 seconds unless you say); full ones reach everyone and the menu (an hour unless you say)
+function annKind(kind) {
+    AD.kind = kind;
+    for (const b of el.querySelectorAll("[data-annkind]")) b.classList.toggle("on", b.dataset.annkind === kind);
+    $("dvAnn").placeholder = kind === "full" ? "Announcement for everyone, on the server and the main menu..." : "Quick announcement for whoever's on right now...";
+    annDur(kind === "full" ? 3600 : 15);
+}
+function annDur(secs) {
+    const u = !secs ? 0 : secs % 86400 === 0 ? 86400 : secs % 3600 === 0 ? 3600 : secs % 60 === 0 ? 60 : 1;
+    $("dvAnnU").value = String(u); if (u) $("dvAnnN").value = secs / u;
+    $("dvAnnN").disabled = !u;
+}
+$("dvAnnU").addEventListener("change", () => { $("dvAnnN").disabled = $("dvAnnU").value === "0"; });
+annKind("quick");
 function adAction(d, b) {
     if (d.ad === "goto") { const p = AD.players.find(q => q.id === d.id); if (p) { teleport(p.x + 2.5, p.z, p.x, p.z); say("next to " + p.name); } return; }
     if (d.ad === "ban" && AD.armed !== d.id) { AD.armed = d.id; drawAdmin(); setTimeout(() => { if (AD.armed === d.id) { AD.armed = ""; drawAdmin(); } }, 3000); return; }
@@ -272,7 +310,7 @@ setInterval(() => {
     if (adKey() && M.on && M.ws && AD.tagged !== M.ws) { AD.tagged = M.ws; T.mp.mpSend({ t: "admin", key: adKey(), op: "tag" }); }
     if (el.classList.contains("show") && AD.ok) adSend("list");
 }, 3000);
-for (const [id, go] of [["dvAnn", "dvAnnGo"], ["dvMotd", "dvMotdGo"], ["dvAdKey", "dvAdKeySave"]]) $(id).addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); $(go).click(); } });
+for (const [id, go] of [["dvFreeName", "dvFreeGo"], ["dvAnn", "dvAnnGo"], ["dvAnnN", "dvAnnGo"], ["dvMotd", "dvMotdGo"], ["dvAdKey", "dvAdKeySave"]]) $(id).addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); $(go).click(); } });
 
 // ---------- buttons ----------
 $("dvWx").innerHTML = ["clear", "cloudy", "rain", "storm", "fog"].map(w => `<button class="dvB" data-wx="${w}" style="padding:5px 8px">${w}</button>`).join("");
@@ -292,10 +330,18 @@ el.addEventListener("click", e => {
     else if (d.wx) { T.setWeather(d.wx); }
     else if (d.speed) T.setSpeed(+d.speed);
     else if (d.ad) adAction(d, b);
+    else if (d.annkind) annKind(d.annkind);
+    else if (d.anndur !== undefined) annDur(+d.anndur);
     else switch (b.id) {
         case "dvClose": show(false); break;
-        case "dvAnnGo": { const v = $("dvAnn").value.trim(); if (!v) { $("dvAnn").focus(); return; } adSend("announce", { text: v }); $("dvAnn").value = ""; break; }
-        case "dvAnnClear": adSend("clearNews"); break;
+        case "dvAnnGo": {
+            const v = $("dvAnn").value.trim(); if (!v) { $("dvAnn").focus(); return; }
+            const u = +$("dvAnnU").value, secs = u ? Math.round(parseFloat($("dvAnnN").value) * u) : 0;
+            if (u && !(secs >= 3)) { say("say how long it stays up (3 seconds or more)", "bad"); $("dvAnnN").focus(); return; }
+            adSend("announce", { text: v, kind: AD.kind, secs }); $("dvAnn").value = ""; break;
+        }
+        case "dvAnnAll": adSend("annDel", { id: "*" }); break;
+        case "dvFreeGo": { const v = $("dvFreeName").value.trim(); if (!v) { $("dvFreeName").focus(); return; } adSend("freeName", { name: v }); $("dvFreeName").value = ""; break; }
         case "dvMotdGo": adSend("motd", { text: $("dvMotd").value.trim() }); $("dvMotd").value = ""; break;
         case "dvUnbanAll": adSend("unban", { k: "*" }); break;
         case "dvAdKeySave": { const v = $("dvAdKey").value.trim(); if (!v) return; try { localStorage.setItem("ts4_admin_key", v); } catch (e) { /* no storage */ } $("dvAdKey").value = ""; adOpen(); drawAdmin(); break; }
