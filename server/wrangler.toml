@@ -1,0 +1,12 @@
+# Tree Sim 4 public server on Cloudflare Workers (see worker.js). Free plan: SQLite-backed Durable Objects.
+name = "treesim4-server"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "Lobby"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Lobby"]

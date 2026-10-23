@@ -346,7 +346,72 @@ const BANDAGE_COST = 25;
 // rebirth: each trip on the ferry costs 3x more and gives +50% log/fish value and +10% axe damage, forever
 const rebirthCost = () => Math.round(250000 * Math.pow(3, save.rebirths || 0));
 const rebirthMult = () => 1 + 0.5 * (save.rebirths || 0);
-const logValue = () => Math.round((4 + save.priceLvl * 2) * rebirthMult() * (isle === 3 ? 4 : isle === 2 ? 2.5 : 1));
+// ---- 2.0.0 pets: who they are, what they do, and the cases they come in (the Black Market and the pets themselves are near the end) ----
+const RAR = [
+    { n: "COMMON", c: "#b8bcc4", k: 1 }, { n: "UNCOMMON", c: "#5ad85a", k: 1.6 }, { n: "RARE", c: "#4aa8ff", k: 2.5 },
+    { n: "EPIC", c: "#b46aff", k: 4 }, { n: "LEGENDARY", c: "#ffb020", k: 6.5 },
+];
+// what a pet does: a percentage (or metres, for reach) at common, 1 star
+const PERKS = {
+    chop:  { n: "Ferocious", base: 4, d: v => `+${v}% axe damage` },
+    logs:  { n: "Hoarder",   base: 4, d: v => `+${v}% logs and materials` },
+    cash:  { n: "Greedy",    base: 5, d: v => `+${v}% for logs and materials you sell` },
+    speed: { n: "Nimble",    base: 3, d: v => `+${v}% move speed` },
+    luck:  { n: "Lucky",     base: 6, d: v => `+${v}% chance of mutated trees` },
+    reach: { n: "Fetcher",   base: 1, d: v => `logs fly to you from ${v} m further` },
+    bite:  { n: "Biter",     base: 3, d: v => `bites the tree you're chopping for ${v}% of your axe` },
+};
+// every pet: its rarity, what it does, how tall it stands (m), whether it flies, and how it's built (the island animals, made small)
+const goldify = g => { g.traverse(o => { if (o.isMesh && o.material && o.material.isMeshLambertMaterial) o.material = amat(0xe8b830, 0x3a2408); }); return g; };
+const PETS = {
+    squirrel: { name: "Squirrel",        r: 0, perk: "logs",  h: 0.34, make: makeSquirrel },
+    rabbit:   { name: "Rabbit",          r: 0, perk: "speed", h: 0.36, make: makeRabbit },
+    frog:     { name: "Pond Frog",       r: 0, perk: "luck",  h: 0.22, make: makeFrog },
+    crab:     { name: "Beach Crab",      r: 0, perk: "cash",  h: 0.22, make: makeCrab },
+    snail:    { name: "Snail",           r: 0, perk: "reach", h: 0.26, make: makeSnail },
+    fox:      { name: "Moon Fox",        r: 1, perk: "chop",  h: 0.55, make: makeFox },
+    crow:     { name: "Crow",            r: 1, perk: "luck",  h: 0.35, make: makeCrow, fly: true },
+    marmot:   { name: "Marmot",          r: 1, perk: "logs",  h: 0.4,  make: makeMarmot },
+    hare:     { name: "Snow Hare",       r: 1, perk: "speed", h: 0.42, make: () => snowHare() },
+    pig:      { name: "Piglet",          r: 1, perk: "cash",  h: 0.45, make: makePig },
+    penguin:  { name: "Penguin",         r: 2, perk: "cash",  h: 0.55, make: makePenguin },
+    parrot:   { name: "Parrot",          r: 2, perk: "luck",  h: 0.42, make: makeParrot, fly: true },
+    monkey:   { name: "Monkey",          r: 2, perk: "reach", h: 0.6,  make: makeMonkey },
+    goat:     { name: "Mountain Goat",   r: 2, perk: "chop",  h: 0.7,  make: makeGoat },
+    turtle:   { name: "Sea Turtle",      r: 2, perk: "logs",  h: 0.3,  make: makeTurtle },
+    afox:     { name: "Arctic Fox",      r: 3, perk: "bite",  h: 0.6,  make: () => arcticFox() },
+    eagle:    { name: "Eagle",           r: 3, perk: "bite",  h: 0.55, make: makeEagle, fly: true },
+    shroom:   { name: "Shroomling",      r: 3, perk: "luck",  h: 0.5,  make: makeShroomling },
+    pony:     { name: "Pony",            r: 3, perk: "speed", h: 0.95, make: makePony },
+    seal:     { name: "Seal Pup",        r: 3, perk: "cash",  h: 0.45, make: makeSeal },
+    bear:     { name: "Polar Bear Cub",  r: 4, perk: "bite",  h: 0.85, make: makePolarBear },
+    salam:    { name: "Ember Salamander", r: 4, perk: "chop", h: 0.3,  make: makeSalamander },
+    stag:     { name: "Golden Stag",     r: 4, perk: "cash",  h: 1.05, make: () => goldify(makeDeer()) },
+    moth:     { name: "Phantom Moth",    r: 4, perk: "luck",  h: 0.45, make: makeMoth, fly: true },
+};
+// the cases Sly sells: price (times the case base), and the chance of each rarity (%)
+const CASES = {
+    sack:   { name: "Burlap Sack",      k: 1,  odds: [62, 26, 9, 2.6, 0.4], col: "#c8a070", desc: "Tied shut with fishing line. Something inside is snoring." },
+    crate:  { name: "Smuggler's Crate", k: 6,  odds: [30, 36, 23, 9, 2],    col: "#7fc8ff", desc: "Stamped FRAGILE and THIS WAY UP. It's upside down." },
+    coffer: { name: "Reaper's Coffer",  k: 30, odds: [0, 22, 43, 26, 9],    col: "#ff5a7a", desc: "Black iron and bone. Sly won't say how he got it." },
+};
+const SHINY_CHANCE = 0.025;
+const caseBase = () => Math.round(6000 * Math.pow(2, save.rebirths || 0));
+const casePrice = k => Math.round(caseBase() * CASES[k].k);
+const petSlots = () => 2 + ((save.rebirths || 0) >= 8 ? 1 : 0);
+if (!save.pets || typeof save.pets !== "object") save.pets = { own: {}, eq: [], opened: 0 };
+if (!save.pets.own || typeof save.pets.own !== "object") save.pets.own = {};
+if (!Array.isArray(save.pets.eq)) save.pets.eq = [];
+save.pets.eq = save.pets.eq.filter(k => PETS[k] && save.pets.own[k]);
+// how much one owned pet does
+function petValue(k) {
+    const P = PETS[k], o = save.pets.own[k] || { stars: 1 }, base = PERKS[P.perk].base * RAR[P.r].k * (1 + 0.25 * ((o.stars || 1) - 1)) * (o.shiny ? 1.5 : 1);
+    return Math.round(base * 10) / 10;
+}
+// the equipped pets' bonus of one kind: petK gives a multiplier (1.12 = +12%), petAdd a plain sum
+const petAdd = kind => save.pets.eq.reduce((s, k) => s + (PETS[k] && PETS[k].perk === kind ? petValue(k) : 0), 0);
+const petK = kind => 1 + petAdd(kind) / 100;
+const logValue = () => Math.round((4 + save.priceLvl * 2) * rebirthMult() * (isle === 3 ? 4 : isle === 2 ? 2.5 : 1) * petK("cash"));
 const ghostIncome = () => 0; // ghosts now earn by really chopping trees
 const maxHpNow = () => 100 + save.hpLvl * 20 + 50 * (save.rebirths || 0); // every rebirth makes you +50 HP tougher, forever
 
@@ -1707,7 +1772,7 @@ function mutW(k) {
     return w;
 }
 function rollMut() {
-    if (Math.random() > 0.07 * (isBlood() ? 1.8 : 1) * (buffOn("lucky") ? 1.5 : 1)) return null;
+    if (Math.random() > 0.07 * (isBlood() ? 1.8 : 1) * (buffOn("lucky") ? 1.5 : 1) * petK("luck")) return null;
     let tot = 0; for (const k of MUT_KEYS) tot += mutW(k);
     let r = Math.random() * tot;
     for (const k of MUT_KEYS) { r -= mutW(k); if (r <= 0) return k; }
@@ -2257,6 +2322,7 @@ function tryHit() {
     }
     if (!best) { sfx(160, 0.12, "sawtooth", 0.05, 0.6); return; }
     hitTree(best, Math.round(axeDmg() * (best.boss ? 1 + 0.25 * enchLv("bane") : 1)), true);
+    lastChop = { t: best, at: time };
     if (enchTotal(save.equipped)) burst(V3(best.x + (player.pos.x - best.x) * 0.2, best.gy + Math.min(best.h * 0.35, 2.2), best.z + (player.pos.z - best.z) * 0.2), 8, 5, [axeRunes.mat, ornMat(0xffffff)]); // enchanted hits throw violet sparks
     const vamp = enchLv("vamp"); // Lifesteal: every swing that lands heals you a little
     if (vamp && player.hp > 0 && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + Math.max(1, Math.round(player.maxHp * 0.012 * vamp)));
@@ -2689,6 +2755,12 @@ function showPanels() {
     if (panel === "relic") renderRelic();
     $("panelTalk").classList.toggle("show", panel === "talk");
     $("panelCShop").classList.toggle("show", panel === "cshop");
+    $("panelMarket").classList.toggle("show", panel === "market");
+    $("panelSpin").classList.toggle("show", panel === "spin");
+    $("panelPets").classList.toggle("show", panel === "pets");
+    if (panel === "market") renderMarket();
+    if (panel === "pets") renderPets();
+    if (panel !== "spin" && spin && !spin.done) finishSpin();
     if (panel === "cshop") renderCShop();
     $("panelBack").classList.toggle("show", panel !== null && panel !== "talk" && panel !== "dev");
     if (window.__ts4dev) window.__ts4dev.show(panel === "dev");
@@ -2787,7 +2859,7 @@ function updateBars(dt) {
 const plates = [];
 const plateV = new THREE.Vector3();
 const treeDmg = t => (t.type.flee ? 0 : Math.round((8 + t.h) * t.type.dmg * (1 + 0.05 * (save.day - 1)) * dmgScale() * (isBlood() ? 1.25 : 1) * isleDm()));
-const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw() * (buffOn("lucky") ? 1.5 : 1) * (t.mut ? MUTS[t.mut].mult : 1)));
+const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw() * (buffOn("lucky") ? 1.5 : 1) * (t.mut ? MUTS[t.mut].mult : 1) * petK("logs")));
 function hidePlates() { for (const p of plates) p.style.display = "none"; }
 function updateNameplates() {
     const cands = [];
@@ -2895,11 +2967,14 @@ function renderMenu() {
             : `<div class="hint">Chop trees, carry logs home, send them down the chute. At night, rarer trees come out.</div>`;
         $("menuBtn").textContent = save.seconds > 5 ? "CONTINUE" : "PLAY";
         $("menuQuit").style.display = "none";
+        $("menuJoin").style.display = ""; $("menuOnline").style.display = "";
     } else if (state === "paused") {
         $("menuHead").innerHTML = `<div class="logo small">PAUSED</div><div class="tag">the trees are waiting.</div>`;
         $("menuStats").innerHTML = `<div><span>Day</span><b>${save.day}</b></div><div><span>Logs</span><b>${save.logs}</b></div><div><span>Cash</span><b>${money(save.money)}</b></div><div><span>Felled</span><b>${save.felled}</b></div><div><span>Deaths</span><b>${save.deaths}</b></div><div><span>Time</span><b>${fmtTime(save.seconds)}</b></div>`;
         $("menuBtn").textContent = "RESUME";
         $("menuQuit").style.display = "";
+        $("menuJoin").style.display = "none"; $("menuOnline").style.display = "none";
+        if ($("menuLeave")) $("menuLeave").style.display = mp.on || mp.connecting ? "" : "none";
     }
     $("menuControls").innerHTML = CONTROLS.map(c => `<div><kbd>${c[0]}</kbd><span>${c[1]}</span></div>`).join("");
 }
@@ -3000,9 +3075,12 @@ addEventListener("keydown", e => {
     if (panel === "casino") { if (e.code === "Escape") { closePanel(); return; } if (casinoKey(e.code)) e.preventDefault(); return; }
     if (panel === "talk") { if (e.code === "KeyF" || e.code === "Space" || e.code === "Enter") advanceTalk(); else if (e.code === "Escape") closePanel(); return; }
     if (e.code === "Escape") { if (panel) closePanel(); return; }
-    if (e.code === "Tab") { e.preventDefault(); if (panel === "shop") { const tl = SHOP_TABS[shopMode].map(t => t[0]); shopPage = 0; shopTab = tl[(tl.indexOf(shopTab) + 1) % tl.length]; renderShop(); } return; }
+    if (e.code === "KeyT" && mp.on && !panel) { e.preventDefault(); mpOpenChat(); return; }
+    if (e.code === "Tab") { e.preventDefault(); if (!panel && mp.on) renderMpList(); if (panel === "shop") { const tl = SHOP_TABS[shopMode].map(t => t[0]); shopPage = 0; shopTab = tl[(tl.indexOf(shopTab) + 1) % tl.length]; renderShop(); } return; }
     if (e.code === "KeyE") { togglePanel("inv"); return; }
     if (e.code === "KeyM") { togglePanel("map"); return; }
+    if (e.code === "KeyP") { togglePanel("pets"); return; }
+    if (panel === "spin" && (e.code === "Space" || e.code === "Enter")) { if (spin && !spin.done) finishSpin(); return; }
     if (e.code === "KeyF") { if (fishing.on) { fishAction(); return; } interact(); return; }
     if (e.code === "KeyJ") { togglePanel("fish"); return; }
     if (e.code === "KeyK") { togglePanel("relic"); return; }
@@ -3022,7 +3100,7 @@ addEventListener("keydown", e => {
         sfx(200, 0.2, "sawtooth", 0.06, 3);
     }
 });
-addEventListener("keyup", e => (keys[e.code] = false));
+addEventListener("keyup", e => { keys[e.code] = false; if (e.code === "Tab") $("mpList").classList.remove("show"); });
 addEventListener("wheel", e => { if (state === "playing" && !panel && locked && !ride) cycleWeapon(e.deltaY > 0 ? 1 : -1); }, { passive: true });
 addEventListener("mousedown", e => {
     if ($("intro")) return;
@@ -3060,6 +3138,7 @@ function nearest0() {
     if (isle === 5 && B5.on) return nearest5();
     { const pn = nearestPlaced(); if (pn) return pn; } // things placed in the Studio: people, notes, chests, shrines, portals
     if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
+    if (slyCart.g.visible && Math.hypot(player.pos.x - slyCart.x, player.pos.z - slyCart.z) < 3.9) return { k: "market" };
     if (casino && casino.isle === isle && isle === casinoHome() && Math.hypot(player.pos.x - casino.door.x, player.pos.z - casino.door.z) < 3.4) return { k: "casino" };
     if (CI()) return CI().nearest();
     if (isle === 6) return nearest6();
@@ -3080,7 +3159,8 @@ function nearest0() {
 }
 function interact() {
     if (panel === "talk") { advanceTalk(); return; }
-    if (panel === "shop" || panel === "ench" || panel === "crew") { closePanel(); return; }
+    if (panel === "spin") { if (spin && !spin.done) finishSpin(); else closePanel(); return; }
+    if (panel === "shop" || panel === "ench" || panel === "crew" || panel === "market" || panel === "pets") { closePanel(); return; }
     if (panel) return;
     const n = nearest();
     if (!n) return;
@@ -3089,6 +3169,7 @@ function interact() {
     if (ISLE5_ACT[n.k]) { ISLE5_ACT[n.k](n); return; }
     if (n.k === "placed") { placedInteract(n.o); return; }
     if (n.k === "ench") { openEnch(pick(ENCH_SAY)); return; }
+    if (n.k === "market") { talkSly(); return; }
     if (n.k === "casino") { enterCasino(); return; }
     if (CS_PROMPTS[n.k]) { casinoInteract(n); return; }
     if (n.k === "smith") {
@@ -3337,7 +3418,7 @@ function update(dt) {
     const dir = boating() ? new THREE.Vector3() : new THREE.Vector3((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), 0, (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0));
     if (dir.lengthSq() > 0) dir.normalize().applyAxisAngle(UP, player.yaw);
     if (boating()) driveBoat(dt); else {
-    const maxSp = (keys.ShiftLeft ? 8.5 : 5.5) * (1 + 0.07 * save.bootLvl) * (buffOn("swift") ? 1.3 : 1) * devSpeed * (isle === 5 ? moveK5() : 1), accel = player.onGround ? 14 : 4;
+    const maxSp = (keys.ShiftLeft ? 8.5 : 5.5) * (1 + 0.07 * save.bootLvl) * (buffOn("swift") ? 1.3 : 1) * petK("speed") * devSpeed * (isle === 5 ? moveK5() : 1), accel = player.onGround ? 14 : 4;
     player.vel.x += (dir.x * maxSp - player.vel.x) * Math.min(1, accel * dt);
     player.vel.z += (dir.z * maxSp - player.vel.z) * Math.min(1, accel * dt);
     if (keys.Space && player.onGround && !panel) { player.vel.y = 7; player.onGround = false; }
@@ -3386,7 +3467,7 @@ function update(dt) {
     for (let i = logs.length - 1; i >= 0; i--) {
         const l = logs[i], p = l.m.position;
         const dx = player.pos.x - p.x, dz = player.pos.z - p.z, d = Math.hypot(dx, dz);
-        const lgy = groundY(p.x, p.z), LR = 5 + 2.5 * (save.magnetLvl || 0);
+        const lgy = groundY(p.x, p.z), LR = 5 + 2.5 * (save.magnetLvl || 0) + petAdd("reach");
         if (d < LR) { const pull = (LR - d) * 6 * dt; p.x += dx / (d || 1) * pull; p.z += dz / (d || 1) * pull; p.y += (lgy + 1 - p.y) * 0.1; }
         l.vy -= 14 * dt; p.y += l.vy * dt;
         if (p.y < lgy + 0.2 && d >= LR) { p.y = lgy + 0.2; l.vy = 0; }
@@ -3998,6 +4079,7 @@ function placeEnchTable() {
     enchTable.g.position.set(x, y, z); enchTable.g.rotation.y = m.ry ?? Math.atan2(-p.x, -p.z); enchTable.g.scale.setScalar(k); enchTable.g.visible = !m.hide;
     const L = Array.isArray(m.labels) ? m.labels[0] || null : null; styleLabel(enchTable.lb, L);
     enchTable.lb.isle = isle; enchTable.lb.position.set(x, m.hide || (L && L.hide) ? -1e4 : y + 2.6 * k + (L ? +L.dy || 0 : 0), z);
+    try { placeDealer(); } catch (e) { /* Sly's cart isn't built yet while the game starts; it places itself then */ } // the Black Market parks beside it (2.0.0)
 }
 // the floating names that belong to a built-in thing, for the Studio to change
 function builtinLabels(n, i) {
@@ -4531,7 +4613,7 @@ const isleMats = () => MATS_BY_ISLE[isle] || MATS_BY_ISLE[2];
 // a Studio island's own materials exist from the start, so a save holding some never trips anything (makeCI sets their real look and price)
 for (const d of Array.isArray(CONTENT_ISLANDS) ? CONTENT_ISLANDS : []) for (const m of d && Array.isArray(d.mats) ? d.mats : []) if (m && /^m_[a-z0-9_]+$/.test(String(m.key)) && !MATS[m.key]) MATS[m.key] = { name: String(m.name || "Material").slice(0, 24), col: "#9a9aa4", price: 1, hex: 0x9a9aa4, custom: true };
 const GLOW_MATS = ["gold", "crystal", "magma", "moonstone", "void", "star", "heartwood", "ember", "phoenixf", "molten"];
-const matPrice = k => Math.round(MATS[k].price * rebirthMult() * (1 + 0.15 * (save.priceLvl || 0)));
+const matPrice = k => Math.round(MATS[k].price * rebirthMult() * (1 + 0.15 * (save.priceLvl || 0)) * petK("cash"));
 const hasMats = r => Object.entries(r).every(([k, n]) => (save.mats[k] || 0) >= n);
 function payMats(r) { for (const [k, n] of Object.entries(r)) save.mats[k] -= n; }
 const matMeshMat = {};
@@ -14121,7 +14203,7 @@ const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
     ...PROMPTS5, ferry6: () => "[F] Talk to the Ferryman", ferryC: () => "[F] Talk to the Ferryman", placed: n => placedPrompt(n.o),
-    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", casino: () => `[F] Enter ${casino && casino.name ? casino.name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : "the Casino"}`, ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
+    shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", market: () => "[F] Psst... Sly's Black Market", casino: () => `[F] Enter ${casino && casino.name ? casino.name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : "the Casino"}`, ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
     depot: () => "[F] Trade at the Trading Post",
@@ -14192,7 +14274,7 @@ function hud(dt) {
     if (panel === "map") drawMap();
     if (panel === "ferry") renderFerry();
 }
-const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0)) * (1 + 0.12 * enchLv("sharp", i)) * dmgBuff()); };
+const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0)) * (1 + 0.12 * enchLv("sharp", i)) * dmgBuff() * petK("chop")); };
 
 // =====================================================================
 //  Tree Sim 4 Studio content: the signs and props you place in the editor (content/world.js).
@@ -14609,6 +14691,491 @@ function placedInteract(o) {
 for (const o of CONTENT_WORLD && Array.isArray(CONTENT_WORLD.objects) ? CONTENT_WORLD.objects : []) placedBuild(o);
 let studioHook = null; // set by studio/studio.js: it flies the camera while you edit
 
+// =====================================================================
+// 2.0.0: THE BLACK MARKET AND PETS. Sly, a shady dealer with a cart, sets up beside the enchanting table
+// on every island and sells cases. Open one and a pet rolls out of it: it follows you everywhere and helps
+// (harder swings, more logs, more cash, faster feet, better luck, longer log reach, or it bites the tree
+// you're chopping). A pet you already have adds a star (up to 5); a shiny one glows and helps half as much again.
+// =====================================================================
+
+// ---- Sly and his cart ----
+const SLY_SIDE = { 1: -1 }; // which side of the enchanting table Sly parks on (1 its right, -1 its left)
+const SLY_SAY = ["Psst. Over here, woodcutter. Don't tell the Reaper.", "No refunds. No questions. No looking in the air holes.", "These fell off a ferry. Honest.", "That one's breathing. Probably fine.", "Cash only. The trees don't take cards.", "You didn't get these from me."];
+const SLY_LINES = ["Psst! You. Yes, you with the axe. Come closer.", "Name's Sly. I deal in... rare goods. Cases. What's inside? Depends on your luck.", "Every case holds a little friend. They follow you, they help you chop, they never ask for a raise.", "Open the same kind twice and yours gets stronger. Find a shiny one and, well. Retire.", "Prices go up the more you've reborn. Supply and demand, woodcutter."];
+const slyCart = (() => {
+    const g = new THREE.Group(), wood = lamb(0x6a4228), dark = lamb(0x3a2418), tarp = lamb(0x5a1a24), iron = lamb(0x2a2a30);
+    part(g, BOX, wood, 0, 0.75, 0, 2.2, 0.5, 1.2); part(g, BOX, dark, 0, 0.52, 0, 2.3, 0.08, 1.3);
+    for (const s of [-1, 1]) { const w = part(g, CYL8, dark, -0.4, 0.42, s * 0.68, 0.42, 0.08, 0.42, Math.PI / 2); w.rotation.z = 0; part(g, CYL8, iron, -0.4, 0.42, s * 0.73, 0.12, 0.04, 0.12, Math.PI / 2); }
+    part(g, BOX, wood, 1.35, 0.6, 0, 0.9, 0.06, 0.08); // the handles
+    for (const [x, z] of [[-1, -0.55], [1, -0.55], [-1, 0.55], [1, 0.55]]) part(g, BOX, dark, x, 1.55, z, 0.07, 1.2, 0.07);
+    const roof = part(g, BOX, tarp, 0, 2.18, 0, 2.4, 0.06, 1.5); roof.rotation.x = 0.08;
+    for (let k = 0; k < 5; k++) part(g, BOX, k % 2 ? lamb(0x3a0e16) : tarp, -1 + k * 0.5, 2.05, 0.76, 0.5, 0.24, 0.03); // a scalloped edge
+    // the three cases on show
+    const cases = new THREE.Group(); cases.position.set(0, 1.0, 0.1); g.add(cases);
+    caseModel("sack", cases, -0.65); caseModel("crate", cases, 0.05); caseModel("coffer", cases, 0.72);
+    const lamp = new THREE.Group(); lamp.position.set(1.0, 1.95, 0.6); g.add(lamp);
+    part(lamp, BOX, iron, 0, 0.12, 0, 0.16, 0.04, 0.16); part(lamp, BOX, new THREE.MeshBasicMaterial({ color: 0x8aff9a }), 0, 0, 0, 0.12, 0.18, 0.12); // a green lantern: you know he's up to something
+    const sly = makeHumanoid({ face: "clerk", skin: 0x9a7a62, shirt: 0x2a3a2e, pants: 0x1a1a1e, boots: 0x141414, cape: 0x1e2a22, scarf: 0x1a1a1e, hat: "hood", hatCol: 0x1e2a22 });
+    sly.g.position.set(0, 0, -1.05); sly.g.scale.setScalar(0.95); g.add(sly.g);
+    g.visible = false; scene.add(g);
+    const lb = label("BLACK MARKET", "#8aff9a", 3.2, 0.78); lb.keep = true;
+    return { g, sly, lamp, lb, x: 0, z: 0, t: 0 };
+})();
+placeDealer();
+function caseModel(k, parent, x) {
+    const g = new THREE.Group(); g.position.x = x; parent.add(g);
+    if (k === "sack") { part(g, ICO, lamb(0x9a7a4a), 0, 0.2, 0, 0.26, 0.24, 0.24); part(g, CONE6, lamb(0x8a6a3a), 0, 0.46, 0, 0.1, 0.16, 0.1); part(g, CYL8, lamb(0x2a2a2a), 0, 0.4, 0, 0.09, 0.03, 0.09); }
+    else if (k === "crate") { part(g, BOX, lamb(0x8a6a44), 0, 0.2, 0, 0.5, 0.4, 0.4); for (const y of [0.05, 0.35]) part(g, BOX, lamb(0x4a3020), 0, y, 0, 0.52, 0.06, 0.42); part(g, BOX, new THREE.MeshBasicMaterial({ color: 0x7fc8ff }), 0, 0.2, 0.205, 0.22, 0.08, 0.01); }
+    else { part(g, BOX, lamb(0x1a1418), 0, 0.18, 0, 0.5, 0.34, 0.34); part(g, CYL8, lamb(0x1a1418), 0, 0.35, 0, 0.17, 0.5, 0.17, 0, 0, Math.PI / 2); for (const s of [-1, 1]) part(g, BOX, new THREE.MeshBasicMaterial({ color: 0xffc040 }), s * 0.23, 0.2, 0, 0.04, 0.36, 0.36); part(g, ICO, new THREE.MeshBasicMaterial({ color: 0xff5a7a }), 0, 0.22, 0.18, 0.05, 0.05, 0.02); }
+    return g;
+}
+// Sly parks his cart five metres to the enchanting table's right, facing the same way (on Pine Island, its left: the safehouse is on the right)
+function placeDealer() {
+    const ry = enchTable.g.rotation.y, s = 5.2 * (SLY_SIDE[isle] || 1), x = enchTable.x + Math.cos(ry) * s, z = enchTable.z - Math.sin(ry) * s, y = groundY(x, z);
+    slyCart.x = x; slyCart.z = z;
+    slyCart.g.position.set(x, y, z); slyCart.g.rotation.y = ry; slyCart.g.visible = !!ENCH_AT[isle];
+    slyCart.lb.isle = isle; slyCart.lb.position.set(x, slyCart.g.visible ? y + 3.0 : -1e4, z);
+}
+function talkSly() {
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    if (!save.slyTalk) { save.slyTalk = 1; startTalk("SLY", SLY_LINES, () => openMarket(pick(SLY_SAY))); } else openMarket(pick(SLY_SAY));
+}
+
+// ---- pictures of pets and cases (rendered from their models, like the item pictures) ----
+function renderIcon(id, build) {
+    if (iconCache[id]) return iconCache[id];
+    const wrap = new THREE.Group(), o = build(); wrap.add(o); iconScene.add(wrap);
+    wrap.updateMatrixWorld(true);
+    icBox.setFromObject(wrap); icBox.getCenter(icC); icBox.getSize(icS);
+    const r = Math.max(icS.x, icS.y, icS.z) * 0.62;
+    iconCam.position.set(icC.x, icC.y, icC.z + r / Math.tan((iconCam.fov / 2) * Math.PI / 180) + icS.z * 0.5);
+    iconCam.lookAt(icC);
+    iconR.render(iconScene, iconCam);
+    iconCache[id] = iconR.domElement.toDataURL();
+    iconScene.remove(wrap);
+    return iconCache[id];
+}
+const petIcon = k => renderIcon("pet:" + k, () => { const g = PETS[k].make(); g.rotation.y = 0.6; return g; });
+const caseIcon = k => renderIcon("case:" + k, () => { const g = new THREE.Group(); caseModel(k, g, 0); g.rotation.set(0.25, -0.5, 0); return g; });
+
+// ---- opening a case ----
+function rollPet(caseKey) {
+    const odds = CASES[caseKey].odds, tot = odds.reduce((a, b) => a + b, 0);
+    let r = Math.random() * tot, rar = 0;
+    for (let i = 0; i < odds.length; i++) { r -= odds[i]; if (r <= 0) { rar = i; break; } }
+    const pool = Object.keys(PETS).filter(k => PETS[k].r === rar);
+    return { key: pool[Math.floor(Math.random() * pool.length)], shiny: Math.random() < SHINY_CHANCE };
+}
+// gives you the pet straight away (so closing the window mid-spin never loses it), then shows the spin
+function openCase(caseKey) {
+    const price = casePrice(caseKey);
+    if (save.money < price) { toast(`Sly shakes his head. The ${CASES[caseKey].name} costs ${money(price)}.`, "bad"); return null; }
+    save.money -= price; save.pets.opened = (save.pets.opened || 0) + 1;
+    const got = rollPet(caseKey), own = save.pets.own[got.key];
+    let note;
+    if (!own) { save.pets.own[got.key] = { stars: 1, shiny: got.shiny ? 1 : 0, n: 1 }; note = "NEW!"; if (save.pets.eq.length < petSlots()) save.pets.eq.push(got.key); }
+    else {
+        own.n = (own.n || 1) + 1;
+        if (got.shiny && !own.shiny) { own.shiny = 1; note = "IT'S SHINY NOW!"; }
+        else if ((own.stars || 1) < 5) { own.stars = (own.stars || 1) + 1; note = `+1 STAR (${own.stars}★)`; }
+        else { const back = Math.round(price * 0.25); save.money += back; note = `MAXED: SLY BUYS IT BACK FOR ${money(back)}`; }
+    }
+    spawnPets();
+    writeSave();
+    return { ...got, note };
+}
+
+// ---- the panels: the market, the spin, your pets ----
+let spin = null; // the case being opened: { caseKey, got, t, done }
+function openMarket(say) { marketSay = say || ""; openPanel("market"); }
+let marketSay = "";
+function oddsBar(odds) { return `<div class="modds">${odds.map((p, i) => p ? `<i style="flex:${p};background:${RAR[i].c}" title="${RAR[i].n} ${p}%"></i>` : "").join("")}</div><div class="moddt">${odds.map((p, i) => p ? `<span style="color:${RAR[i].c}">${RAR[i].n[0]}${RAR[i].n.slice(1).toLowerCase()} ${p}%</span>` : "").join("")}</div>`; }
+function renderMarket() {
+    const found = Object.keys(save.pets.own).length, all = Object.keys(PETS).length;
+    $("marketSay").textContent = marketSay ? `"${marketSay}"` : "";
+    $("marketBody").innerHTML = Object.entries(CASES).map(([k, C]) => {
+        const p = casePrice(k), can = save.money >= p;
+        return `<div class="mcase" style="--c:${C.col}"><img src="${caseIcon(k)}"><b>${C.name}</b><small>${C.desc}</small>${oddsBar(C.odds)}<button data-case="${k}" ${can ? "" : "disabled"}>OPEN · ${money(p)}</button></div>`;
+    }).join("");
+    $("marketFoot").innerHTML = `You've found <b>${found} of ${all}</b> pets · ${save.pets.opened || 0} cases opened · shiny chance ${SHINY_CHANCE * 100}% · <b>P</b> shows your pets`;
+}
+function startSpin(caseKey) {
+    const got = openCase(caseKey); if (!got) { renderMarket(); return; }
+    spin = { caseKey, got, t: 0, done: false };
+    // a strip of 48 pets with the prize at 40; they slide left and slow down onto it
+    const strip = [];
+    for (let i = 0; i < 48; i++) strip.push(i === 40 ? got : rollPet(caseKey));
+    $("spinStrip").innerHTML = strip.map((s, i) => `<div class="scard${s.shiny ? " shiny" : ""}" style="--c:${RAR[PETS[s.key].r].c}"><img src="${petIcon(s.key)}"><b>${PETS[s.key].name}</b></div>`).join("");
+    $("spinResult").classList.remove("show");
+    $("spinTitle").textContent = CASES[caseKey].name.toUpperCase();
+    openPanel("spin");
+    const strip$ = $("spinStrip"), W = 124, view = $("spinWin").clientWidth || 760, target = 40 * W - view / 2 + W / 2 + (Math.random() - 0.5) * (W * 0.6);
+    strip$.style.transition = "none"; strip$.style.transform = "translateX(0px)";
+    void strip$.offsetWidth;
+    strip$.style.transition = "transform 5.4s cubic-bezier(0.12, 0.72, 0.18, 1)";
+    strip$.style.transform = `translateX(${-target}px)`;
+    spin.target = target; spin.lastCard = -1;
+    sfx(220, 0.3, "sawtooth", 0.05, 2.2);
+}
+function spinTick(dt) {
+    if (!spin || spin.done) return;
+    spin.t += dt;
+    // a tick as each card passes the middle
+    const m = new DOMMatrixReadOnly(getComputedStyle($("spinStrip")).transform), x = -m.m41, card = Math.floor((x + ($("spinWin").clientWidth || 760) / 2) / 124);
+    if (card !== spin.lastCard) { spin.lastCard = card; sfx(1200, 0.025, "square", 0.04, 1); }
+    if (spin.t > 5.5) finishSpin();
+}
+function finishSpin() {
+    if (!spin || spin.done) return;
+    spin.done = true;
+    const s = $("spinStrip"); s.style.transition = "none"; s.style.transform = `translateX(${-spin.target}px)`;
+    const g = spin.got, P = PETS[g.key], R = RAR[P.r], own = save.pets.own[g.key];
+    $("spinResult").innerHTML = `<div class="sres${own.shiny ? " shiny" : ""}" style="--c:${R.c}"><img src="${petIcon(g.key)}"><div><em>${R.n}${own.shiny ? " · SHINY" : ""}</em><b>${own.shiny ? "Shiny " : ""}${P.name}</b><small>${PERKS[P.perk].n}: ${PERKS[P.perk].d(petValue(g.key))}</small><strong>${g.note}</strong>${"★".repeat(own.stars || 1)}</div></div>
+        <div class="sbtns"><button id="spinAgain">OPEN ANOTHER · ${money(casePrice(spin.caseKey))}</button><button id="spinPets">MY PETS</button><button data-close>DONE</button></div>`;
+    $("spinResult").classList.add("show");
+    $("spinAgain").disabled = save.money < casePrice(spin.caseKey);
+    if (P.r >= 3 || own.shiny) { flash = 0.5; sfx(523, 0.15, "triangle", 0.1, 1); setTimeout(() => sfx(784, 0.2, "triangle", 0.1, 1), 120); setTimeout(() => sfx(1046, 0.4, "triangle", 0.1, 1), 260); }
+    else sfx(660, 0.2, "triangle", 0.08, 1.2);
+    toast(`${own.shiny ? "Shiny " : ""}${P.name} (${R.n.toLowerCase()})! ${g.note}`, P.r >= 3 ? "rare" : "good");
+}
+function renderPets() {
+    const own = save.pets.own, keys = Object.keys(PETS), eq = save.pets.eq;
+    $("petsHead").innerHTML = `<b>${eq.length}/${petSlots()}</b> following you${(save.rebirths || 0) < 8 ? " · a 3rd pet can follow you from Rebirth 8" : ""}`;
+    const sums = Object.keys(PERKS).map(p => [p, petAdd(p)]).filter(([, v]) => v > 0).map(([p, v]) => PERKS[p].d(Math.round(v * 10) / 10)).join(" · ");
+    $("petsSum").textContent = sums || "No pets following you. Click one to bring it along.";
+    $("petsBody").innerHTML = keys.map(k => {
+        const P = PETS[k], R = RAR[P.r], o = own[k];
+        if (!o) return `<div class="petc locked" style="--c:${R.c}"><div class="petq">?</div><b>???</b><small>${R.n}</small></div>`;
+        const on = eq.includes(k);
+        return `<div class="petc${on ? " on" : ""}${o.shiny ? " shiny" : ""}" data-pet="${k}" style="--c:${R.c}"><img src="${petIcon(k)}"><b>${o.shiny ? "Shiny " : ""}${P.name}</b><span>${"★".repeat(o.stars || 1)}<i>${"★".repeat(5 - (o.stars || 1))}</i></span><small>${PERKS[P.perk].d(petValue(k))}</small>${on ? "<em>FOLLOWING</em>" : ""}</div>`;
+    }).join("");
+}
+function togglePet(k) {
+    const eq = save.pets.eq, i = eq.indexOf(k);
+    if (i >= 0) eq.splice(i, 1);
+    else { if (eq.length >= petSlots()) eq.shift(); eq.push(k); }
+    spawnPets(); writeSave(); renderPets();
+    sfx(i >= 0 ? 400 : 700, 0.08, "triangle", 0.07, 1.4);
+}
+document.addEventListener("click", e => {
+    const c = e.target.closest("[data-case]"); if (c && !c.disabled) { startSpin(c.dataset.case); return; }
+    if (e.target.closest("#spinAgain")) { const k = spin && spin.caseKey; if (k) startSpin(k); return; }
+    if (e.target.closest("#spinPets") || e.target.closest("#marketPets")) { openPanel("pets"); return; }
+    const p = e.target.closest("[data-pet]"); if (p) togglePet(p.dataset.pet);
+});
+
+// ---- pets in the world: they follow you, look around, and the biters go for the tree you're chopping ----
+const pets = [];
+let lastChop = null; // { t: the tree you last hit, at: when }
+function spawnPets() {
+    for (const p of pets) scene.remove(p.g);
+    pets.length = 0;
+    save.pets.eq.forEach((k, i) => {
+        const P = PETS[k]; if (!P) return;
+        const g = P.make(), o = save.pets.own[k] || {};
+        g.updateMatrixWorld(true); icBox.setFromObject(g); icBox.getSize(icS);
+        g.scale.multiplyScalar(P.h / Math.max(icS.y, 0.05)); // every pet stands its own height, whatever animal it's built from
+        if (o.shiny) { const aura = new THREE.Mesh(SPH, aglow(0xffe070, 0.12)); aura.scale.setScalar(Math.max(icS.x, icS.y, icS.z) * 0.6); aura.position.y = icS.y * 0.5; g.add(aura); g.userData.aura = aura; }
+        // just ahead of you, to either side, so you can see them (a third one trots further out)
+        const side = [-1.8, 1.8, -2.9][i] || 0, back = [-2.4, -2.4, -0.8][i] || 0;
+        const x = player.pos.x + Math.sin(player.yaw) * back - Math.cos(player.yaw) * side, z = player.pos.z + Math.cos(player.yaw) * back + Math.sin(player.yaw) * side;
+        g.position.set(x, groundY(x, z), z);
+        scene.add(g);
+        pets.push({ key: k, P, g, i, side, back, x, z, y: g.position.y, yOff: 0, ph: Math.random() * 6, sp: 0, biteT: 0, hop: 0 });
+    });
+}
+function updatePets(dt) {
+    const hide = inCasino() || boating() || !!ride;
+    for (const p of pets) {
+        p.g.visible = !hide; if (hide) continue;
+        p.ph += dt;
+        // where it wants to be: just behind you, to the side (or at the tree, for a biter while you chop)
+        let tx = player.pos.x + Math.sin(player.yaw) * p.back - Math.cos(player.yaw) * p.side, tz = player.pos.z + Math.cos(player.yaw) * p.back + Math.sin(player.yaw) * p.side, biting = null;
+        if (p.P.perk === "bite" && lastChop && time - lastChop.at < 2.5 && !lastChop.t.dying && !lastChop.t.gone) {
+            const t = lastChop.t, a = Math.atan2(p.x - t.x, p.z - t.z) + p.side * 0.4;
+            tx = t.x + Math.sin(a) * (t.r + 0.5); tz = t.z + Math.cos(a) * (t.r + 0.5); biting = t;
+        }
+        let dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz);
+        if (d > 30) { p.x = tx; p.z = tz; dx = dz = d = 0; } // left far behind (a ferry, a teleport): it catches up at once
+        const want = d > 0.3 ? Math.min(11, d * 2.6) : 0;
+        p.sp += (want - p.sp) * Math.min(1, dt * 6);
+        if (d > 0.05) { const st = Math.min(d, p.sp * dt); p.x += dx / d * st; p.z += dz / d * st; }
+        const face = biting ? Math.atan2(biting.x - p.x, biting.z - p.z) : d > 0.3 ? Math.atan2(dx, dz) : player.yaw + Math.PI;
+        p.g.rotation.y += angDiff(face, p.g.rotation.y) * Math.min(1, dt * 8);
+        const gy = groundY(p.x, p.z);
+        p.y = p.P.fly ? gy + 1.7 + Math.sin(p.ph * 2.2) * 0.15 : gy;
+        // a biter lunges at the bark now and then
+        let lunge = 0;
+        if (biting && d < 0.6) {
+            p.biteT -= dt;
+            if (p.biteT <= 0) { p.biteT = 1.1; const dmg = Math.max(1, Math.round(axeDmg() * petValue(p.key) / 100)); hitTree(biting, dmg, false); p.hop = 1; }
+        }
+        if (p.hop > 0) { p.hop = Math.max(0, p.hop - dt * 4); lunge = Math.sin(p.hop * Math.PI) * 0.35; }
+        p.g.position.set(p.x + Math.sin(p.g.rotation.y) * lunge, p.y + (p.P.fly ? 0 : Math.abs(Math.sin(p.ph * 9)) * 0.04 * Math.min(1, p.sp / 3)), p.z + Math.cos(p.g.rotation.y) * lunge);
+        // its legs, wings, tail and blinking, the way the wild ones move
+        const R = p.g.userData.rig;
+        if (R) { p.yOff = 0; animRig(p, p.sp, dt); if (R.wings2) flap2(R, p.ph * (p.P.fly ? 12 : 1), p.P.fly ? 0.6 : 0, 0.1, p.P.fly ? 0 : 1); }
+        else if (p.g.userData.frog) { const F = p.g.userData.frog; F.hind.forEach(h => (h.rotation.x = p.sp > 0.5 ? Math.sin(p.ph * 10) * 0.6 : 0)); }
+        else if (p.g.userData.crab) { const C = p.g.userData.crab; C.legs.forEach(L => (L.p.rotation.z = Math.sin(p.ph * 14 + L.ph) * 0.3 * Math.min(1, p.sp))); }
+        if (p.g.userData.aura) p.g.userData.aura.material.opacity = 0.1 + Math.sin(p.ph * 3) * 0.05;
+    }
+}
+spawnPets();
+
+// =====================================================================
+// 2.0.0: THE PUBLIC SERVER. "Join public server" on the main menu connects to the Tree Sim 4 server
+// (server/worker.js, on Cloudflare). Players on the same island see each other walk, swing and lead their
+// pets, with their names over their heads. T chats, holding Tab lists who's on. Everyone's progress stays their own.
+// =====================================================================
+const MP_SERVER = "wss://treesim4-server.jacksongamer25.workers.dev/play"; // server/worker.js, deployed with npx wrangler deploy
+const mpUrl = () => { try { return localStorage.getItem("ts4_server") || MP_SERVER; } catch (e) { return MP_SERVER; } };
+const mpHttp = () => mpUrl().replace(/^ws/, "http").replace(/\/play$/, "");
+const mp = { ws: null, on: false, connecting: false, id: "", name: "", others: new Map(), sendT: 0, last: "", lastT: 0, retry: 0, manual: true, chat: [], typing: false, admin: false };
+const MP_HATS = ["hood", "cap", "beanie", "bandana", "straw", "top", "helmet"];
+const MP_SHIRTS = [0x2a6ad0, 0xd04a3a, 0x3aa05a, 0xd0a02a, 0x7a3ad0, 0x2ab0b0, 0xe07a2a, 0x5a5a6a, 0xc83a8a, 0x8a6a3a];
+const MP_SKINS = [0xf2c8a0, 0xe0b090, 0xc89070, 0xa0704a, 0x7a5232, 0x5a3a22];
+// everyone gets a look from their name: the same name always looks the same
+function mpLook(name) {
+    let h = 7; for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const pick = (a, s) => a[(h >>> s) % a.length];
+    return { skin: pick(MP_SKINS, 3), shirt: pick(MP_SHIRTS, 7), pants: pick([0x202830, 0x3a2a1a, 0x2a3a2a, 0x1a1a1e], 11), hat: pick(MP_HATS, 13), hatCol: pick(MP_SHIRTS, 17) };
+}
+const mpIsleName = n => (customIsle(n) ? customIsle(n).name : ["", "Pine Island", "the Highland Isle", "Mooncap Isle", "Ashfall Isle", "the Archipelago", "the Iceberg"][n] || "island " + n);
+function mpSavedName() { try { return localStorage.getItem("ts4_mp_name") || ""; } catch (e) { return ""; } }
+function mpState() {
+    const eq = save.pets.eq.slice(0, 3);
+    return { x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, pitch: player.pitch, sw: swing.t < 0.55 ? 1 : 0, axe: save.equipped, isle,
+        pets: eq, shiny: eq.map(k => (save.pets.own[k] && save.pets.own[k].shiny ? 1 : 0)) };
+}
+function mpSend(o) { if (mp.ws && mp.ws.readyState === 1) try { mp.ws.send(JSON.stringify(o)); } catch (e) { /* it's closing */ } }
+function mpConnect(name) {
+    if (!mpUrl()) { toast("The public server isn't online yet.", "bad"); return; }
+    if (mp.ws) { mp.manual = true; try { mp.ws.close(); } catch (e) { /* gone */ } }
+    mp.name = name; mp.manual = false; mp.connecting = true; mp.admin = false; updateMpHud();
+    let ws;
+    try { ws = new WebSocket(mpUrl()); } catch (e) { mp.connecting = false; toast("Couldn't reach the public server.", "bad"); updateMpHud(); return; }
+    mp.ws = ws;
+    ws.onopen = () => { if (mp.ws !== ws) return; ws.send(JSON.stringify({ t: "hi", name, look: mpLook(name), st: mpState() })); };
+    ws.onmessage = e => { if (mp.ws !== ws) return; let m; try { m = JSON.parse(e.data); } catch (err) { return; } mpMsg(m); };
+    ws.onclose = e => {
+        if (mp.ws !== ws) return;
+        const was = mp.on; mp.on = false; mp.connecting = false; mp.ws = null; mpClearOthers(); updateMpHud();
+        if (mp.manual) return;
+        if (e.code === 1013) { toast("The public server is full. Try again in a bit.", "bad"); return; }
+        if (e.code === 4001 || e.code === 4003 || e.code === 4004) { mp.manual = true; mpLine("", e.code === 4003 ? "You're banned from the public server." : e.code === 4001 ? "The admin kicked you from the public server." : "Disconnected."); return; }
+        if (mp.retry < 5) {
+            mp.retry++;
+            if (mp.retry === 1) toast(was ? "Lost the public server. Reconnecting..." : "Couldn't reach the public server. Trying again...", "bad");
+            setTimeout(() => { if (!mp.manual && !mp.ws) mpConnect(mp.name); }, 1500 * mp.retry);
+        } else toast("Couldn't reach the public server. You're playing offline.", "bad");
+    };
+}
+function mpLeave() {
+    mp.manual = true;
+    if (mp.ws) try { mp.ws.close(1000, "leaving"); } catch (e) { /* gone */ }
+    mp.ws = null; mp.on = false; mp.connecting = false; mpClearOthers(); updateMpHud();
+    mpLine("", "You left the public server.");
+}
+function mpMsg(m) {
+    if (m.t === "welcome") {
+        mp.on = true; mp.connecting = false; mp.retry = 0; mp.id = m.id; mp.last = "";
+        mpClearOthers();
+        for (const p of m.players || []) mpAdd(p);
+        mpLine("", m.motd || "Connected.");
+        toast(`Connected to the public server · ${mp.others.size + 1} online`, "good");
+        sfx(660, 0.12, "triangle", 0.08, 1.4); setTimeout(() => sfx(990, 0.18, "triangle", 0.08, 1.4), 110);
+        if (m.news) mpAnnounce(m.news.text, true);
+    } else if (m.t === "join") { mpAdd(m); mpLine("", `${m.name} joined${m.isle === isle ? "" : " (on " + mpIsleName(m.isle) + ")"}`); }
+    else if (m.t === "announce") mpAnnounce(m.text);
+    else if (m.t === "sys") mpLine("", m.text);
+    else if (m.t === "kicked" || m.t === "banned") mp.manual = true; // the close that follows says why, and no reconnecting
+    else if (m.t === "adminTag") { if (m.id === mp.id) mp.admin = true; else { const o = mp.others.get(m.id); if (o) mpTagAdmin(o); } }
+    else if (m.t === "leave") { const o = mp.others.get(m.id); if (o) { mpLine("", `${o.name} left`); mpRemove(m.id); } }
+    else if (m.t === "st") { const o = mp.others.get(m.id); if (o) mpApply(o, m); }
+    else if (m.t === "chat") { mpLine(m.name, m.text, m.id === mp.id, m.admin); if (m.id !== mp.id) sfx(880, 0.05, "triangle", 0.04, 1.2); }
+    else if (m.t === "full") toast(`The public server is full (${m.max} players).`, "bad");
+    updateMpHud();
+}
+// another player: a person with their name over their head, their axe in hand, their pets at their heels
+function mpAdd(p) {
+    if (p.id === mp.id || mp.others.has(p.id)) return;
+    const L = p.look || mpLook(p.name), h = makeHumanoid({ face: "clerk", skin: L.skin, shirt: L.shirt, pants: L.pants, hat: L.hat || "", hatCol: L.hatCol });
+    h.g.visible = false; scene.add(h.g);
+    const lb = label(p.name, "#8aff9a", 2.4, 0.6); lb.maxD = 70; lb.isle = -1;
+    const o = { id: p.id, name: p.name, isle: p.isle || 1, h, lb, x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, yaw: 0, tyaw: 0, pitch: 0, sw: 0, swT: 1, axe: -1, axeM: null, pets: [], petKey: "", walk: 0, sp: 0, seen: false };
+    mp.others.set(p.id, o);
+    if (p.admin) mpTagAdmin(o);
+    if (p.st) mpApply(o, p.st);
+}
+// the admin: a gold name with [ADMIN] over their head
+function mpTagAdmin(o) { o.admin = true; o.lb.el.textContent = "[ADMIN] " + o.name; o.lb.el.style.color = o.lb.el.style.borderColor = "#ffd040"; }
+// an announcement from the admin: a banner at the top for a while, and a line in the chat
+let mpAnnT = 0;
+function mpAnnounce(text, quiet) {
+    $("mpAnnText").textContent = text; $("mpAnnounce").classList.add("show");
+    clearTimeout(mpAnnT); mpAnnT = setTimeout(() => $("mpAnnounce").classList.remove("show"), quiet ? 6000 : 10000);
+    const line = document.createElement("div"); line.className = "mpl ann"; line.textContent = "📢 " + text;
+    const box = $("mpChat"); box.appendChild(line); while (box.children.length > 8) box.firstChild.remove();
+    setTimeout(() => line.classList.add("old"), 20000);
+    if (!quiet) { sfx(520, 0.16, "triangle", 0.1, 1.5); setTimeout(() => sfx(780, 0.16, "triangle", 0.1, 1.5), 140); setTimeout(() => sfx(1040, 0.26, "triangle", 0.1, 1.5), 280); }
+}
+function mpApply(o, s) {
+    o.isle = s.isle || o.isle; o.tx = s.x; o.ty = s.y; o.tz = s.z; o.tyaw = s.yaw; o.pitch = s.pitch || 0;
+    if (s.sw && !o.sw) o.swT = 0; o.sw = s.sw;
+    if (!o.seen) { o.seen = true; o.x = o.tx; o.y = o.ty; o.z = o.tz; o.yaw = o.tyaw; }
+    if (s.axe !== o.axe && AXES[s.axe]) { // their axe, in their right hand
+        if (o.axeM) o.h.armR.remove(o.axeM);
+        o.axeM = axeModel(s.axe); o.axeM.scale.setScalar(0.62); o.axeM.rotation.set(Math.PI / 2, 0, 0); o.axeM.position.set(0, -0.62, 0.22);
+        o.h.armR.add(o.axeM); o.axe = s.axe;
+    }
+    const key = (s.pets || []).join(",") + "|" + (s.shiny || []).join(",");
+    if (key !== o.petKey) { o.petKey = key; mpPets(o, s.pets || [], s.shiny || []); }
+}
+function mpPets(o, keys, shiny) {
+    for (const p of o.pets) scene.remove(p.g);
+    o.pets = [];
+    keys.forEach((k, i) => {
+        const P = PETS[k]; if (!P) return;
+        const g = P.make(); g.updateMatrixWorld(true); icBox.setFromObject(g); icBox.getSize(icS);
+        g.scale.multiplyScalar(P.h / Math.max(icS.y, 0.05));
+        if (shiny[i]) { const aura = new THREE.Mesh(SPH, aglow(0xffe070, 0.12)); aura.scale.setScalar(Math.max(icS.x, icS.y, icS.z) * 0.6); aura.position.y = icS.y * 0.5; g.add(aura); }
+        g.visible = false; scene.add(g);
+        o.pets.push({ key: k, P, g, side: [-1.2, 1.2, 0][i], back: [1.2, 1.2, 2.2][i], x: o.x, z: o.z, y: o.y - 1.7, ph: Math.random() * 6, sp: 0, yOff: 0 });
+    });
+}
+function mpRemove(id) {
+    const o = mp.others.get(id); if (!o) return;
+    scene.remove(o.h.g); for (const p of o.pets) scene.remove(p.g);
+    const i = labelList.indexOf(o.lb); if (i >= 0) labelList.splice(i, 1); o.lb.el.remove();
+    mp.others.delete(id);
+}
+function mpClearOthers() { for (const id of [...mp.others.keys()]) mpRemove(id); }
+function mpTick(dt) {
+    if (!mp.on) return;
+    // tell the server where you are, 8 times a second while you move (and every 2 s anyway)
+    mp.sendT -= dt; mp.lastT += dt;
+    if (mp.sendT <= 0 && state === "playing") {
+        mp.sendT = 0.125;
+        const s = mpState(), k = [s.x.toFixed(2), s.y.toFixed(2), s.z.toFixed(2), s.yaw.toFixed(2), s.pitch.toFixed(2), s.sw, s.axe, s.isle, s.pets.join(",")].join("|");
+        if (k !== mp.last || mp.lastT > 2) { mp.last = k; mp.lastT = 0; mpSend({ t: "st", ...s }); }
+    }
+    const here = state === "playing" || state === "paused";
+    for (const o of mp.others.values()) {
+        const vis = here && o.seen && o.isle === isle;
+        o.h.g.visible = vis; o.lb.isle = vis ? isle : -1;
+        for (const p of o.pets) p.g.visible = vis;
+        if (!vis) continue;
+        // glide towards where they really are (their updates come 8 times a second)
+        const k = 1 - Math.exp(-dt * 12), ox = o.x, oz = o.z;
+        if (Math.hypot(o.tx - o.x, o.tz - o.z) > 25) { o.x = o.tx; o.z = o.tz; o.y = o.ty; } // they jumped (a ferry, a teleport)
+        o.x += (o.tx - o.x) * k; o.y += (o.ty - o.y) * k; o.z += (o.tz - o.z) * k; o.yaw += angDiff(o.tyaw, o.yaw) * k;
+        o.sp += (Math.hypot(o.x - ox, o.z - oz) / Math.max(dt, 1e-3) - o.sp) * Math.min(1, dt * 8);
+        const H = o.h; H.g.position.set(o.x, o.y - 1.7, o.z); H.g.rotation.y = o.yaw + Math.PI;
+        // walking: arms swing and the body bobs; the head looks where they look
+        o.walk += dt * Math.min(o.sp, 9) * 1.6;
+        const sw = Math.min(1, o.sp / 3);
+        H.torso.position.y = 0.95 + Math.abs(Math.sin(o.walk)) * 0.05 * sw;
+        H.armL.rotation.x = Math.sin(o.walk) * 0.7 * sw;
+        H.head.rotation.x = -o.pitch * 0.6;
+        // their swing: up and over, then down hard
+        o.swT = Math.min(1, o.swT + dt / 0.36);
+        H.armR.rotation.x = o.swT < 1 ? (o.swT < 0.35 ? -2.6 * (o.swT / 0.35) : -2.6 + 3.3 * ((o.swT - 0.35) / 0.65)) : -Math.sin(o.walk) * 0.7 * sw - 0.35;
+        o.lb.position.set(o.x, o.y + 0.75, o.z);
+        // their pets
+        for (const p of o.pets) {
+            p.ph += dt;
+            const tx = o.x + Math.sin(o.yaw) * p.back - Math.cos(o.yaw) * p.side, tz = o.z + Math.cos(o.yaw) * p.back + Math.sin(o.yaw) * p.side;
+            let dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz);
+            if (d > 25) { p.x = tx; p.z = tz; d = 0; }
+            p.sp += ((d > 0.3 ? Math.min(11, d * 2.6) : 0) - p.sp) * Math.min(1, dt * 6);
+            if (d > 0.05) { const st = Math.min(d, p.sp * dt); p.x += dx / d * st; p.z += dz / d * st; }
+            const face = d > 0.3 ? Math.atan2(dx, dz) : o.yaw + Math.PI;
+            p.g.rotation.y += angDiff(face, p.g.rotation.y) * Math.min(1, dt * 8);
+            const gy = groundY(p.x, p.z);
+            p.g.position.set(p.x, p.P.fly ? gy + 1.7 + Math.sin(p.ph * 2.2) * 0.15 : gy, p.z);
+            const R = p.g.userData.rig;
+            if (R) { animRig(p, p.sp, dt); if (R.wings2) flap2(R, p.ph * (p.P.fly ? 12 : 1), p.P.fly ? 0.6 : 0, 0.1, p.P.fly ? 0 : 1); }
+        }
+    }
+    if (keys.Tab && !panel && mp.on) renderMpList();
+}
+// the chat: a few recent lines bottom left, fading; T to type, Enter to send, Esc to cancel
+function mpLine(name, text, mine, admin) {
+    const line = document.createElement("div");
+    line.className = "mpl" + (name ? "" : " sys") + (mine ? " mine" : "") + (admin ? " adm" : "");
+    if (name) { const b = document.createElement("b"); b.textContent = name + ":"; line.appendChild(b); line.appendChild(document.createTextNode(" " + text)); }
+    else line.textContent = text;
+    const box = $("mpChat"); box.appendChild(line);
+    while (box.children.length > 8) box.firstChild.remove();
+    setTimeout(() => line.classList.add("old"), 12000);
+}
+function mpOpenChat() {
+    if (!mp.on || mp.typing) return;
+    mp.typing = true;
+    for (const k in keys) keys[k] = false;
+    $("mpChat").classList.add("typing");
+    const inp = $("mpInput"); inp.value = ""; inp.classList.add("show");
+    if (document.pointerLockElement) document.exitPointerLock();
+    setTimeout(() => inp.focus(), 0);
+}
+function mpCloseChat(send) {
+    const inp = $("mpInput");
+    if (send && inp.value.trim()) mpSend({ t: "chat", text: inp.value.trim().slice(0, 140) });
+    mp.typing = false; inp.classList.remove("show"); inp.blur(); $("mpChat").classList.remove("typing");
+    if (state === "playing" && !panel) { try { lockPointer(); } catch (e) { /* click to re-lock */ } }
+}
+$("mpInput").addEventListener("keydown", e => {
+    if (e.code === "Enter" || e.code === "NumpadEnter") { e.preventDefault(); mpCloseChat(true); }
+    else if (e.code === "Escape") { e.preventDefault(); mpCloseChat(false); }
+    e.stopPropagation();
+});
+function renderMpList() {
+    const rows = [{ name: (mp.admin ? "[ADMIN] " : "") + mp.name + " (you)", isle }, ...[...mp.others.values()].map(o => ({ name: (o.admin ? "[ADMIN] " : "") + o.name, isle: o.isle }))];
+    const el = $("mpList");
+    el.innerHTML = `<h3>PUBLIC SERVER · ${rows.length} ONLINE</h3>`;
+    for (const r of rows) { const d = document.createElement("div"); d.className = r.isle === isle ? "here" : ""; const b = document.createElement("b"); b.textContent = r.name; const s = document.createElement("span"); s.textContent = mpIsleName(r.isle); d.append(b, s); el.appendChild(d); }
+    el.classList.add("show");
+}
+function updateMpHud() {
+    const b = $("mpBadge");
+    b.classList.toggle("show", mp.on || mp.connecting);
+    b.textContent = mp.on ? `ONLINE · ${mp.others.size + 1}` : mp.connecting ? "CONNECTING..." : "";
+    if ($("menuLeave")) $("menuLeave").style.display = mp.on || mp.connecting ? "" : "none";
+}
+// the main menu's button, its "N online" line, and the name box
+async function mpCheckOnline() {
+    const el = $("menuOnline"); if (!el) return;
+    $("menuJoin").disabled = !mpUrl();
+    if (!mpUrl()) { el.textContent = "coming soon"; return; }
+    el.textContent = "checking...";
+    const news = $("menuNews");
+    try {
+        const r = await fetch(mpHttp() + "/status", { cache: "no-store" }); const j = await r.json(); el.textContent = `${j.online} online now`;
+        news.textContent = j.news ? "📢 " + j.news.text : ""; news.classList.toggle("show", !!j.news);
+    } catch (e) { el.textContent = "can't reach the server"; news.classList.remove("show"); }
+}
+function mpShowJoin() {
+    $("mpJoin").classList.add("show");
+    const inp = $("mpName"); inp.value = mpSavedName() || `Woodcutter${Math.floor(1000 + Math.random() * 9000)}`;
+    setTimeout(() => { inp.focus(); inp.select(); }, 0);
+}
+function mpJoinGo() {
+    const name = $("mpName").value.replace(/[^A-Za-z0-9 _\-]/g, "").trim().slice(0, 16);
+    if (!name) { $("mpName").focus(); return; }
+    try { localStorage.setItem("ts4_mp_name", name); } catch (e) { /* fine */ }
+    $("mpJoin").classList.remove("show");
+    startPlaying();
+    mpConnect(name);
+}
+$("menuJoin").addEventListener("click", mpShowJoin);
+$("mpJoinGo").addEventListener("click", mpJoinGo);
+$("mpJoinX").addEventListener("click", () => $("mpJoin").classList.remove("show"));
+$("mpName").addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); mpJoinGo(); } else if (e.code === "Escape") $("mpJoin").classList.remove("show"); e.stopPropagation(); });
+$("menuLeave").addEventListener("click", () => mpLeave());
+setInterval(() => { if (mp.on) mpSend({ t: "ping", ts: Date.now() }); }, 20000); // keeps the connection open while you sit in a menu
+mpCheckOnline();
+updateMpHud();
+
 // ---------- loop ----------
 let last = performance.now();
 // one bad frame shouldn't freeze the whole game: report it and keep going
@@ -14624,11 +15191,14 @@ function frameBody(now) {
     let dt = real;
     if (hitstop > 0) { hitstop -= real; dt *= 0.08; }
     if (state === "playing") {
-        if (panel !== "inv" && panel !== "map") update(dt);
+        if (panel !== "inv" && panel !== "map") { update(dt); updatePets(dt); }
+        if (panel === "spin") spinTick(real);
+        mpTick(real);
         animateAxe();
         if (holdingGun()) animateGun(real);
         updateBars(real);
     } else if (state === "dead") {
+        mpTick(real);
         deadT += real;
         hurtEl.style.opacity = 0.55;
     } else if (state === "title") {
@@ -14673,6 +15243,8 @@ $("gfxPick").classList.remove("show");
 
 // debug/test handle (used by automated checks, harmless in play)
 if (DEBUG) window.__ts4 = {
+    mp: { mp, mpConnect, mpLeave, mpState, mpLook, mpCheckOnline, mpShowJoin, mpJoinGo, mpOpenChat, mpCloseChat, renderMpList, mpUrl, mpSend, mpAnnounce, mpIsleName },
+    pets: { PETS, CASES, RAR, PERKS, list: () => pets, openCase, startSpin, finishSpin, togglePet, spawnPets, petK, petAdd, petValue, casePrice, slyCart, placeDealer, rollPet, getSpin: () => spin },
     save, player, trees, camera, renderer, gfx: { GQ, FX, sunL, grass, TSU, MODERN, hemiL, skyDome }, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,
     docks: () => (CI() ? CI().DOCKS : isle === 6 ? DOCKS6 : []).map(D => ({ kind: D.kind, B: { x: D.B.x, z: D.B.z }, DIR: { x: D.DIR.x, z: D.DIR.z }, LEN: D.LEN })), // where this island's docks are, for walking tests
     get state() { return state; },

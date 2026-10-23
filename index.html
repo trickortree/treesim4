@@ -166,6 +166,68 @@
   .diceRow { display: flex; align-items: center; gap: 14px; } .diceRow span { font-size: 110px; line-height: 1; color: #f4ecd8; text-shadow: 0 4px 0 #5a3214; } .diceRow b { font: 900 54px Consolas; color: #ffd040; min-width: 70px; text-align: center; }
   .coinBig { width: 150px; height: 150px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 900 72px Consolas; color: #8a6a1a; background: radial-gradient(circle at 35% 30%, #ffe890, #d8a840 60%, #8a6a1a); border: 5px solid #b8862a; box-shadow: 0 6px 24px rgba(255,200,64,.35); }
   .coinBig.spin { animation: coinSpin .25s linear infinite; } @keyframes coinSpin { from { transform: rotateY(0); } to { transform: rotateY(360deg); } }
+  /* 2.0.0: the public server */
+  .menuJoinRow { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: -8px; }
+  #menuJoin.join { background: linear-gradient(180deg, #1f7a3e, #155028); border-color: #8aff9a; color: #eaffee; font-size: 18px; letter-spacing: 3px; padding: 12px 34px; }
+  #menuJoin:disabled { opacity: .45; cursor: default; filter: grayscale(.6); }
+  #menuOnline { font: 12px Consolas; letter-spacing: 1px; color: #8aff9a; opacity: .85; }
+  #mpJoin { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; background: rgba(5,2,12,.7); }
+  #mpJoin.show { display: flex; }
+  #mpJoin .mjBox { position: relative; width: min(460px, 92vw); padding: 26px 28px; border-radius: 14px; background: var(--bg); border: 1px solid #8aff9a; box-shadow: 0 20px 60px rgba(0,0,0,.6); text-align: center; }
+  #mpJoin h2 { margin: 0 0 8px; font: 800 20px "Segoe UI"; letter-spacing: 3px; color: #8aff9a; } #mpJoin p { font: 13px/1.5 "Segoe UI"; opacity: .8; margin: 0 0 16px; }
+  #mpJoin label { display: block; font: 800 11px Consolas; letter-spacing: 2px; opacity: .7; margin-bottom: 6px; }
+  #mpJoin input { width: 100%; box-sizing: border-box; padding: 11px 14px; border-radius: 8px; border: 1px solid rgba(138,255,154,.5); background: rgba(0,0,0,.35); color: #fff; font: 700 18px "Segoe UI"; text-align: center; outline: none; margin-bottom: 14px; }
+  #mpJoin #mpJoinGo { width: 100%; }
+  #mpChat { position: fixed; left: 18px; bottom: 150px; width: min(440px, 60vw); z-index: 12; display: flex; flex-direction: column; gap: 3px; pointer-events: none; }
+  .mpl { font: 14px "Segoe UI"; color: #fff; text-shadow: 0 1px 3px #000; background: rgba(0,0,0,.38); padding: 3px 9px; border-radius: 6px; transition: opacity 1s; overflow-wrap: anywhere; }
+  .mpl b { color: #8aff9a; } .mpl.mine b { color: #ffd040; } .mpl.sys { color: #bfe8c8; font-style: italic; }
+  .mpl.old { opacity: 0; } #mpChat.typing .mpl.old { opacity: .85; }
+  #mpInput { position: fixed; left: 18px; bottom: 112px; width: min(440px, 60vw); box-sizing: border-box; z-index: 13; display: none; padding: 9px 12px; border-radius: 8px; border: 1px solid #8aff9a; background: rgba(5,2,12,.85); color: #fff; font: 15px "Segoe UI"; outline: none; }
+  #mpInput.show { display: block; }
+  #mpList { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 25; display: none; min-width: 340px; max-height: 70vh; overflow: auto; padding: 16px 20px; border-radius: 12px; background: rgba(8,4,18,.9); border: 1px solid #8aff9a; }
+  #mpList.show { display: block; } #mpList h3 { margin: 0 0 10px; font: 800 14px "Segoe UI"; letter-spacing: 3px; color: #8aff9a; }
+  #mpList div { display: flex; justify-content: space-between; gap: 20px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.06); font: 14px "Segoe UI"; color: #c8ccd4; } #mpList div.here { color: #fff; } #mpList span { font: 12px Consolas; color: #aab0bc; }
+  #mpBadge { position: fixed; top: 14px; left: 50%; transform: translateX(-50%) translateY(34px); z-index: 12; display: none; padding: 4px 12px; border-radius: 999px; background: rgba(20,60,30,.75); border: 1px solid #8aff9a; color: #8aff9a; font: 800 11px Consolas; letter-spacing: 2px; pointer-events: none; }
+  #mpBadge.show { display: block; }
+  .mpl.adm b { color: #ffd040; } .mpl.adm b::before { content: "[ADMIN] "; color: #ff8a3a; } .mpl.ann { color: #ffe9a0; font-weight: 700; font-style: normal; background: rgba(90,50,0,.6); border-left: 3px solid #ffd040; }
+  #menuNews { display: none; max-width: min(520px, 90vw); text-align: center; font: 700 13px "Segoe UI"; color: #ffe9a0; background: rgba(90,50,0,.45); border: 1px solid #ffd04088; border-radius: 8px; padding: 6px 12px; overflow-wrap: anywhere; }
+  #menuNews.show { display: block; }
+  #mpAnnounce { position: fixed; top: 84px; left: 50%; transform: translate(-50%, -16px); z-index: 30; width: min(620px, 92vw); box-sizing: border-box; padding: 14px 22px 16px; border-radius: 14px; text-align: center;
+    background: linear-gradient(180deg, rgba(70,40,0,.94), rgba(40,20,0,.94)); border: 2px solid #ffd040; box-shadow: 0 0 40px rgba(255,200,60,.35), 0 16px 40px rgba(0,0,0,.6); opacity: 0; pointer-events: none; transition: opacity .35s, transform .35s; }
+  #mpAnnounce.show { opacity: 1; transform: translate(-50%, 0); }
+  #mpAnnounce h4 { margin: 0 0 6px; font: 900 12px "Segoe UI"; letter-spacing: 4px; color: #ffd040; } #mpAnnounce p { margin: 0; font: 700 19px/1.35 "Segoe UI"; color: #fff; text-shadow: 0 2px 4px #000; overflow-wrap: anywhere; }
+  /* 2.0.0: Sly's Black Market, opening a case, and your pets */
+  #panelMarket { width: min(860px, 95vw); border-color: rgba(138,255,154,.55); }
+  #panelMarket h2 span, #panelPets h2 span { font-size: 13px; letter-spacing: 2px; color: #8aff9a; opacity: .85; margin-left: 10px; }
+  .msay { font: italic 14px/1.5 "Segoe UI"; opacity: .85; margin: -6px 0 14px; }
+  .mcases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .mcase { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 12px 12px; border-radius: 12px; background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border: 1px solid var(--c); text-align: center; }
+  .mcase img { width: 96px; height: 96px; } .mcase b { font: 800 16px "Segoe UI"; color: var(--c); letter-spacing: 1px; } .mcase small { font: 12px/1.4 "Segoe UI"; color: #c4c0cc; min-height: 34px; }
+  .modds { display: flex; width: 100%; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 4px; } .modds i { display: block; height: 100%; }
+  .moddt { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 8px; font: 11px Consolas; }
+  .mcase button, .sbtns button, .mfoot button { margin-top: 6px; width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #8aff9a; background: rgba(138,255,154,.14); color: #fff; font: 800 13px "Segoe UI"; letter-spacing: 1px; cursor: pointer; }
+  .mcase button:hover:not(:disabled), .sbtns button:hover:not(:disabled), .mfoot button:hover { background: rgba(138,255,154,.32); } .mcase button:disabled, .sbtns button:disabled { opacity: .35; cursor: default; }
+  .mfoot { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; font: 12px Consolas; opacity: .9; } .mfoot b { color: #8aff9a; } .mfoot button { width: auto; margin: 0; padding: 7px 14px; }
+  #panelSpin { width: min(820px, 95vw); text-align: center; border-color: rgba(255,208,64,.6); }
+  #spinWin { position: relative; height: 150px; overflow: hidden; border-radius: 10px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.12); }
+  #spinStrip { position: absolute; left: 0; top: 10px; display: flex; will-change: transform; }
+  .scard { width: 114px; height: 128px; margin-right: 10px; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-radius: 10px; background: rgba(255,255,255,.05); border-bottom: 4px solid var(--c); box-shadow: inset 0 -30px 40px -30px var(--c); }
+  .scard img { width: 80px; height: 80px; } .scard b { font: 700 12px "Segoe UI"; color: var(--c); }
+  .scard.shiny, .petc.shiny, .sres.shiny { box-shadow: inset 0 -30px 40px -30px var(--c), 0 0 18px rgba(255,224,112,.55); }
+  .spinMark { position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: #ffd040; box-shadow: 0 0 12px #ffd040; }
+  #spinResult { opacity: 0; transform: translateY(8px); transition: opacity .3s, transform .3s; min-height: 10px; } #spinResult.show { opacity: 1; transform: none; }
+  .sres { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 16px auto 4px; padding: 12px 20px; max-width: 560px; border-radius: 12px; border: 1px solid var(--c); background: rgba(255,255,255,.04); text-align: left; color: #ffd040; }
+  .sres img { width: 110px; height: 110px; } .sres em { display: block; font: 800 12px Consolas; letter-spacing: 3px; color: var(--c); font-style: normal; }
+  .sres b { display: block; font: 800 24px "Segoe UI"; color: #fff; } .sres small { display: block; font: 13px "Segoe UI"; opacity: .85; color: #fff; margin: 2px 0 4px; } .sres strong { display: block; font: 800 13px Consolas; color: #8aff9a; letter-spacing: 1px; }
+  .sbtns { display: flex; gap: 10px; justify-content: center; margin-top: 10px; } .sbtns button { width: auto; padding: 9px 18px; }
+  #panelPets { width: min(900px, 95vw); max-height: 88vh; overflow: auto; border-color: rgba(138,255,154,.55); }
+  .psum { font: 13px "Segoe UI"; color: #8aff9a; margin: -6px 0 12px; min-height: 18px; }
+  .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .petc { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 8px; border-radius: 10px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-bottom: 4px solid var(--c); cursor: pointer; text-align: center; }
+  .petc:hover { background: rgba(255,255,255,.1); } .petc.on { border-color: #8aff9a; background: rgba(138,255,154,.1); }
+  .petc img { width: 76px; height: 76px; } .petc b { font: 700 13px "Segoe UI"; color: var(--c); } .petc span { color: #ffd040; font-size: 13px; letter-spacing: 1px; } .petc span i { font-style: normal; opacity: .2; }
+  .petc small { font: 11px/1.35 "Segoe UI"; opacity: .8; } .petc em { position: absolute; top: 6px; right: 6px; font: 800 9px Consolas; letter-spacing: 1px; color: #0a1a0e; background: #8aff9a; border-radius: 4px; padding: 2px 5px; font-style: normal; }
+  .petc.locked { cursor: default; opacity: .45; } .petq { width: 76px; height: 76px; display: flex; align-items: center; justify-content: center; font: 900 40px Consolas; color: var(--c); }
   /* a Studio island's shops */
   #panelCShop { width: min(640px, 94vw); max-height: 86vh; overflow: auto; }
   #panelCShop h2 { padding-right: 90px; }
@@ -563,6 +625,27 @@
   <div class="foot" id="shFoot"></div>
 </div>
 
+<div id="panelMarket" class="panel">
+  <button class="xbtn" data-close>✕ LEAVE <kbd>F</kbd></button>
+  <h2>THE BLACK MARKET <span>SLY'S CASES</span></h2>
+  <div id="marketSay" class="msay"></div>
+  <div id="marketBody" class="mcases"></div>
+  <div class="mfoot"><span id="marketFoot"></span><button id="marketPets">MY PETS <kbd>P</kbd></button></div>
+</div>
+<div id="panelSpin" class="panel">
+  <h2 id="spinTitle">CASE</h2>
+  <div id="spinWin"><div id="spinStrip"></div><div class="spinMark"></div></div>
+  <div id="spinResult"></div>
+  <div class="foot">Space skips the spin</div>
+</div>
+<div id="panelPets" class="panel">
+  <button class="xbtn" data-close>✕ CLOSE <kbd>P</kbd></button>
+  <h2>YOUR PETS <span id="petsHead"></span></h2>
+  <div id="petsSum" class="psum"></div>
+  <div id="petsBody" class="pgrid"></div>
+  <div class="foot">Click a pet to bring it along or send it home · get more from Sly's Black Market, beside every enchanting table</div>
+</div>
+
 <div id="updateModal" class="umodal">
   <div class="ubox">
     <div class="utitle" id="uTitle">UPDATE AVAILABLE</div>
@@ -623,8 +706,9 @@
   <div id="menuHead"></div>
   <div id="menuStats"></div>
   <button id="menuBtn" class="btn">PLAY</button>
+  <div class="menuJoinRow"><button id="menuJoin" class="btn join">JOIN PUBLIC SERVER</button><small id="menuOnline"></small><div id="menuNews"></div></div>
   <div id="menuControls"></div>
-  <div class="menuRow"><button id="menuSettings" class="btn ghost">SETTINGS</button><button id="menuQuit" class="btn ghost">QUIT</button></div>
+  <div class="menuRow"><button id="menuLeave" class="btn ghost" style="display:none">LEAVE SERVER</button><button id="menuSettings" class="btn ghost">SETTINGS</button><button id="menuQuit" class="btn ghost">QUIT</button></div>
   <div class="ver" id="ver">TREE CHOP STUDIOS</div>
 </div>
 
@@ -636,6 +720,13 @@
     <div class="sdanger"><h4>DANGER ZONE</h4><p>Deletes your save: cash, islands, rebirths, axes, everything. You start over on Pine Island. Your settings stay.</p><button id="resetBtn">RESET PROGRESS</button></div>
   </div>
 </div>
+
+<div id="mpJoin"><div class="mjBox"><button class="xbtn" id="mpJoinX">✕</button><h2>JOIN THE PUBLIC SERVER</h2><p>Other players on your island will see you, your axe and your pets. Your progress stays your own.</p><label>YOUR NAME</label><input id="mpName" maxlength="16" spellcheck="false" autocomplete="off"><button id="mpJoinGo" class="btn">JOIN</button></div></div>
+<div id="mpChat"></div>
+<input id="mpInput" maxlength="140" placeholder="Say something... (Enter to send, Esc to cancel)" spellcheck="false" autocomplete="off">
+<div id="mpList"></div>
+<div id="mpBadge"></div>
+<div id="mpAnnounce"><h4>📢 ANNOUNCEMENT</h4><p id="mpAnnText"></p></div>
 
 <div id="death"><h1>YOU DIED</h1><div id="deathLost"></div><small>click or press space to wake up in the safehouse</small></div>
 

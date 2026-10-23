@@ -41,6 +41,13 @@ const css = `
 .dvFoot .dvB { padding: 12px 14px; } .dvApply { flex: 1; font: 900 15px "Segoe UI" !important; letter-spacing: 5px !important; }
 .dvApply:disabled { opacity: .35; cursor: default; color: #8a7aa8 !important; border-color: #44365f !important; }
 .dvApply:not(:disabled) { background: linear-gradient(#ffd040, #ffb020); color: #1a0e00; border-color: #ffd040; }
+.dvCard.dvAdm { border-color: #ffd04066; background: #221830; }
+.dvText { width: 100%; background: #0e0818; color: #fff; border: 1px solid #3a2c55; border-radius: 8px; padding: 8px 10px; font: 14px "Segoe UI"; outline: none; margin-bottom: 7px; user-select: text; }
+.dvText:focus { border-color: #ffd040; }
+.dvAdRow { display: flex; align-items: center; gap: 6px; background: #261c3a; border-radius: 9px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
+.dvAdRow b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .dvAdRow b.adm { color: #ffd040; }
+.dvAdRow span { font: 11px Consolas; color: #a89cc4; white-space: nowrap; } .dvAdRow .dvB { padding: 4px 8px; font-size: 11px; }
+.dvNews { font: 600 12px "Segoe UI"; color: #ffe9a0; background: #3a2a10; border-left: 3px solid #ffd040; border-radius: 6px; padding: 6px 9px; margin-bottom: 8px; overflow-wrap: anywhere; }
 `;
 document.head.appendChild(Object.assign(document.createElement("style"), { textContent: css }));
 
@@ -63,6 +70,22 @@ el.id = "devPanel";
 el.innerHTML = `
   <div class="dvHead"><div class="dvTitle">TREESIM4 DEV</div><div class="dvStatus"><span class="dvDot" id="dvDot"></span><span id="dvStat"></span><button class="dvX" data-close id="dvClose">✕</button></div></div>
   <div class="dvBody">
+    <div class="dvCard dvAdm">
+      <div class="dvH">ADMIN · PUBLIC SERVER <small id="dvAdStat"></small></div>
+      <div id="dvAdNoKey" style="display:none"><input class="dvText" id="dvAdKey" type="password" placeholder="Paste your admin key (from admin.key.js on your main PC)" spellcheck="false" autocomplete="off"><div class="dvBtns"><button class="dvB" id="dvAdKeySave">Save key on this PC</button></div></div>
+      <div id="dvAdBox">
+        <div id="dvAdNews"></div>
+        <input class="dvText" id="dvAnn" maxlength="200" placeholder="Announcement everyone on the server sees..." spellcheck="true" autocomplete="off">
+        <div class="dvBtns" style="margin-bottom:10px"><button class="dvB on" id="dvAnnGo">📢 Announce</button><button class="dvB" id="dvAnnClear">Clear announcement</button></div>
+        <input class="dvText" id="dvMotd" maxlength="200" placeholder="Message of the day (empty = the default)" spellcheck="true" autocomplete="off">
+        <div class="dvBtns" style="margin-bottom:10px"><button class="dvB" id="dvMotdGo">Set message of the day</button></div>
+        <div class="dvH" style="margin:4px 0 7px">PLAYERS <small id="dvAdCount"></small></div>
+        <div id="dvAdPlayers"></div>
+        <div class="dvH" style="margin:10px 0 7px">BANS <small><button class="dvB warn" id="dvUnbanAll" style="padding:3px 8px">lift every ban</button></small></div>
+        <div id="dvAdBans"></div>
+      </div>
+      <div class="dvHint">only you have the key: it's in admin.key.js (git ignores it) and on the server as ADMIN_KEY</div>
+    </div>
     <div class="dvCard">
       <div class="dvH">CASH</div>
       <div class="dvRow"><label>Money</label><input class="dvIn money" id="dvMoney" spellcheck="false"></div>
@@ -174,7 +197,7 @@ function status() {
     const playing = T.state === "playing";
     $("dvDot").classList.toggle("off", !playing);
     const h = T.hour, hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
-    $("dvStat").textContent = `${ISLE_NAMES[T.getIsle()]} · day ${S().day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}${playing ? "" : " · " + T.state}`;
+    $("dvStat").textContent = `${ISLE_NAMES[T.getIsle()] || T.mp.mpIsleName(T.getIsle())} · day ${S().day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}${playing ? "" : " · " + T.state}`;
     $("dvWorld").textContent = `${T.wx.type}${T.isBlood() ? " · BLOOD MOON" : ""}`;
     for (const b of el.querySelectorAll("[data-isle]")) b.classList.toggle("on", +b.dataset.isle === T.getIsle());
     for (const b of el.querySelectorAll("[data-speed]")) b.classList.toggle("on", +b.dataset.speed === T.getSpeed());
@@ -200,6 +223,57 @@ function buildGo() {
 }
 function teleport(x, z, faceX = 0, faceZ = 0) { T.setPos(x, z, Math.atan2(-(faceX - x), -(faceZ - z)), 0); T.player.vel.set(0, 0, 0); }
 
+// ---------- admin: your own line to the public server (server/worker.js checks the key on every command) ----------
+let KEY_FILE = "";
+try { KEY_FILE = (await import("./admin.key.js")).default || ""; } catch (e) { /* no admin.key.js on this PC: paste the key instead */ }
+const adKey = () => { if (KEY_FILE) return KEY_FILE; try { return localStorage.getItem("ts4_admin_key") || ""; } catch (e) { return ""; } };
+const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", news: null, tagged: null, armed: "" };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function adOpen() {
+    if (!adKey() || (AD.ws && AD.ws.readyState <= 1)) return;
+    let ws; try { ws = new WebSocket(T.mp.mpUrl()); } catch (e) { return; }
+    AD.ws = ws; AD.err = "";
+    ws.onopen = () => adSend("list");
+    ws.onmessage = e => {
+        let m; try { m = JSON.parse(e.data); } catch (err) { return; }
+        if (m.t === "adminOk") { Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, news: m.news }); if (m.text) say(m.text); drawAdmin(); }
+        else if (m.t === "adminErr") { AD.ok = false; AD.err = m.text; say(m.text, "bad"); drawAdmin(); }
+    };
+    ws.onclose = () => { if (AD.ws === ws) { AD.ws = null; AD.ok = false; drawAdmin(); } };
+}
+function adSend(op, o = {}) {
+    if (AD.ws && AD.ws.readyState === 1) AD.ws.send(JSON.stringify({ t: "admin", key: adKey(), op, ...o }));
+    else adOpen();
+}
+function drawAdmin() {
+    const has = !!adKey();
+    $("dvAdNoKey").style.display = has ? "none" : ""; $("dvAdBox").style.display = has ? "" : "none";
+    $("dvAdStat").textContent = !has ? "no key on this PC" : AD.err ? AD.err : AD.ok ? `connected · ${AD.players.length} online` : AD.ws ? "connecting..." : "offline";
+    if (!has) return;
+    $("dvAdNews").innerHTML = AD.news ? `<div class="dvNews">📢 showing now: ${esc(AD.news.text)}</div>` : "";
+    $("dvMotd").placeholder = "Message of the day: " + (AD.motd || "the default");
+    $("dvAdCount").textContent = AD.players.length ? "" : "nobody's on";
+    const me = T.mp.mp, here = T.getIsle();
+    $("dvAdPlayers").innerHTML = AD.players.map(p => `<div class="dvAdRow"><b class="${p.admin ? "adm" : ""}">${p.admin ? "[ADMIN] " : ""}${esc(p.name)}${me.on && p.id === me.id ? " (you)" : ""}</b><span>${esc(T.mp.mpIsleName(p.isle))}</span>`
+        + (me.on && p.id === me.id ? "" : `<button class="dvB" data-ad="goto" data-id="${esc(p.id)}" ${me.on && p.isle === here ? "" : "disabled style=\"opacity:.35\""}>Go to</button><button class="dvB" data-ad="mute" data-id="${esc(p.id)}">${p.muted ? "Unmute" : "Mute"}</button><button class="dvB warn" data-ad="kick" data-id="${esc(p.id)}">Kick</button><button class="dvB warn" data-ad="ban" data-id="${esc(p.id)}">${AD.armed === p.id ? "Sure?" : "Ban"}</button>`) + `</div>`).join("");
+    $("dvAdBans").innerHTML = AD.bans.length ? AD.bans.map(b => `<div class="dvAdRow"><b>${esc(b.name)}</b><span>${new Date(b.at).toLocaleDateString()}</span><button class="dvB" data-ad="unban" data-k="${esc(b.k)}">Unban</button></div>`).join("") : `<div class="dvHint" style="margin:0 0 4px">no bans</div>`;
+    $("dvUnbanAll").style.display = AD.bans.length ? "" : "none";
+}
+function adAction(d, b) {
+    if (d.ad === "goto") { const p = AD.players.find(q => q.id === d.id); if (p) { teleport(p.x + 2.5, p.z, p.x, p.z); say("next to " + p.name); } return; }
+    if (d.ad === "ban" && AD.armed !== d.id) { AD.armed = d.id; drawAdmin(); setTimeout(() => { if (AD.armed === d.id) { AD.armed = ""; drawAdmin(); } }, 3000); return; }
+    AD.armed = "";
+    if (d.ad === "unban") adSend("unban", { k: d.k });
+    else adSend(d.ad, { id: d.id });
+}
+// your own player gets [ADMIN] over their head whenever you're on the server
+setInterval(() => {
+    const M = T.mp.mp;
+    if (adKey() && M.on && M.ws && AD.tagged !== M.ws) { AD.tagged = M.ws; T.mp.mpSend({ t: "admin", key: adKey(), op: "tag" }); }
+    if (el.classList.contains("show") && AD.ok) adSend("list");
+}, 3000);
+for (const [id, go] of [["dvAnn", "dvAnnGo"], ["dvMotd", "dvMotdGo"], ["dvAdKey", "dvAdKeySave"]]) $(id).addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); $(go).click(); } });
+
 // ---------- buttons ----------
 $("dvWx").innerHTML = ["clear", "cloudy", "rain", "storm", "fog"].map(w => `<button class="dvB" data-wx="${w}" style="padding:5px 8px">${w}</button>`).join("");
 el.addEventListener("click", e => {
@@ -217,8 +291,14 @@ el.addEventListener("click", e => {
     else if (d.hour) { T.setClock(+d.hour); say("time set"); }
     else if (d.wx) { T.setWeather(d.wx); }
     else if (d.speed) T.setSpeed(+d.speed);
+    else if (d.ad) adAction(d, b);
     else switch (b.id) {
         case "dvClose": show(false); break;
+        case "dvAnnGo": { const v = $("dvAnn").value.trim(); if (!v) { $("dvAnn").focus(); return; } adSend("announce", { text: v }); $("dvAnn").value = ""; break; }
+        case "dvAnnClear": adSend("clearNews"); break;
+        case "dvMotdGo": adSend("motd", { text: $("dvMotd").value.trim() }); $("dvMotd").value = ""; break;
+        case "dvUnbanAll": adSend("unban", { k: "*" }); break;
+        case "dvAdKeySave": { const v = $("dvAdKey").value.trim(); if (!v) return; try { localStorage.setItem("ts4_admin_key", v); } catch (e) { /* no storage */ } $("dvAdKey").value = ""; adOpen(); drawAdmin(); break; }
         case "dvApply": apply(); break;
         case "dvUndo": load(); say("edits thrown away", ""); break;
         case "dvMatAll": showAllMats = !showAllMats; load(); break;
@@ -301,7 +381,8 @@ el.addEventListener("click", e => {
 function show(on) {
     const was = el.classList.contains("show");
     el.classList.toggle("show", !!on);
-    if (on && !was) { load(); buildGo(); status(); }
+    if (on && !was) { load(); buildGo(); status(); adOpen(); drawAdmin(); }
+    if (!on && was && AD.ws) { const w = AD.ws; AD.ws = null; AD.ok = false; try { w.close(1000, "panel closed"); } catch (e) { /* gone */ } }
 }
 window.__ts4dev = { show, toggle() { show(!el.classList.contains("show")); } };
 if (T.panel === "dev") show(true);
