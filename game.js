@@ -4898,7 +4898,7 @@ function updateNpcs(dt, list = npcs) {
     for (const p of list) {
         p.g.getWorldPosition(p.wp || (p.wp = new THREE.Vector3()));
         const dx = player.pos.x - p.wp.x, dz = player.pos.z - p.wp.z, d = Math.hypot(dx, dz);
-        const want = d < 14 ? clamp(angDiff(Math.atan2(dx, dz), p.yaw), -1.0, 1.0) : 0;
+        const want = d < 14 ? clamp(angDiff(Math.atan2(dx, dz), p.yaw || 0), -1.0, 1.0) : 0;
         p.head.rotation.y += (want - p.head.rotation.y) * Math.min(1, 4 * dt);
         p.torso.scale.y = 1 + Math.sin(time * 2 + p.ph) * 0.015;
         if (p.kind === "smith") {
@@ -8926,7 +8926,7 @@ function inCasino() { return player.pos.x > 4500; }
 const SLOT_Z = [-6, -2.4, 1.2, 4.8, 8.4, 12];
 const ROUL = { x: CSX, z: 4 }, BJ = { x: CSX + 11, z: 3 }, WHEEL_AT = { x: CSX, z: 17.5 }, BAR = { x0: CSX + 14, z0: 8.5, z1: 16.5 };
 const csCircles = [{ x: ROUL.x, z: ROUL.z, r: 3.4 }, { x: BJ.x + 0.6, z: BJ.z, r: 3.1 }, { x: WHEEL_AT.x, z: 17, r: 2.4 }];
-for (const sx of [-1, 1]) for (const z of [-8, 13]) csCircles.push({ x: CSX + sx * 7, z, r: 0.75 });
+for (const sx of [-1, 1]) for (const z of [-8, 13]) csCircles.push({ x: CSX + sx * 7, z, r: 0.75, pillar: true });
 const casinoNpcs = [];
 let casinoBuilt = false, csIn = null, csMusicT = 0, csChord = 0;
 const slotMachines = [];
@@ -9003,11 +9003,17 @@ function buildCasinoHall() {
     const floorM = new THREE.MeshLambertMaterial({ map: carpetTex() }), floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorM); floor.rotation.x = -Math.PI / 2; floor.position.set(CSX, 0.01, cz); scene.add(floor);
     const wt = wallTex(), wallM = new THREE.MeshLambertMaterial({ map: wt });
     csSkinMats.push(["wall", wallM], ["floor", floorM]);
-    for (const [x, z, w, d, ry] of [[CSX, CS_Z0, W, 0, 0], [CS_X0, cz, D, 0, Math.PI / 2], [CS_X1, cz, D, 0, -Math.PI / 2]]) {
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, CS_H), wallM); m.position.set(x, CS_H / 2, z); m.rotation.y = ry; scene.add(m);
-    }
+    const wallAt = (w, x, z, ry, y = CS_H / 2, h = CS_H) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallM); m.position.set(x, y, z); m.rotation.y = ry; scene.add(m); };
+    wallAt(W, CSX, CS_Z0, 0);
     const wain = batch(darkWood), trimB = batch(gold);
-    for (const [x, z, sx, sz] of [[CSX, CS_Z0 + 0.15, W, 0.3], [CS_X0 + 0.15, cz, 0.3, D], [CS_X1 - 0.15, cz, 0.3, D]]) {
+    // the side walls, each with an arch near the entrance into its wing (the Hi-Lo Wing to the west, the Keno Lounge to the east)
+    const aLo = SIDE_ARCH_Z - SIDE_ARCH_HW, aHi = SIDE_ARCH_Z + SIDE_ARCH_HW, runs = [[CSX, CS_Z0 + 0.15, W, 0.3]];
+    for (const [x, ry, s] of [[CS_X0, Math.PI / 2, 1], [CS_X1, -Math.PI / 2, -1]]) {
+        for (const [a, b] of [[CS_Z0, aLo], [aHi, CS_Z1]]) { wallAt(b - a, x, (a + b) / 2, ry); runs.push([x + s * 0.15, (a + b) / 2, 0.3, b - a]); }
+        wallAt(SIDE_ARCH_HW * 2, x, SIDE_ARCH_Z, ry, (CS_H + ARCH_H) / 2, CS_H - ARCH_H);
+        trimB.add(BOX, x, ARCH_H / 2, aLo, 0, 0, 0, 0.7, ARCH_H, 0.3); trimB.add(BOX, x, ARCH_H / 2, aHi, 0, 0, 0, 0.7, ARCH_H, 0.3); trimB.add(BOX, x, ARCH_H, SIDE_ARCH_Z, 0, 0, 0, 0.7, 0.3, SIDE_ARCH_HW * 2 + 0.3);
+    }
+    for (const [x, z, sx, sz] of runs) {
         wain.add(BOX, x, 0.6, z, 0, 0, 0, sx, 1.2, sz);
         trimB.add(BOX, x, 1.22, z, 0, 0, 0, sx + 0.02, 0.08, sz + 0.06);
         trimB.add(BOX, x, CS_H - 0.5, z, 0, 0, 0, sx + 0.02, 0.12, sz + 0.06);
@@ -9016,7 +9022,8 @@ function buildCasinoHall() {
     for (let x = CS_X0 + 4; x < CS_X1; x += 6) trimB.add(BOX, x, CS_H - 0.1, cz, 0, 0, 0, 0.16, 0.16, D);
     for (let z = CS_Z0 + 4; z < CS_Z1; z += 6) trimB.add(BOX, CSX, CS_H - 0.1, z, 0, 0, 0, W, 0.16, 0.16);
     // marble pillars
-    for (const c of csCircles.slice(3)) { trimB.add(CYL8, c.x, 0.2, c.z, 0, 0, 0, 0.9, 0.4, 0.9); trimB.add(CYL8, c.x, CS_H - 0.3, c.z, 0, 0, 0, 0.85, 0.5, 0.85); const p = new THREE.Mesh(CYL8, marble); p.scale.set(0.6, CS_H, 0.6); p.position.set(c.x, CS_H / 2, c.z); scene.add(p); }
+    // only the four pillars: Hi-Lo and Keno added their own spots to csCircles in 1.8.0, and grew pillars through the table and the kiosk
+    for (const c of csCircles.filter(q => q.pillar)) { trimB.add(CYL8, c.x, 0.2, c.z, 0, 0, 0, 0.9, 0.4, 0.9); trimB.add(CYL8, c.x, CS_H - 0.3, c.z, 0, 0, 0, 0.85, 0.5, 0.85); const p = new THREE.Mesh(CYL8, marble); p.scale.set(0.6, CS_H, 0.6); p.position.set(c.x, CS_H / 2, c.z); scene.add(p); }
     // the doors you came in through, with a velvet rope path
     trimB.add(BOX, CSX, 2.2, CS_Z0 + 0.1, 0, 0, 0, 4.4, 4.4, 0.2);
     const doorM = new THREE.MeshBasicMaterial({ color: 0xffe0a0 });
@@ -9168,6 +9175,7 @@ function leaveCasino() {
     });
 }
 function clampCasino(p) {
+    if (p.z < CS_Z1 && clampSideWings(p)) return; // in the Hi-Lo Wing or the Keno Lounge, or going through an arch
     p.x = clamp(p.x, CS_X0 + 0.6, CS_X1 - 0.6); p.z = clamp(p.z, CS_Z0 + 0.6, WING_Z1 - 0.6);
     clampWing(p);
     if (p.x < CS_X0 + 3.0 && p.z > SLOT_Z[0] - 1.5 && p.z < SLOT_Z[5] + 1.5) p.x = CS_X0 + 3.0; // the slot machines
@@ -9190,6 +9198,8 @@ function casinoInteract(n) {
     if (wingInteract(n)) return;
     if (n.k === "chilo") { openCasino("hilo", ["Higher or lower, friend?", "Thirteen ranks. One guess."][Math.floor(Math.random() * 2)]); return; }
     if (n.k === "ckeno") { openCasino("keno", ["Pick five. Feel lucky.", "Ten balls. Your five numbers."][Math.floor(Math.random() * 2)]); return; }
+    const say = { cwar: ["High card takes it.", "Tie? Then it's war."], cbacc: ["Player, Banker or Tie?", "Nearest to nine. Place your bet."], cdice: ["Over, under, or lucky seven?", "Two dice. One call."], ccoin: ["Heads or tails?", "Double or nothing. Again?"] }[n.k];
+    if (say) { openCasino({ cwar: "war", cbacc: "bacc", cdice: "dice", ccoin: "coin" }[n.k], say[Math.floor(Math.random() * 2)]); return; }
     const pick = a => a[Math.floor(Math.random() * a.length)];
     if (n.k === "cslot") { CS.slot = n.i; openCasino("slots", pick(["Pull the lever, hotshot.", "Three sevens. That's all you need.", "This one's been running hot all night."])); }
     else if (n.k === "croul") openCasino("roulette", pick(["Place your bets.", "Red or black? Trust your gut.", "No more bets... after you bet."]));
@@ -9524,6 +9534,7 @@ function updateCasinoInside(dt) {
     if (panel === "casino") { const cc = $("csCash"); if (cc) cc.textContent = money(save.money); }
     if (!inCasino()) return;
     updateNpcs(dt, casinoNpcs.filter(p => !p.patron));
+    if (coin3D) coin3D.rotation.z += dt * (COIN.busy ? 14 : 0.8); // the Coin Flip coin: it turns, and spins fast while it's in the air
     for (const p of casinoNpcs) if (p.patron) p.torso.scale.y = 1 + Math.sin(time * 2 + p.ph) * 0.015;
     for (const s of csSigns) s.material.opacity = Math.random() < 0.006 ? 0.4 : 0.95;
     for (const L of csLights) L.intensity = L.userData.b * (0.96 + Math.random() * 0.08);
@@ -12994,11 +13005,121 @@ function drawMap6() {
     g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw); g.fillStyle = "#fff"; g.strokeStyle = "#000"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 9); g.lineTo(0, 4); g.lineTo(-8, 9); g.closePath(); g.fill(); g.stroke(); g.restore();
 }
 
-// =========================== the casino grows: HI-LO and KENO ===========================
-const HILO_AT = { x: CSX - 12, z: -12 }, KENO_AT = { x: CSX + 12, z: -12 };
-csCircles.push({ x: HILO_AT.x, z: HILO_AT.z, r: 1.5 }, { x: KENO_AT.x, z: KENO_AT.z, r: 1.2 });
-Object.assign(CS_PROMPTS, { chilo: () => "[F] Play Hi-Lo", ckeno: () => "[F] Play Keno" });
-Object.assign(CS_TITLE, { hilo: "HI-LO", keno: "KENO" });
+// =========================== the casino grows: the HI-LO WING and the KENO LOUNGE ===========================
+// a room off each side wall, by the entrance, through an arch: card games to the west (Hi-Lo, Card War, Baccarat), numbers and luck to the east
+// (Keno, Over/Under 7 dice, Coin Flip). Hi-Lo and Keno came in 1.8.0 as two corners of the main hall; they moved into wings of their own in Studio 1.12
+const SIDE_W = 16, SIDE_Z0 = CS_Z0, SIDE_Z1 = CS_Z0 + 16, SIDE_ARCH_Z = -11, SIDE_ARCH_HW = 2.2, WX = CS_X0 - SIDE_W / 2, EX = CS_X1 + SIDE_W / 2;
+const HILO_AT = { x: CS_X0 - 4.5, z: -3.5 }, WAR_AT = { x: CS_X0 - 11.5, z: -3.5 }, BACC_AT = { x: CS_X0 - 9, z: -12 };
+const KENO_AT = { x: EX, z: -2.4 }, DICE_AT = { x: CS_X1 + 4.5, z: -12 }, COIN_AT = { x: CS_X1 + 11.5, z: -12 };
+const SIDE_GAMES = [["chilo", HILO_AT, 3.2], ["cwar", WAR_AT, 3.2], ["cbacc", BACC_AT, 3.7], ["ckeno", KENO_AT, 3.0], ["cdice", DICE_AT, 3.2], ["ccoin", COIN_AT, 2.8]];
+csCircles.push({ x: HILO_AT.x, z: HILO_AT.z, r: 1.5 }, { x: WAR_AT.x, z: WAR_AT.z, r: 1.5 }, { x: BACC_AT.x, z: BACC_AT.z, r: 1.9 }, { x: KENO_AT.x, z: KENO_AT.z, r: 1.2 }, { x: DICE_AT.x, z: DICE_AT.z, r: 1.5 }, { x: COIN_AT.x, z: COIN_AT.z, r: 1.0 });
+Object.assign(CS_PROMPTS, { chilo: () => "[F] Play Hi-Lo", ckeno: () => "[F] Play Keno", cwar: () => "[F] Play Card War", cbacc: () => "[F] Play Baccarat", cdice: () => "[F] Play Over/Under 7", ccoin: () => "[F] Flip the coin" });
+Object.assign(CS_TITLE, { hilo: "HI-LO", keno: "KENO", war: "CARD WAR", bacc: "BACCARAT", dice: "OVER / UNDER 7", coin: "COIN FLIP" });
+// walking in the wings: through an arch in the side wall, then round the room and its tables. True while you're in a wing or its arch
+function clampSideWings(p) {
+    const s = p.x < CSX ? -1 : 1, wall = s < 0 ? CS_X0 : CS_X1, d = (p.x - wall) * s; // d > 0: past the wall, into the wing
+    const inArch = Math.abs(p.z - SIDE_ARCH_Z) < SIDE_ARCH_HW - 0.45;
+    if (d < (inArch ? -0.7 : -0.55)) return false; // the hall's own edge stops you 0.6 short of the wall, so the arch takes over a little sooner
+    if (d <= 0.55) { // in the wall's thickness: only the arch lets you through
+        if (!inArch) { p.x = wall + s * (d < 0 ? -0.56 : 0.56); return d >= 0; } // the wall itself
+        p.z = clamp(p.z, SIDE_ARCH_Z - SIDE_ARCH_HW + 0.45, SIDE_ARCH_Z + SIDE_ARCH_HW - 0.45); return true;
+    }
+    const xa = wall + s * (inArch ? 0 : 0.56), xb = wall + s * (SIDE_W - 0.6); p.x = clamp(p.x, Math.min(xa, xb), Math.max(xa, xb)); p.z = clamp(p.z, SIDE_Z0 + 0.6, SIDE_Z1 - 0.6); // lined up with the arch, nothing stops you short of it
+    for (const c of csCircles) { const dx = p.x - c.x, dz = p.z - c.z, dd = Math.hypot(dx, dz), m = c.r + 0.45; if (dd < m && dd > 0.001) { p.x = c.x + dx / dd * m; p.z = c.z + dz / dd * m; } }
+    return true;
+}
+// ---- CARD WAR: your card against the dealer's, aces high. A tie means war: both cards go back and you each draw again, and a war you win pays a bonus ----
+const WAR = { phase: "idle", you: null, deal: null, wars: 0, hist: [] };
+const warV = c => (c.r === "A" ? 14 : RANKS.indexOf(c.r) + 1);
+function warRender(G) {
+    const r = WAR.you;
+    G.innerHTML = `<div class="hlWrap"><div class="warSide"><div class="bjLbl">DEALER</div><div class="hlCard">${WAR.deal ? cardHtml(WAR.deal, false, 0) : cardHtml(null, true, 0)}</div></div>
+      <div class="hlSide"><p>You and the dealer each draw a card: <b>higher card wins</b> (aces high) and pays <b class="gold">×1.96</b>. A tie is <b>WAR</b>: you both draw again, and every war you win adds <b class="gold">+×0.5</b>.</p>
+      ${r ? `<p>${WAR.wars ? `<b class="gold">${WAR.wars} war${WAR.wars === 1 ? "" : "s"}!</b> ` : ""}${warV(r) > warV(WAR.deal) ? "You win." : "The dealer wins."}</p>` : ""}
+      <div class="crHist">${WAR.hist.map(h => `<span>${h}</span>`).join("")}</div></div>
+      <div class="warSide"><div class="bjLbl">YOU</div><div class="hlCard">${r ? cardHtml(r, false, 1) : cardHtml(null, true, 1)}</div></div></div>
+      <div class="csActions"><button class="csbtn big" data-c2="wdeal">DEAL <kbd>Space</kbd></button></div>`;
+}
+function warDeal() {
+    const bet = takeBet(); if (!bet) return;
+    let you, deal, wars = 0;
+    do { you = drawCard(); deal = drawCard(); if (warV(you) === warV(deal)) wars++; } while (warV(you) === warV(deal) && wars < 6);
+    if (warV(you) === warV(deal)) deal = { r: you.r === "2" ? "3" : "2", s: deal.s }; // six wars in a row: the dealer blinks first
+    Object.assign(WAR, { you, deal, wars, phase: "done" });
+    const won = warV(you) > warV(deal), win = won ? Math.round(bet * (1.96 + 0.5 * wars)) : 0;
+    payOut(win, bet); WAR.hist.unshift(won ? "W" : "L"); WAR.hist.length = Math.min(WAR.hist.length, 12);
+    csMsg(won ? `${wars ? "WAR! " : ""}Your ${you.r} beats the ${deal.r}. +${money(win)}` : `${wars ? "WAR! " : ""}The dealer's ${deal.r} beats your ${you.r}. -${money(bet)}`, won ? (wars ? "jack" : "win") : "lose");
+    sfx(won ? 880 : 180, 0.12, won ? "triangle" : "sawtooth", 0.07, won ? 1.3 : 0.6);
+    warRender($("csGame")); renderBetRow();
+}
+// ---- BACCARAT: bet on the Player, the Banker or a Tie; two hands of two or three cards, the one nearer 9 wins (proper third-card rules) ----
+const BAC = { side: "player", p: [], b: [], res: "" };
+const BAC_PAY = { player: 2, banker: 1.95, tie: 9 };
+const bacV = c => (["10", "J", "Q", "K"].includes(c.r) ? 0 : c.r === "A" ? 1 : +c.r), bacT = h => h.reduce((s, c) => s + bacV(c), 0) % 10;
+function bacRender(G) {
+    const dealt = BAC.p.length > 0;
+    G.innerHTML = `<div class="bjTable"><div class="bjLbl">BANKER <b>${dealt ? bacT(BAC.b) : ""}</b></div><div class="hand">${BAC.b.map((c, k) => cardHtml(c, false, k)).join("")}</div>
+      <div class="bjMid">NEAREST TO 9 WINS · PLAYER 1:1 · BANKER 0.95:1 · TIE 8:1</div><div class="hand">${BAC.p.map((c, k) => cardHtml(c, false, k)).join("")}</div><div class="bjLbl">PLAYER <b>${dealt ? bacT(BAC.p) : ""}</b></div></div>
+      <div class="csActions">${["player", "banker", "tie"].map(s => `<button class="csbtn ${BAC.side === s ? "green" : ""}" data-c2="bs:${s}">${s.toUpperCase()} ×${BAC_PAY[s]}</button>`).join("")}<button class="csbtn big" data-c2="bdeal">DEAL <kbd>Space</kbd></button></div>`;
+}
+function bacDeal() {
+    const bet = takeBet(); if (!bet) return;
+    const p = [drawCard(), drawCard()], b = [drawCard(), drawCard()];
+    let pt = bacT(p), bt = bacT(b);
+    if (pt < 8 && bt < 8) { // no natural: the player draws on 0-5, then the banker by the tableau
+        let third = null; if (pt <= 5) { third = drawCard(); p.push(third); pt = bacT(p); }
+        const t = third ? bacV(third) : -1;
+        const draws = third === null ? bt <= 5 : bt <= 2 || (bt === 3 && t !== 8) || (bt === 4 && t >= 2 && t <= 7) || (bt === 5 && t >= 4 && t <= 7) || (bt === 6 && (t === 6 || t === 7));
+        if (draws) { b.push(drawCard()); bt = bacT(b); }
+    }
+    const res = pt > bt ? "player" : bt > pt ? "banker" : "tie", mult = BAC.side === res ? BAC_PAY[res] : res === "tie" ? 1 : 0; // a tie hands Player and Banker bets back
+    Object.assign(BAC, { p, b, res });
+    const win = Math.round(bet * mult); payOut(win, bet);
+    csMsg(`${res === "tie" ? "A tie" : (res === "player" ? "Player" : "Banker") + " wins"}, ${pt} to ${bt}. ${mult > 1 ? "+" + money(win) : mult === 1 ? "Your bet comes back." : "-" + money(bet)}`, mult > 2 ? "jack" : mult > 1 ? "win" : mult === 1 ? "push" : "lose");
+    sfx(mult > 1 ? 880 : 300, 0.1, "triangle", 0.06, 1.2);
+    bacRender($("csGame")); renderBetRow();
+}
+// ---- OVER / UNDER 7: two dice. Under 7 or over 7 pays ×2.3, exactly 7 pays ×5.8 ----
+const DICE = { pick: "over", busy: false, d: [3, 4], hist: [] };
+const DICE_PAY = { under: 2.3, seven: 5.8, over: 2.3 }, DIE = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+function diceRender(G) {
+    const sum = DICE.d[0] + DICE.d[1];
+    G.innerHTML = `<div class="hlWrap"><div class="diceRow">${DICE.d.map(v => `<span>${DIE[v - 1]}</span>`).join("")}<b>${DICE.busy ? "…" : sum}</b></div>
+      <div class="hlSide"><p>Roll two dice. Bet the total comes up <b>under 7</b>, <b>exactly 7</b> or <b>over 7</b>.</p><div class="crHist">${DICE.hist.map(s => `<span>${s}</span>`).join("")}</div></div></div>
+      <div class="csActions">${[["under", "UNDER 7"], ["seven", "7"], ["over", "OVER 7"]].map(([k, t]) => `<button class="csbtn ${DICE.pick === k ? "green" : ""}" data-c2="dp:${k}" ${DICE.busy ? "disabled" : ""}>${t} ×${DICE_PAY[k]}</button>`).join("")}<button class="csbtn big" data-c2="droll" ${DICE.busy ? "disabled" : ""}>ROLL <kbd>Space</kbd></button></div>`;
+}
+function diceRoll() {
+    if (DICE.busy) return; const bet = takeBet(); if (!bet) return;
+    DICE.busy = true; const pick = DICE.pick, live = () => panel === "casino" && CS.game === "dice";
+    for (let f = 0; f < 9; f++) setTimeout(() => {
+        DICE.d = [1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]; sfx(300 + f * 40, 0.04, "square", 0.04, 1);
+        if (f < 8) { if (live()) diceRender($("csGame")); return; }
+        DICE.busy = false; const s = DICE.d[0] + DICE.d[1], won = (pick === "under" && s < 7) || (pick === "seven" && s === 7) || (pick === "over" && s > 7), win = won ? Math.round(bet * DICE_PAY[pick]) : 0;
+        payOut(win, bet); DICE.hist.unshift(s); DICE.hist.length = Math.min(DICE.hist.length, 14);
+        if (live()) { csMsg(`${s}! ${won ? "+" + money(win) : "-" + money(bet)}`, won ? (pick === "seven" ? "jack" : "win") : "lose"); diceRender($("csGame")); renderBetRow(); }
+    }, 70 * (f + 1));
+}
+// ---- COIN FLIP: call it. Every right call doubles your pot (×1.96); call again, or cash out. Ten in a row cashes out for you ----
+const COIN = { phase: "idle", bet: 0, mult: 1, streak: 0, last: null, busy: false };
+function coinRender(G) {
+    const play = COIN.phase === "play";
+    G.innerHTML = `<div class="hlWrap"><div class="coinBig ${COIN.busy ? "spin" : ""}">${COIN.busy ? "?" : COIN.last === "tails" ? "T" : "H"}</div>
+      <div class="hlSide"><p>Call <b>heads</b> or <b>tails</b>. Get it right and your pot doubles (<b class="gold">×1.96</b>). Keep calling, or cash out before your luck turns.</p>
+      ${play ? `<p>Streak <b>${COIN.streak}</b> · pot <b class="gold">${fmtX(COIN.mult)}</b> = ${money(Math.round(COIN.bet * COIN.mult))}</p>` : ""}</div></div>
+      <div class="csActions"><button class="csbtn big" data-c2="ch" ${COIN.busy ? "disabled" : ""}>HEADS <kbd>W</kbd></button><button class="csbtn big" data-c2="ct" ${COIN.busy ? "disabled" : ""}>TAILS <kbd>S</kbd></button><button class="csbtn green" data-c2="cc" ${play && COIN.streak && !COIN.busy ? "" : "disabled"}>CASH OUT <kbd>Space</kbd></button></div>`;
+}
+function coinCall(side) {
+    if (COIN.busy) return;
+    if (COIN.phase !== "play") { const bet = takeBet(); if (!bet) return; Object.assign(COIN, { phase: "play", bet, mult: 1, streak: 0 }); renderBetRow(); }
+    COIN.busy = true; coinRender($("csGame")); sfx(900, 0.05, "triangle", 0.05, 1.5);
+    setTimeout(() => {
+        COIN.busy = false; const res = Math.random() < 0.5 ? "heads" : "tails"; COIN.last = res; const live = panel === "casino" && CS.game === "coin";
+        if (res === side) { COIN.mult *= 1.96; COIN.streak++; if (live) csMsg(`${res.toUpperCase()}! ${fmtX(COIN.mult)}`, "win"); sfx(700 + COIN.streak * 60, 0.1, "triangle", 0.07, 1.3); if (COIN.streak >= 10) { coinCash(); return; } }
+        else { COIN.phase = "done"; payOut(0, COIN.bet); if (live) csMsg(`${res.toUpperCase()}. The pot's gone. -${money(COIN.bet)}`, "lose"); sfx(140, 0.3, "sawtooth", 0.08, 0.5); }
+        if (live) { coinRender($("csGame")); renderBetRow(); }
+    }, 650);
+}
+function coinCash() { if (COIN.phase !== "play" || !COIN.streak || COIN.busy) return; const win = Math.round(COIN.bet * COIN.mult); COIN.phase = "done"; payOut(win, COIN.bet); csMsg(`Cashed out at ${fmtX(COIN.mult)}! +${money(win)}`, COIN.mult >= 10 ? "jack" : "win"); coinRender($("csGame")); renderBetRow(); }
 const rankV = c => RANKS.indexOf(c.r) + 1; // A = 1 ... K = 13
 const HL = { phase: "idle", bet: 0, card: null, mult: 1, streak: 0, hist: [] };
 const hlOdds = (v, hi) => (hi ? 13 - v : v - 1) / 13; // chance the next card is strictly higher / lower
@@ -13046,23 +13167,66 @@ function knDraw() {
 }
 Object.assign(CSG, {
     hilo: { render: hlRender, act(a) { if (a === "hstart") hlStart(); else if (a === "hi") hlGuess(true); else if (a === "lo") hlGuess(false); else if (a === "hcash") hlCash(); }, key(c) { if (c === "Space" || c === "Enter") { HL.phase === "play" ? hlCash() : hlStart(); return true; } if (c === "KeyW") { hlGuess(true); return true; } if (c === "KeyS") { hlGuess(false); return true; } } },
+    war: { render: warRender, act(a) { if (a === "wdeal") warDeal(); }, key(c) { if (c === "Space" || c === "Enter") { warDeal(); return true; } } },
+    bacc: { render: bacRender, act(a) { if (a.startsWith("bs:")) { BAC.side = a.slice(3); bacRender($("csGame")); } else if (a === "bdeal") bacDeal(); }, key(c) { if (c === "Space" || c === "Enter") { bacDeal(); return true; } } },
+    dice: { render: diceRender, act(a) { if (a.startsWith("dp:")) { if (!DICE.busy) { DICE.pick = a.slice(3); diceRender($("csGame")); } } else if (a === "droll") diceRoll(); }, key(c) { if (c === "Space" || c === "Enter") { diceRoll(); return true; } } },
+    coin: { render: coinRender, act(a) { if (a === "ch") coinCall("heads"); else if (a === "ct") coinCall("tails"); else if (a === "cc") coinCash(); }, key(c) { if (c === "KeyW") { coinCall("heads"); return true; } if (c === "KeyS") { coinCall("tails"); return true; } if (c === "Space" || c === "Enter") { coinCash(); return true; } } },
     keno: { render: knRender, act(a) { if (a.startsWith("k:")) { if (KN.busy) return; const n = +a.slice(2), i = KN.picks.indexOf(n); if (i >= 0) KN.picks.splice(i, 1); else if (KN.picks.length < 5) KN.picks.push(n); KN.drawn = []; knRender($("csGame")); } else if (a === "kq") { const p = []; while (p.length < 5) { const n = 1 + Math.floor(Math.random() * 40); if (!p.includes(n)) p.push(n); } KN.picks = p; KN.drawn = []; knRender($("csGame")); } else if (a === "kdraw") knDraw(); }, key(c) { if (c === "Space" || c === "Enter") { knDraw(); return true; } } }
 });
-function nearestHall2() { const px = player.pos.x, pz = player.pos.z; if (Math.hypot(px - HILO_AT.x, pz - HILO_AT.z) < 3.2) return { k: "chilo" }; if (Math.hypot(px - KENO_AT.x, pz - KENO_AT.z) < 3.0) return { k: "ckeno" }; return null; }
-function buildHall2() { // a Hi-Lo table and a Keno lounge in the front of the main hall
-    const gold = new THREE.MeshLambertMaterial({ color: 0xd8a840, emissive: 0x3a2a08, flatShading: true });
-    const t = new THREE.Group(); t.position.set(HILO_AT.x, 0, HILO_AT.z); scene.add(t);
-    part(t, CYL8, lamb(0x2a140c), 0, 0.45, 0, 0.5, 0.9, 0.5);
-    const felt = csCanvas(256, 256, (g, w) => { g.fillStyle = "#0e5a3a"; g.fillRect(0, 0, w, w); g.fillStyle = "#e8d8a0"; g.font = "900 34px Consolas"; g.textAlign = "center"; g.fillText("HI-LO", w / 2, w / 2 - 10); g.font = "700 18px Consolas"; g.fillText("HIGHER OR LOWER?", w / 2, w / 2 + 22); });
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.12, 24), [lamb(0x2a140c), new THREE.MeshLambertMaterial({ map: felt }), lamb(0x2a140c)]); top.position.y = 0.96; t.add(top);
-    part(t, new THREE.TorusGeometry(1.4, 0.06, 6, 24), gold, 0, 1.02, 0, 1, 1, 1, Math.PI / 2);
-    const dealer = makeHumanoid({ face: "clerk", skin: 0xc89070, shirt: 0xf2f2f2, vest: 0x1a3a5a, pants: 0x141414, hair: 0x101010 });
-    dealer.g.position.set(HILO_AT.x, 0, HILO_AT.z - 2.1); scene.add(dealer.g); casinoNpcs.push(dealer);
+function nearestHall2() { const px = player.pos.x, pz = player.pos.z; for (const [k, at, r] of SIDE_GAMES) if (Math.hypot(px - at.x, pz - at.z) < r) return { k }; return null; }
+let coin3D = null; // the big gold coin over the Coin Flip podium: it turns slowly
+function buildHall2() { // the Hi-Lo Wing (west) and the Keno Lounge (east): rooms off each side wall, with their tables, dealers and signs
+    const gold = new THREE.MeshLambertMaterial({ color: 0xd8a840, emissive: 0x3a2a08, flatShading: true }), darkWood = lamb(0x2a140c);
+    const wallM = new THREE.MeshLambertMaterial({ map: wallTex() }), floorM = new THREE.MeshLambertMaterial({ map: carpetTex() }); csSkinMats.push(["wall", wallM], ["floor", floorM]);
+    const wain = batch(darkWood), trim = batch(gold), crystal = new THREE.MeshBasicMaterial({ color: 0xfff4d8 });
+    const plane = (w, h, x, y, z, ry) => { const o = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallM); o.position.set(x, y, z); o.rotation.y = ry; scene.add(o); return o; };
+    const aLo = SIDE_ARCH_Z - SIDE_ARCH_HW, aHi = SIDE_ARCH_Z + SIDE_ARCH_HW, D = SIDE_Z1 - SIDE_Z0, cz = (SIDE_Z0 + SIDE_Z1) / 2;
+    for (const [wx, s] of [[WX, -1], [EX, 1]]) {
+        const inner = s < 0 ? CS_X0 : CS_X1, outer = inner + s * SIDE_W, toWing = s < 0 ? -Math.PI / 2 : Math.PI / 2;
+        const fl = new THREE.Mesh(new THREE.PlaneGeometry(SIDE_W, D), floorM); fl.rotation.x = -Math.PI / 2; fl.position.set(wx, 0.01, cz); scene.add(fl);
+        const ce = new THREE.Mesh(new THREE.PlaneGeometry(SIDE_W, D), lamb(0x1a0a10)); ce.rotation.x = Math.PI / 2; ce.position.set(wx, CS_H, cz); scene.add(ce);
+        plane(D, CS_H, outer, CS_H / 2, cz, -toWing); plane(SIDE_W, CS_H, wx, CS_H / 2, SIDE_Z0, 0); plane(SIDE_W, CS_H, wx, CS_H / 2, SIDE_Z1, Math.PI); // the far wall, the front and the back
+        for (const [a, b] of [[SIDE_Z0, aLo], [aHi, SIDE_Z1]]) plane(b - a, CS_H, inner, CS_H / 2, (a + b) / 2, toWing); // the hall's wall seen from in here, round the arch
+        plane(SIDE_ARCH_HW * 2, CS_H - ARCH_H, inner, (CS_H + ARCH_H) / 2, SIDE_ARCH_Z, toWing);
+        for (const [x, z, sx, sz] of [[outer - s * 0.15, cz, 0.3, D], [wx, SIDE_Z0 + 0.15, SIDE_W, 0.3], [wx, SIDE_Z1 - 0.15, SIDE_W, 0.3], [inner + s * 0.15, (SIDE_Z0 + aLo) / 2, 0.3, aLo - SIDE_Z0], [inner + s * 0.15, (aHi + SIDE_Z1) / 2, 0.3, SIDE_Z1 - aHi]]) {
+            wain.add(BOX, x, 0.6, z, 0, 0, 0, sx, 1.2, sz); trim.add(BOX, x, 1.22, z, 0, 0, 0, sx + 0.02, 0.08, sz + 0.06); trim.add(BOX, x, CS_H - 0.5, z, 0, 0, 0, sx + 0.02, 0.12, sz + 0.06);
+        }
+        for (let x = Math.min(inner, outer) + 4; x < Math.max(inner, outer); x += 4) trim.add(BOX, x, CS_H - 0.1, cz, 0, 0, 0, 0.16, 0.16, D);
+        const ch = new THREE.Group(); ch.position.set(wx, CS_H - 1.6, cz); scene.add(ch); // a chandelier
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.07, 6, 16), gold); ring.rotation.x = Math.PI / 2; ch.add(ring);
+        for (let k = 0; k < 12; k++) { const a = (k / 12) * Math.PI * 2; part(ch, CONE6, crystal, Math.cos(a) * 1.2, -0.25, Math.sin(a) * 1.2, 0.07, 0.4, 0.07, Math.PI); }
+        part(ch, ICO, crystal, 0, -0.6, 0, 0.22); part(ch, CYL6, gold, 0, 1.0, 0, 0.04, 1.4, 0.04);
+        const L = new THREE.PointLight(0xffd8a0, 30, 22, 1.5); L.position.set(0, -0.6, 0); ch.add(L); L.userData.b = 30; csLights.push(L);
+    }
+    wingSign("HI-LO WING", "#6dffa0", CS_X0 + 0.12, ARCH_H + 1.0, SIDE_ARCH_Z, Math.PI / 2, 4.8, 1.2); wingSign("KENO LOUNGE", "#ffd040", CS_X1 - 0.12, ARCH_H + 1.0, SIDE_ARCH_Z, -Math.PI / 2, 4.8, 1.2);
+    wingSign("MAIN HALL", "#ffe0b0", CS_X0 - 0.12, ARCH_H + 0.8, SIDE_ARCH_Z, -Math.PI / 2, 3.2, 0.8); wingSign("MAIN HALL", "#ffe0b0", CS_X1 + 0.12, ARCH_H + 0.8, SIDE_ARCH_Z, Math.PI / 2, 3.2, 0.8);
+    // a round felt table with its name on it, and a dealer behind it facing you
+    const table = (at, name, sub, felt, rad, dealerAt, dyaw, look) => {
+        const t = new THREE.Group(); t.position.set(at.x, 0, at.z); scene.add(t);
+        part(t, CYL8, darkWood, 0, 0.45, 0, 0.5, 0.9, 0.5);
+        const tex = csCanvas(256, 256, (g, w) => { g.fillStyle = felt; g.fillRect(0, 0, w, w); g.fillStyle = "#e8d8a0"; g.textAlign = "center"; g.font = `900 ${Math.min(34, Math.floor(300 / name.length))}px Consolas`; g.fillText(name, w / 2, w / 2 - 10); g.font = "700 16px Consolas"; g.fillText(sub, w / 2, w / 2 + 22); });
+        const top = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, 0.12, 28), [darkWood, new THREE.MeshLambertMaterial({ map: tex }), darkWood]); top.position.y = 0.96; top.rotation.y = dyaw; t.add(top);
+        part(t, new THREE.TorusGeometry(rad, 0.06, 6, 28), gold, 0, 1.02, 0, 1, 1, 1, Math.PI / 2);
+        const d = makeHumanoid(look); d.g.position.set(dealerAt.x, 0, dealerAt.z); d.g.rotation.y = dyaw; scene.add(d.g); d.yaw = dyaw; casinoNpcs.push(d);
+    };
+    const vest = (v, skin, hair) => ({ face: "clerk", skin, shirt: 0xf2f2f2, vest: v, pants: 0x141414, hair });
+    table(HILO_AT, "HI-LO", "HIGHER OR LOWER?", "#0e5a3a", 1.4, { x: HILO_AT.x, z: HILO_AT.z + 2.1 }, Math.PI, vest(0x1a3a5a, 0xc89070, 0x101010));
+    table(WAR_AT, "CARD WAR", "HIGH CARD WINS", "#5a0e1a", 1.4, { x: WAR_AT.x, z: WAR_AT.z + 2.1 }, Math.PI, vest(0x5a1a1a, 0xf0c8a0, 0x8a5a2a));
+    table(BACC_AT, "BACCARAT", "PLAYER · BANKER · TIE", "#0e2a5a", 1.8, { x: BACC_AT.x, z: BACC_AT.z - 2.5 }, 0, vest(0x0a1a3a, 0x8a5a3a, 0x2a1a10));
+    table(DICE_AT, "OVER / UNDER 7", "TWO DICE", "#3a0e5a", 1.4, { x: DICE_AT.x, z: DICE_AT.z - 2.1 }, 0, vest(0x3a1a5a, 0xe8c0a0, 0xd8c08a));
+    wingSign("HI-LO", "#6dffa0", HILO_AT.x, 4.4, SIDE_Z1 - 0.14, Math.PI, 2.6, 0.9); wingSign("CARD WAR", "#ff6a6a", WAR_AT.x, 4.4, SIDE_Z1 - 0.14, Math.PI, 3.2, 0.9);
+    wingSign("BACCARAT", "#7fd8ff", BACC_AT.x, 4.4, SIDE_Z0 + 0.14, 0, 3.4, 0.9); wingSign("OVER / UNDER 7", "#c8a0ff", DICE_AT.x, 4.4, SIDE_Z0 + 0.14, 0, 4.2, 0.9); wingSign("COIN FLIP", "#ffd040", COIN_AT.x, 4.4, SIDE_Z0 + 0.14, 0, 3.2, 0.9);
+    // Coin Flip: a podium with a big gold coin turning over it, and a dealer to flip it
+    { const t = new THREE.Group(); t.position.set(COIN_AT.x, 0, COIN_AT.z); scene.add(t); part(t, CYL8, darkWood, 0, 0.5, 0, 0.7, 1.0, 0.7); part(t, CYL8, gold, 0, 1.03, 0, 0.8, 0.06, 0.8);
+      const face = csCanvas(128, 128, (g, w) => { g.fillStyle = "#d8a840"; g.beginPath(); g.arc(64, 64, 62, 0, 7); g.fill(); g.fillStyle = "#8a6a1a"; g.font = "900 64px Consolas"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("H", 64, 68); });
+      coin3D = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.08, 28), [gold, new THREE.MeshBasicMaterial({ map: face }), new THREE.MeshBasicMaterial({ map: face })]); coin3D.rotation.x = Math.PI / 2; coin3D.position.set(0, 2.1, 0); t.add(coin3D);
+      const d = makeHumanoid(vest(0x5a4a1a, 0xf0c8a0, 0x2a1a10)); d.g.position.set(COIN_AT.x, 0, COIN_AT.z - 1.8); scene.add(d.g); d.yaw = 0; casinoNpcs.push(d); }
+    // Keno: the kiosk where you pick your numbers, and the big board on the lounge's back wall
     const k = new THREE.Group(); k.position.set(KENO_AT.x, 0, KENO_AT.z); scene.add(k);
     part(k, BOX, lamb(0x1a1a2a), 0, 0.6, 0, 1.2, 1.2, 0.8); part(k, BOX, gold, 0, 1.22, 0, 1.3, 0.06, 0.9);
     const board = csCanvas(512, 256, (g, w, h) => { g.fillStyle = "#0a0a24"; g.fillRect(0, 0, w, h); g.fillStyle = "#ffd040"; g.font = "900 40px Consolas"; g.textAlign = "center"; g.fillText("KENO", w / 2, 46); for (let n = 1; n <= 40; n++) { const x = 40 + ((n - 1) % 10) * 44, y = 80 + Math.floor((n - 1) / 10) * 40; g.fillStyle = [3, 11, 17, 26, 33].includes(n) ? "#ff5ad8" : "#2a2a5a"; g.fillRect(x, y, 38, 32); g.fillStyle = "#fff"; g.font = "700 18px Consolas"; g.fillText(String(n), x + 19, y + 23); } });
-    const scr = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), new THREE.MeshBasicMaterial({ map: board })); scr.position.set(CS_X1 - 0.13, 3.4, KENO_AT.z); scr.rotation.y = -Math.PI / 2; scene.add(scr);
-    wingSign("HI-LO", "#6dffa0", CS_X0 + 0.12, 4.6, HILO_AT.z, Math.PI / 2, 3, 1);
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(7, 3.5), new THREE.MeshBasicMaterial({ map: board })); scr.position.set(EX, 3.6, SIDE_Z1 - 0.13); scr.rotation.y = Math.PI; scene.add(scr);
+    wain.build(); trim.build();
 }
 
 // =====================================================================
