@@ -14958,14 +14958,14 @@ function mpState() {
         pets: eq, shiny: eq.map(k => (save.pets.own[k] && save.pets.own[k].shiny ? 1 : 0)) };
 }
 function mpSend(o) { if (mp.ws && mp.ws.readyState === 1) try { mp.ws.send(JSON.stringify(o)); } catch (e) { /* it's closing */ } }
-function mpConnect(name) {
+function mpConnect(name, pass) {
     if (!mpUrl()) { toast("The public server isn't online yet.", "bad"); return; }
     if (mp.ws) { mp.manual = true; try { mp.ws.close(); } catch (e) { /* gone */ } }
     mp.name = name; mp.manual = false; mp.connecting = true; mp.admin = false; updateMpHud();
     let ws;
     try { ws = new WebSocket(mpUrl()); } catch (e) { mp.connecting = false; toast("Couldn't reach the public server.", "bad"); updateMpHud(); return; }
     mp.ws = ws;
-    ws.onopen = () => { if (mp.ws !== ws) return; ws.send(JSON.stringify({ t: "hi", v: 2, name, tok: mpTok(), key: mpAdminKey() || undefined, look: mpLook(name), st: mpState() })); };
+    ws.onopen = () => { if (mp.ws !== ws) return; ws.send(JSON.stringify({ t: "hi", v: 2, name, tok: mpTok(), key: mpAdminKey() || undefined, pass: pass || undefined, look: mpLook(name), st: mpState() })); };
     ws.onmessage = e => { if (mp.ws !== ws) return; let m; try { m = JSON.parse(e.data); } catch (err) { return; } mpMsg(m); };
     ws.onclose = e => {
         if (mp.ws !== ws) return;
@@ -15207,18 +15207,21 @@ async function mpCheckOnline() {
     } catch (e) { el.textContent = "can't reach the server"; news.classList.remove("show"); }
 }
 // the name box: only the first time (after that your name is saved and JOIN goes straight in), when you change it, or when it's taken
-function mpShowJoin(name, err) {
+function mpShowJoin(name, err, claim) {
     $("mpJoin").classList.add("show");
     $("mpJoinErr").textContent = err || ""; $("mpJoinErr").classList.toggle("show", !!err);
+    // "Tree" on a second PC: the server lets it in with the Tree password the admin set
+    $("mpPassRow").classList.toggle("show", !!claim); $("mpPass").value = "";
     const inp = $("mpName"); inp.value = name || mpSavedName() || (mpAdminKey() ? "Tree" : `Woodcutter${Math.floor(1000 + Math.random() * 9000)}`);
     setTimeout(() => { inp.focus(); inp.select(); }, 0);
 }
 function mpJoinGo() {
     const name = $("mpName").value.replace(/[^A-Za-z0-9 _\-]/g, "").trim().slice(0, 16);
     if (!name) { $("mpName").focus(); return; }
+    const pass = $("mpPassRow").classList.contains("show") && name.toLowerCase().replace(/[^a-z0-9]/g, "") === "tree" ? $("mpPass").value : "";
     $("mpJoin").classList.remove("show");
     startPlaying();
-    mpConnect(name);
+    mpConnect(name, pass);
 }
 function mpJoinClick() { const n = mpSavedName(); if (n) { startPlaying(); mpConnect(n); } else mpShowJoin(); }
 // the server said no to the name: back to the menu with the name box up, saying why
@@ -15227,7 +15230,15 @@ function mpNameTaken(m) {
     try { if (mpSavedName() === m.name) localStorage.removeItem("ts4_mp_name"); } catch (e) { /* fine */ }
     if (state === "playing") { if (document.pointerLockElement) document.exitPointerLock(); state = "paused"; showPanels(); renderMenu(); }
     mpNameLine();
-    mpShowJoin(m.name, m.why === "reserved" ? `"${m.name}" is reserved. Pick another name.` : m.why === "online" ? `Someone called ${m.name} is on the server right now. Pick another name.` : `${m.name} belongs to another player. Pick another name.`);
+    const why = {
+        reserved: m.claim ? `"${m.name}" is reserved. If it's you, type your Tree password.` : `"${m.name}" is reserved. Pick another name.`,
+        badPass: "That Tree password isn't right.",
+        slotsFull: "Tree is already on two PCs. Free a slot in the admin card on your main PC.",
+        slow: "Too many wrong passwords. Try again in 15 minutes.",
+        online: `Someone called ${m.name} is on the server right now. Pick another name.`,
+    }[m.why] || `${m.name} belongs to another player. Pick another name.`;
+    mpShowJoin(m.name, why, m.claim);
+    if (m.claim) setTimeout(() => $("mpPass").focus(), 0);
 }
 // under JOIN on the title screen: who you'll join as, and a way to change it
 function mpNameLine() { const n = mpSavedName(); $("menuName").textContent = n ? `joining as ${n} · change name` : ""; $("menuName").classList.toggle("show", !!n); }
@@ -15235,6 +15246,7 @@ $("menuName").addEventListener("click", () => mpShowJoin());
 $("menuJoin").addEventListener("click", mpJoinClick);
 $("mpJoinGo").addEventListener("click", mpJoinGo);
 $("mpJoinX").addEventListener("click", () => $("mpJoin").classList.remove("show"));
+$("mpPass").addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); mpJoinGo(); } else if (e.code === "Escape") $("mpJoin").classList.remove("show"); e.stopPropagation(); });
 $("mpName").addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); mpJoinGo(); } else if (e.code === "Escape") $("mpJoin").classList.remove("show"); e.stopPropagation(); });
 $("menuLeave").addEventListener("click", () => mpLeave());
 setInterval(() => { if (mp.on) mpSend({ t: "ping", ts: Date.now() }); }, 20000); // keeps the connection open while you sit in a menu

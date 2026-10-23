@@ -47,6 +47,15 @@ async function tokHash(t) {
     const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
     return [...new Uint8Array(d)].slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
 }
+// "Tree" is the admin's own name, on up to TREE_SLOTS PCs at once: the PC with the admin key takes a slot by itself,
+// and another PC (school) takes one with the Tree password the admin sets in the admin card. Wrong passwords are slowed down.
+const TREE_SLOTS = 2, TREE_FAILS = 10, TREE_COOL = 15 * 60 * 1000;
+async function sha(t) { const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t)); return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join(""); }
+async function passOk(P, pass) {
+    if (!P || typeof pass !== "string" || !pass || pass.length > 64) return false;
+    const a = new TextEncoder().encode(await sha(P.salt + pass)), b = new TextEncoder().encode(P.hash);
+    return a.length === b.length && crypto.subtle.timingSafeEqual(a, b);
+}
 async function keyOk(env, key) {
     if (!env.ADMIN_KEY || typeof key !== "string" || key.length > 200) return false;
     const a = new TextEncoder().encode(key), b = new TextEncoder().encode(env.ADMIN_KEY);
@@ -118,19 +127,34 @@ export class Lobby extends DurableObject {
         if (m.t === "hi" && !a.joined) {
             let name = cleanName(m.name) || "Woodcutter";
             const v = int(m.v, 1, 99, 1), admin = await keyOk(this.env, m.key), h = await tokHash(m.tok), k = nameKey(name), now = Date.now();
-            const holder = this.players().find(p => p.w !== ws && nameKey(p.a.name) === k), mine = admin && reserved(name);
-            let why = "";
-            if (reserved(name) && !admin) why = "reserved";
-            else if (holder && !mine && !(h && holder.a.h === h)) why = "online";
-            else if (!mine) { const rec = await this.ctx.storage.get("name:" + k); if (rec && rec.h !== h && now - rec.seen < NAME_KEEP) why = "owned"; }
-            if (why && v >= 2) { this.send(ws, { t: "nameTaken", name, why }); try { ws.close(4005, "name taken"); } catch (e) { /* gone */ } return; }
+            const same = this.players().filter(p => p.w !== ws && nameKey(p.a.name) === k);
+            let why = "", mine = admin && reserved(name), you = admin;
+            if (k === "tree") { why = await this.treeCheck(admin, h, m.pass, now); if (!why) mine = you = true; }
+            else if (reserved(name) && !admin) why = "reserved";
+            if (!why && !mine) {
+                if (same.length && !(h && same[0].a.h === h)) why = "online";
+                else { const rec = await this.ctx.storage.get("name:" + k); if (rec && rec.h !== h && now - rec.seen < NAME_KEEP) why = "owned"; }
+            }
+            if (why && v >= 2) {
+                const claim = k === "tree" && why !== "slotsFull" && !!(await this.ctx.storage.get("treePass"));
+                this.send(ws, { t: "nameTaken", name, why, claim: claim ? 1 : 0 }); try { ws.close(4005, "name taken"); } catch (e) { /* gone */ }
+                return;
+            }
             if (why) name = "Woodcutter" + (1000 + Math.floor(Math.random() * 9000));
             else {
                 if (h && !mine) await this.ctx.storage.put("name:" + k, { h, name, seen: now });
-                // the same game joining again (a reconnect, or another window): the old connection makes way
-                if (holder) { this.send(holder.w, { t: "replaced" }); this.gone(holder.w, 4006); }
+                // the same game joining again (a reconnect, or another window) takes over from its old connection.
+                // Tree can be on two PCs at once, so another Tree only makes way when there would be more than two.
+                let out = same;
+                if (k === "tree") {
+                    out = same.filter(p => h && p.a.h === h);
+                    const devs = (await this.ctx.storage.get("treeDevs")) || [], held = p => devs.some(d => d.h === p.a.h);
+                    const rest = same.filter(p => !out.includes(p)).sort((x, y) => held(x) - held(y)); // a PC whose slot was freed goes first
+                    if (rest.length >= TREE_SLOTS) out = out.concat(rest.slice(0, rest.length - TREE_SLOTS + 1));
+                }
+                for (const p of out) { this.send(p.w, { t: "replaced" }); this.gone(p.w, 4006); }
             }
-            a.name = name; a.h = h; a.admin = admin; a.v = v;
+            a.name = name; a.h = h; a.admin = you; a.v = v;
             a.look = cleanLook(m.look);
             a.st = cleanState(m.st || {}) || null;
             a.isle = a.st ? a.st.isle : int(m.isle, 1, 99, 1);
@@ -168,6 +192,26 @@ export class Lobby extends DurableObject {
         ws.serializeAttachment(a);
     }
 
+    // can this game be Tree? "" when it can; otherwise why not (reserved, badPass, slotsFull, slow)
+    async treeCheck(admin, h, pass, now) {
+        const devs = (await this.ctx.storage.get("treeDevs")) || [], dev = h && devs.find(d => d.h === h);
+        if (admin || dev) {
+            if (dev) dev.seen = now; else if (h && devs.length < TREE_SLOTS) devs.push({ h, by: "key", at: now, seen: now });
+            if (h) await this.ctx.storage.put("treeDevs", devs);
+            return "";
+        }
+        const P = await this.ctx.storage.get("treePass");
+        if (!P || typeof pass !== "string" || !pass || !h) return "reserved";
+        let f = (await this.ctx.storage.get("treeFails")) || { n: 0, t: now };
+        if (now - f.t > TREE_COOL) f = { n: 0, t: now };
+        if (f.n >= TREE_FAILS) return "slow";
+        if (!(await passOk(P, pass))) { f.n++; await this.ctx.storage.put("treeFails", f); return "badPass"; }
+        if (devs.length >= TREE_SLOTS) return "slotsFull";
+        devs.push({ h, by: "password", at: now, seen: now });
+        await this.ctx.storage.put("treeDevs", devs);
+        return "";
+    }
+
     // ---------- admin: every message carries the key, so nothing depends on the connection surviving a sleep ----------
     async admin(ws, a, m) {
         if (!(await keyOk(this.env, m.key))) {
@@ -178,7 +222,9 @@ export class Lobby extends DurableObject {
         }
         const reply = async (text = "") => {
             const bans = (await this.ctx.storage.get("bans")) || {};
-            this.send(ws, { t: "adminOk", op: m.op, text, motd: await this.motd(), anns: (await this.anns()).map(x => annWire(x)), bans: Object.entries(bans).map(([k, b]) => ({ k: k.slice(-4), name: b.name, at: b.at })),
+            const devs = (await this.ctx.storage.get("treeDevs")) || [];
+            const tree = { pass: !!(await this.ctx.storage.get("treePass")), slots: TREE_SLOTS, devs: devs.map(d => ({ k: d.h.slice(-4), by: d.by, at: d.at, seen: d.seen })) };
+            this.send(ws, { t: "adminOk", op: m.op, text, tree, motd: await this.motd(), anns: (await this.anns()).map(x => annWire(x)), bans: Object.entries(bans).map(([k, b]) => ({ k: k.slice(-4), name: b.name, at: b.at })),
                 players: this.players().map(p => ({ id: p.a.id, name: p.a.name, isle: p.a.isle, admin: p.a.admin ? 1 : 0, muted: p.a.muted ? 1 : 0, x: p.a.st ? p.a.st.x : 0, z: p.a.st ? p.a.st.z : 0 })) });
         };
         const op = m.op;
@@ -229,6 +275,20 @@ export class Lobby extends DurableObject {
             p.a.muted = !p.a.muted; p.w.serializeAttachment(p.a);
             this.send(p.w, { t: "sys", text: p.a.muted ? "The admin muted you." : "The admin unmuted you." });
             return reply(`${p.a.name} ${p.a.muted ? "muted" : "unmuted"}.`);
+        }
+        if (op === "treePass") { // the password that lets another PC be Tree (empty turns it off)
+            const pass = typeof m.pass === "string" ? m.pass : "";
+            if (!pass) { await this.ctx.storage.delete("treePass"); return reply("Tree password removed: only the key can be Tree now."); }
+            if (pass.length < 6 || pass.length > 64) return reply("The Tree password needs 6 to 64 characters.");
+            const salt = crypto.randomUUID();
+            await this.ctx.storage.put("treePass", { salt, hash: await sha(salt + pass) });
+            await this.ctx.storage.delete("treeFails");
+            return reply("Tree password set.");
+        }
+        if (op === "treeFree") { // frees a Tree slot (k: the last 4 of its PC's id, or "*")
+            const devs = (await this.ctx.storage.get("treeDevs")) || [], left = devs.filter(d => !(m.k === "*" || d.h.slice(-4) === m.k));
+            await this.ctx.storage.put("treeDevs", left);
+            return reply(devs.length === left.length ? "That slot's already free." : "Tree slot freed.");
         }
         if (op === "freeName") { // lets someone else have a name a player is holding on to
             const k = nameKey(cleanName(m.name)); if (!k) return reply("Which name?");

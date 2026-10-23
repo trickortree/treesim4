@@ -90,6 +90,9 @@ el.innerHTML = `
         <div id="dvAdBans"></div>
         <div class="dvH" style="margin:10px 0 7px">NAMES <small>a name stays with whoever used it for 30 days</small></div>
         <div style="display:flex;gap:6px"><input class="dvText" id="dvFreeName" maxlength="16" placeholder="Free up a name someone's holding..." spellcheck="false" autocomplete="off" style="margin:0"><button class="dvB" id="dvFreeGo">Free it</button></div>
+        <div class="dvH" style="margin:10px 0 7px">TREE ON 2 PCS <small id="dvTreeInfo"></small></div>
+        <div style="display:flex;gap:6px;margin-bottom:7px"><input class="dvText" id="dvTreePass" type="password" maxlength="64" placeholder="Tree password for your other PC (6+ characters)" autocomplete="off" style="margin:0"><button class="dvB" id="dvTreePassGo">Set</button></div>
+        <div id="dvTreeDevs"></div>
       </div>
       <div class="dvHint">only you have the key: it's in admin.key.js (git ignores it) and on the server as ADMIN_KEY</div>
     </div>
@@ -236,7 +239,15 @@ try { KEY_FILE = (await import("./admin.key.js")).default || ""; } catch (e) { /
 const adKey = () => { if (KEY_FILE) return KEY_FILE; try { return localStorage.getItem("ts4_admin_key") || ""; } catch (e) { return ""; } };
 // the game sends the key when it joins, so "Tree" (your reserved name) is yours, even in the installed game on this PC
 if (KEY_FILE) { T.mp.mp.key = KEY_FILE; try { if (localStorage.getItem("ts4_admin_key") !== KEY_FILE) localStorage.setItem("ts4_admin_key", KEY_FILE); } catch (e) { /* no storage */ } }
-const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", anns: [], kind: "quick", tagged: null, armed: "" };
+const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", anns: [], tree: null, myK: "", kind: "quick", tagged: null, armed: "" };
+// this PC's id as the server shows it (the end of a hash of the game's token), so its Tree slot can say "this PC"
+async function myPcK() {
+    try {
+        const t = localStorage.getItem("ts4_mp_tok"); if (!t) return "";
+        const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+        return [...new Uint8Array(d)].slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("").slice(-4);
+    } catch (e) { return ""; }
+}
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 function adOpen() {
     if (!adKey() || (AD.ws && AD.ws.readyState <= 1)) return;
@@ -247,8 +258,9 @@ function adOpen() {
         let m; try { m = JSON.parse(e.data); } catch (err) { return; }
         if (m.t === "adminOk") {
             const now = performance.now();
-            Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, anns: (m.anns || []).map(a => ({ ...a, until: a.left ? now + a.left : 0 })) });
+            Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, tree: m.tree || null, anns: (m.anns || []).map(a => ({ ...a, until: a.left ? now + a.left : 0 })) });
             if (m.text) say(m.text); drawAdmin();
+            myPcK().then(k => { if (k !== AD.myK) { AD.myK = k; drawAdmin(); } });
         }
         else if (m.t === "adminErr") { AD.ok = false; AD.err = m.text; say(m.text, "bad"); drawAdmin(); }
     };
@@ -265,6 +277,10 @@ function drawAdmin() {
     if (!has) return;
     setHTML("dvAnnList", AD.anns.length ? AD.anns.map(a => `<div class="dvAdRow"><b class="${a.kind === "full" ? "adm" : "quick"}" title="${esc(a.text)}">${a.kind === "full" ? "📢" : "⚡"} ${esc(a.text)}</b><span data-annleft="${esc(a.id)}"></span><button class="dvB warn" data-ad="annDel" data-id="${esc(a.id)}">Take down</button></div>`).join("") : `<div class="dvHint" style="margin:0 0 4px">nothing up right now</div>`);
     $("dvAnnAll").style.display = AD.anns.length > 1 ? "" : "none";
+    const TR = AD.tree;
+    $("dvTreeInfo").textContent = TR ? `${TR.devs.length} of ${TR.slots} PCs · password ${TR.pass ? "set" : "not set"}` : "";
+    setHTML("dvTreeDevs", TR && TR.devs.length ? TR.devs.map(d => `<div class="dvAdRow"><b>${d.k === AD.myK ? "This PC" : "PC ····" + esc(d.k)}</b><span>${d.by === "key" ? "your key" : "password"} · last on ${new Date(d.seen).toLocaleDateString()}</span><button class="dvB warn" data-ad="treeFree" data-k="${esc(d.k)}">Free</button></div>`).join("")
+        : `<div class="dvHint" style="margin:0 0 4px">no PCs yet: this one takes a slot the next time you join as Tree</div>`);
     annLeft();
     $("dvMotd").placeholder = "Message of the day: " + (AD.motd || "the default");
     $("dvAdCount").textContent = AD.players.length ? "" : "nobody's on";
@@ -302,6 +318,7 @@ function adAction(d, b) {
     if (d.ad === "ban" && AD.armed !== d.id) { AD.armed = d.id; drawAdmin(); setTimeout(() => { if (AD.armed === d.id) { AD.armed = ""; drawAdmin(); } }, 3000); return; }
     AD.armed = "";
     if (d.ad === "unban") adSend("unban", { k: d.k });
+    else if (d.ad === "treeFree") adSend("treeFree", { k: d.k });
     else adSend(d.ad, { id: d.id });
 }
 // your own player gets [ADMIN] over their head whenever you're on the server
@@ -310,7 +327,7 @@ setInterval(() => {
     if (adKey() && M.on && M.ws && AD.tagged !== M.ws) { AD.tagged = M.ws; T.mp.mpSend({ t: "admin", key: adKey(), op: "tag" }); }
     if (el.classList.contains("show") && AD.ok) adSend("list");
 }, 3000);
-for (const [id, go] of [["dvFreeName", "dvFreeGo"], ["dvAnn", "dvAnnGo"], ["dvAnnN", "dvAnnGo"], ["dvMotd", "dvMotdGo"], ["dvAdKey", "dvAdKeySave"]]) $(id).addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); $(go).click(); } });
+for (const [id, go] of [["dvTreePass", "dvTreePassGo"], ["dvFreeName", "dvFreeGo"], ["dvAnn", "dvAnnGo"], ["dvAnnN", "dvAnnGo"], ["dvMotd", "dvMotdGo"], ["dvAdKey", "dvAdKeySave"]]) $(id).addEventListener("keydown", e => { if (e.code === "Enter") { e.preventDefault(); $(go).click(); } });
 
 // ---------- buttons ----------
 $("dvWx").innerHTML = ["clear", "cloudy", "rain", "storm", "fog"].map(w => `<button class="dvB" data-wx="${w}" style="padding:5px 8px">${w}</button>`).join("");
@@ -341,6 +358,7 @@ el.addEventListener("click", e => {
             adSend("announce", { text: v, kind: AD.kind, secs }); $("dvAnn").value = ""; break;
         }
         case "dvAnnAll": adSend("annDel", { id: "*" }); break;
+        case "dvTreePassGo": { const v = $("dvTreePass").value; if (v.length < 6) { say("the Tree password needs 6 characters or more", "bad"); $("dvTreePass").focus(); return; } adSend("treePass", { pass: v }); $("dvTreePass").value = ""; break; }
         case "dvFreeGo": { const v = $("dvFreeName").value.trim(); if (!v) { $("dvFreeName").focus(); return; } adSend("freeName", { name: v }); $("dvFreeName").value = ""; break; }
         case "dvMotdGo": adSend("motd", { text: $("dvMotd").value.trim() }); $("dvMotd").value = ""; break;
         case "dvUnbanAll": adSend("unban", { k: "*" }); break;

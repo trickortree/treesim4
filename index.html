@@ -196,6 +196,7 @@
   #menuName.show { display: block; } #menuName:hover { color: #fff; }
   #mpJoinErr { display: none; margin: -6px 0 12px; font: 600 13px/1.4 "Segoe UI"; color: #ffb0a0; }
   #mpJoinErr.show { display: block; }
+  #mpPassRow { display: none; } #mpPassRow.show { display: block; }
   #menuNews div + div { margin-top: 5px; padding-top: 5px; border-top: 1px solid #ffd04033; }
   #mpAnns { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 30; width: min(560px, 90vw); display: flex; flex-direction: column; pointer-events: none; transition: opacity .3s; }
   #mpAnns.off { opacity: 0; }
@@ -734,7 +735,7 @@
   </div>
 </div>
 
-<div id="mpJoin"><div class="mjBox"><button class="xbtn" id="mpJoinX">✕</button><h2>JOIN THE PUBLIC SERVER</h2><p>Other players on your island will see you, your axe and your pets. Your progress stays your own.</p><label>YOUR NAME</label><input id="mpName" maxlength="16" spellcheck="false" autocomplete="off"><div id="mpJoinErr"></div><button id="mpJoinGo" class="btn">JOIN</button></div></div>
+<div id="mpJoin"><div class="mjBox"><button class="xbtn" id="mpJoinX">✕</button><h2>JOIN THE PUBLIC SERVER</h2><p>Other players on your island will see you, your axe and your pets. Your progress stays your own.</p><label>YOUR NAME</label><input id="mpName" maxlength="16" spellcheck="false" autocomplete="off"><div id="mpJoinErr"></div><div id="mpPassRow"><label>TREE PASSWORD</label><input id="mpPass" type="password" maxlength="64" autocomplete="off"></div><button id="mpJoinGo" class="btn">JOIN</button></div></div>
 <div id="mpChat"></div>
 <input id="mpInput" maxlength="140" placeholder="Say something... (Enter to send, Esc to cancel)" spellcheck="false" autocomplete="off">
 <div id="mpList"></div>
