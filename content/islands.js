@@ -543,5 +543,73 @@ export default [
         "light": "#9ffcff"
       }
     }
+  },
+  {
+    "name": "Midwest Island",
+    "sub": "",
+    "theme": "desert",
+    "seed": 5.533,
+    "radius": 210,
+    "wobble": 0.35,
+    "plateau": 6.1,
+    "hills": 23,
+    "hillSize": 1.2,
+    "beach": 24,
+    "cliffs": 0,
+    "decor": 3,
+    "features": [
+      {
+        "type": "hill",
+        "dir": 124,
+        "dist": 0.5,
+        "r": 30,
+        "h": 10
+      },
+      {
+        "type": "spire",
+        "dir": 149,
+        "dist": 0.6,
+        "r": 12,
+        "h": 45,
+        "name": "ANCIENT SPIKE"
+      },
+      {
+        "type": "valley",
+        "dir": 248,
+        "dist": 0.45,
+        "r": 10,
+        "len": 125
+      }
+    ],
+    "colors": {
+      "grass": "#d8b878",
+      "grass2": "#c8a868",
+      "sand": "#ecd8a0",
+      "rock": "#a8784a",
+      "snow": "#ffffff",
+      "camp": "#c8a070",
+      "shallow": "#5ad0d0",
+      "deep": "#0e3a5a",
+      "bush": "#8a9a4a"
+    },
+    "snowline": "",
+    "trees": [
+      "palm"
+    ],
+    "treeCount": 150,
+    "economy": 4,
+    "rebirth": {
+      "cost": 25000000,
+      "items": {
+        "permafrost": 5
+      }
+    },
+    "rideLine1": "The sea goes quiet. Something new waits ahead...",
+    "rideLine2": "Midwest Island raises out of the sea.",
+    "ferryLine": "Next stop: Midwest Island. Hold on tight.",
+    "arrive": "Welcome to Midwest Island...",
+    "campName": "CAMP",
+    "arrDir": 125,
+    "nextDir": -35
   }
 ];

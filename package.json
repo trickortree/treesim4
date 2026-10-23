@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.9.5",
+  "version": "2.0.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -59,7 +59,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.9.5 (MINOR NEW REBIRTH)\n\nNEXT UPDATE WILL INTRODUCE A WHOLE NEW SYSTEM!\n\n- NEW TREE: the Neon Willow, growing on Mega Town.\n- NEW TREE: the Holo Pine, growing on Mega Town.\n- NEW TREE: the Circuit Oak, growing on Mega Town.\n- REBIRTH 7: MEGA TOWN, Walled neon metropolis of the endless skyways. Talk to the Ferryman on the island before to sail there.\n- NEW PROPS: Holo Billboard, Noodle Capsule, Skyport Garage, Traffic Beacon and more. Look around!\n- NEW ANIMALS: Hover Pigeon, Glitch Cat. Keep an eye out!\n- Mega Town: 73 new signs and props (look for \"HIGHWAY UNDER CONSTRUCTION\")."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.0.0 (PETS & THE PUBLIC SERVER)\n\nTHE WHOLE NEW SYSTEM IS HERE!\n\n- JOIN PUBLIC SERVER: a new button on the main menu. Everyone on your island sees you walk, swing your axe and lead your pets, with your name over your head. Press T to chat, hold Tab to see who's online. Your progress stays your own.\n- ANNOUNCEMENTS: news from the admin shows up as a banner in game and on the main menu.\n- PETS: psst... Sly's Black Market is a shady cart beside the enchanting table on every island. Buy a Burlap Sack, a Smuggler's Crate or a Reaper's Coffer and spin for one of 24 pets in five rarities (2.5% chance of a SHINY).\n- Pets follow you and each has a perk: axe damage, more logs, more cash, speed, mutation luck, log reach, or biting the tree you're chopping. Duplicates add stars. Press P to see your pets. A third pet slot opens at Rebirth 8.\n- REBIRTH 8: MIDWEST ISLAND. Talk to the Ferryman on Mega Town to sail there.\n- NEW TREES on Midwest Island: the Dune Stalker, Terracotta Sentinel, Mesa Stonewood, Dust Storm Snag and Tumbleweed."
     }
   }
 }
