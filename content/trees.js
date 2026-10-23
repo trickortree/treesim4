@@ -102,5 +102,107 @@ export default [
     "flee": false,
     "titan": false,
     "tall": false
+  },
+  {
+    "key": "c_neon_willow",
+    "name": "Neon Willow",
+    "shape": "tall",
+    "leaf": [
+      "#ff4fd8",
+      "#a64dff",
+      "#ff9cf0"
+    ],
+    "trunk": "#2a1838",
+    "glow": "#2a0a3a",
+    "dots": "#ffb3ff",
+    "snow": false,
+    "rocks": false,
+    "col": "#ff6ef2",
+    "hp": 1.8,
+    "logs": 2,
+    "dmg": 1.2,
+    "speed": 1.15,
+    "bonus": 25,
+    "wd": 0.25,
+    "wn": 0.6,
+    "isl": [
+      8
+    ],
+    "arch": "",
+    "minTier": 0,
+    "mat": "m_neon_pulp",
+    "rare": false,
+    "night": false,
+    "flee": false,
+    "titan": false,
+    "tall": true
+  },
+  {
+    "key": "c_holo_pine",
+    "name": "Holo Pine",
+    "shape": "conifer",
+    "leaf": [
+      "#3ff6ff",
+      "#7a5cff",
+      "#1fb8ff"
+    ],
+    "trunk": "#2a3a5c",
+    "glow": "#0a1f3a",
+    "dots": "#a8fff9",
+    "snow": false,
+    "rocks": false,
+    "col": "#5ffcff",
+    "hp": 1.8,
+    "logs": 1.9,
+    "dmg": 1.15,
+    "speed": 1.3,
+    "bonus": 15,
+    "wd": 0.25,
+    "wn": 0.6,
+    "isl": [
+      8
+    ],
+    "arch": "",
+    "minTier": 1,
+    "mat": "m_circuit_sap",
+    "rare": false,
+    "night": false,
+    "flee": false,
+    "titan": false,
+    "tall": false
+  },
+  {
+    "key": "c_circuit_oak",
+    "name": "Circuit Oak",
+    "shape": "round",
+    "leaf": [
+      "#c8d4dc",
+      "#8fa3b0",
+      "#3fe6f0"
+    ],
+    "trunk": "#9aa6ae",
+    "glow": "#04222a",
+    "dots": "#4ff4ff",
+    "snow": false,
+    "rocks": false,
+    "col": "#5ff0ff",
+    "hp": 1.8,
+    "logs": 1.9,
+    "dmg": 1.15,
+    "speed": 1,
+    "bonus": 15,
+    "wd": 0.55,
+    "wn": 0.6,
+    "isl": [
+      8
+    ],
+    "arch": "",
+    "minTier": 0,
+    "mat": "m_circuit_sap",
+    "rare": false,
+    "night": false,
+    "flee": false,
+    "titan": false,
+    "tall": false
   }
 ];

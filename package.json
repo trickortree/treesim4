@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "1.9.0",
+  "version": "1.9.5",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -59,7 +59,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.9.0 (THE DESERT UPDATE!)\n\n- NEW TREE: the Mirrorbark Saguaro, growing on Glassdune Expanse.\n- NEW TREE: the Lantern Spire, growing on Glassdune Expanse.\n- NEW TREE: the Cinderglass Tamarisk, growing on Glassdune Expanse.\n- REBIRTH 6: GLASSDUNE EXPANSE, Where the sands hum back at the sky. Talk to the Ferryman on the Iceberg to sail there.\n- NEW PROPS: Mega Town Machine, Toppled Relay Tower, Crumbling Caravan Waystation, Sandy Locomotive. Look around!\n- NEW ANIMALS: Chromeback Skink, Vaultfox. Keep an eye out!\n- Glassdune Expanse: 50 new signs and props (look for \"PROPERTY OF MEGA TOWN\").\n- Walkable Archipelago terrain: judge slopes over a stride, slide along cliffs\n\nSTAY TUNED, NEXT UPDATE WILL BE A HUGE ONE."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 1.9.5 (MINOR NEW REBIRTH)\n\nNEXT UPDATE WILL INTRODUCE A WHOLE NEW SYSTEM!\n\n- NEW TREE: the Neon Willow, growing on Mega Town.\n- NEW TREE: the Holo Pine, growing on Mega Town.\n- NEW TREE: the Circuit Oak, growing on Mega Town.\n- REBIRTH 7: MEGA TOWN, Walled neon metropolis of the endless skyways. Talk to the Ferryman on the island before to sail there.\n- NEW PROPS: Holo Billboard, Noodle Capsule, Skyport Garage, Traffic Beacon and more. Look around!\n- NEW ANIMALS: Hover Pigeon, Glitch Cat. Keep an eye out!\n- Mega Town: 73 new signs and props (look for \"HIGHWAY UNDER CONSTRUCTION\")."
     }
   }
 }
