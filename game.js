@@ -331,7 +331,7 @@ const isleHp = () => [1, 1, 1.7, 2.2, 2.8, 3.6, 4.5][isle] ?? 4.5 * Math.pow(1.3
 // timed buffs from the Apothecary and the Moonwell (they tick on play time, so pausing doesn't waste them)
 const buffOn = k => (save.buffs[k] || 0) > save.seconds;
 const dmgBuff = () => (buffOn("fury") ? 1.4 : 1) * (buffOn("blessed") ? 1.25 : 1);
-let godMode = false, devSpeed = 1; // dev panel only
+let godMode = false, devSpeed = 1, adminPow = 1, flying = false; // the dev panel's and the admin's powers
 const hpScale = () => Math.pow(bestDmg(), 0.6); // grows much slower than your damage, so every upgrade really chops faster
 const rewardScale = () => 1.5 * (1 + (bestDmg() - 1) * 0.14);
 const dmgScale = () => 1 + bestIdx() * 0.1;
@@ -3423,15 +3423,20 @@ function update(dt) {
     const maxSp = (keys.ShiftLeft ? 8.5 : 5.5) * (1 + 0.07 * save.bootLvl) * (buffOn("swift") ? 1.3 : 1) * petK("speed") * devSpeed * (isle === 5 ? moveK5() : 1), accel = player.onGround ? 14 : 4;
     player.vel.x += (dir.x * maxSp - player.vel.x) * Math.min(1, accel * dt);
     player.vel.z += (dir.z * maxSp - player.vel.z) * Math.min(1, accel * dt);
-    if (keys.Space && player.onGround && !panel) { player.vel.y = 7; player.onGround = false; }
-    player.vel.y -= 22 * dt;
+    if (flying) {
+        const up = panel ? 0 : (keys.Space ? 1 : 0) - (keys.KeyC ? 1 : 0);
+        player.vel.y += (up * maxSp - player.vel.y) * Math.min(1, 8 * dt); player.onGround = false;
+    } else {
+        if (keys.Space && player.onGround && !panel) { player.vel.y = 7; player.onGround = false; }
+        player.vel.y -= 22 * dt;
+    }
     player.pos.addScaledVector(player.vel, dt);
     clampToIsland(player.pos, dt);
     pushOutBoxes(player.pos, 0.45);
     }
     if (ride) updateRide(dt);
     const gnd = groundY(player.pos.x, player.pos.z) + 1.7;
-    if (!ride && !boating() && (player.pos.y <= gnd || (player.onGround && player.vel.y <= 0 && player.pos.y - gnd < 0.7))) { player.pos.y = gnd; player.vel.y = 0; player.onGround = true; }
+    if (!ride && !boating() && (player.pos.y <= gnd || (!flying && player.onGround && player.vel.y <= 0 && player.pos.y - gnd < 0.7))) { player.pos.y = gnd; player.vel.y = 0; player.onGround = !flying; }
     player.dashCd -= dt;
     updateAbilities(dt);
     if (player.onGround) player.bob += dt * Math.hypot(player.vel.x, player.vel.z) * 1.6;
@@ -14276,7 +14281,7 @@ function hud(dt) {
     if (panel === "map") drawMap();
     if (panel === "ferry") renderFerry();
 }
-const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0)) * (1 + 0.12 * enchLv("sharp", i)) * dmgBuff() * petK("chop")); };
+const axeDmgFor = i => { const a = AXES[i]; return Math.round(a.dmg * (a.night && isNight() ? a.night : 1) * (1 + 0.1 * (save.rebirths || 0)) * (1 + 0.1 * (save.whetLvl || 0)) * (1 + 0.12 * enchLv("sharp", i)) * dmgBuff() * petK("chop") * adminPow); };
 
 // =====================================================================
 //  Tree Sim 4 Studio content: the signs and props you place in the editor (content/world.js).
@@ -14704,6 +14709,7 @@ let studioHook = null; // set by studio/studio.js: it flies the camera while you
 const SLY_SIDE = { 1: -1 }; // which side of the enchanting table Sly parks on (1 its right, -1 its left)
 const SLY_SAY = ["Psst. Over here, woodcutter. Don't tell the Reaper.", "No refunds. No questions. No looking in the air holes.", "These fell off a ferry. Honest.", "That one's breathing. Probably fine.", "Cash only. The trees don't take cards.", "You didn't get these from me."];
 const SLY_LINES = ["Psst! You. Yes, you with the axe. Come closer.", "Name's Sly. I deal in... rare goods. Cases. What's inside? Depends on your luck.", "Every case holds a little friend. They follow you, they help you chop, they never ask for a raise.", "Open the same kind twice and yours gets stronger. Find a shiny one and, well. Retire.", "Prices go up the more you've reborn. Supply and demand, woodcutter."];
+const SLY_LOOK = { face: "clerk", skin: 0x9a7a62, shirt: 0x2a3a2e, pants: 0x1a1a1e, boots: 0x141414, cape: 0x1e2a22, scarf: 0x1a1a1e, hat: "hood", hatCol: 0x1e2a22 };
 const slyCart = (() => {
     const g = new THREE.Group(), wood = lamb(0x6a4228), dark = lamb(0x3a2418), tarp = lamb(0x5a1a24), iron = lamb(0x2a2a30);
     part(g, BOX, wood, 0, 0.75, 0, 2.2, 0.5, 1.2); part(g, BOX, dark, 0, 0.52, 0, 2.3, 0.08, 1.3);
@@ -14717,7 +14723,7 @@ const slyCart = (() => {
     caseModel("sack", cases, -0.65); caseModel("crate", cases, 0.05); caseModel("coffer", cases, 0.72);
     const lamp = new THREE.Group(); lamp.position.set(1.0, 1.95, 0.6); g.add(lamp);
     part(lamp, BOX, iron, 0, 0.12, 0, 0.16, 0.04, 0.16); part(lamp, BOX, new THREE.MeshBasicMaterial({ color: 0x8aff9a }), 0, 0, 0, 0.12, 0.18, 0.12); // a green lantern: you know he's up to something
-    const sly = makeHumanoid({ face: "clerk", skin: 0x9a7a62, shirt: 0x2a3a2e, pants: 0x1a1a1e, boots: 0x141414, cape: 0x1e2a22, scarf: 0x1a1a1e, hat: "hood", hatCol: 0x1e2a22 });
+    const sly = makeHumanoid(SLY_LOOK);
     sly.g.position.set(0, 0, -1.05); sly.g.scale.setScalar(0.95); g.add(sly.g);
     g.visible = false; scene.add(g);
     const lb = label("BLACK MARKET", "#8aff9a", 3.2, 0.78); lb.keep = true;
@@ -15230,10 +15236,63 @@ function mpJoinClick() { const n = mpSavedName(); if (n) { startPlaying(); mpCon
 // the admin card (admin.js): on the PC with the admin key the dev panel shows it; in the installed game ` opens it as its own
 // panel once the server says you're Tree (the key, or your other PC's Tree slot)
 let adminMod = null, adminPanel = null;
+// what the admin card can do to your own game: the installed game has no dev panel, so the powers come from here
+const adminPowers = {
+    trees: () => Object.entries(TYPES).map(([k, T]) => ({ k, name: T.name || k })),
+    muts: () => Object.entries(MUTS).map(([k, M]) => ({ k, name: M.name })),
+    axes: () => AXES.map((a, i) => ({ i, name: a.name, dmg: a.dmg, owned: !!save.owned[i] })),
+    enchants: () => Object.entries(ENCH).map(([k, E]) => ({ k, name: E.name, max: E.max })),
+    state: () => ({ pow: adminPow, speed: devSpeed, fly: flying, god: godMode, money: save.money, axe: save.equipped, ench: { ...(save.ench[save.equipped] || {}) } }),
+    // trees in a fan in front of you, as tough as you like
+    spawnTree(key, hp, h, mut, n) {
+        if (!TYPES[key]) return 0;
+        n = clamp(Math.round(+n) || 1, 1, 25);
+        for (let k = 0; k < n; k++) {
+            const a = player.yaw + (k % 7 - Math.min(n - 1, 6) / 2) * 0.32, d = 6 + Math.floor(k / 7) * 3.5;
+            const t = makeTree(player.pos.x - Math.sin(a) * d, player.pos.z - Math.cos(a) * d, clamp(+h || 7, 2, 16), key);
+            if (MUTS[mut]) applyMut(t, mut);
+            if (+hp > 0) t.hp = t.maxHp = Math.round(clamp(+hp, 1, 1e12));
+        }
+        return n;
+    },
+    // any axe, with whatever enchantments you pick, in your hand
+    giveAxe(i, ench) {
+        if (!AXES[i]) return false;
+        if (!save.owned[i]) gainAxe(i);
+        const e = {};
+        for (const [k, l] of Object.entries(ench || {})) if (ENCH[k] && +l > 0) e[k] = Math.min(ENCH[k].max, Math.round(+l));
+        if (Object.keys(e).length) save.ench[i] = e; else delete save.ench[i];
+        save.equipped = -1; equipAxe(i); writeSave();
+        return true;
+    },
+    setPow(v) { adminPow = clamp(+v || 1, 0.1, 1e6); },
+    setSpeed(v) { devSpeed = clamp(+v || 1, 0.25, 20); },
+    setFly(v) { flying = !!v; if (flying) { player.onGround = false; player.vel.y = 2; } },
+    setGod(v) { godMode = !!v; },
+    heal() { player.hp = player.maxHp; },
+    money(v, set) { save.money = Math.max(0, Math.round(set ? +v : save.money + +v) || 0); writeSave(); },
+    setTime(h) { clockT = (clamp(+h, 0, 24) / 24) * DAY_LEN; },
+    weather(w) { setWeather(w); },
+    // everyone in the game, for the character gallery: [{ id, name, group, icon() }]
+    characters() {
+        const hum = look => () => { const h = makeHumanoid(look); h.g.rotation.y = 0.45; return h.g; };
+        const out = [];
+        for (const [k, L] of Object.entries(NPC_LOOKS)) out.push({ id: "npc:" + k, name: L.name || k[0].toUpperCase() + k.slice(1), group: L.custom ? "Your people (Studio)" : "People", icon: hum(L) });
+        out.push({ id: "sly", name: "Sly", group: "People", icon: hum(SLY_LOOK) });
+        out.push({ id: "ferryman", name: "The Ferryman", group: "People", icon: () => { const f = makeFerrymanFigure(0x22163a, 0x6a4a9a, 0xe8d8ff); f.rotation.y = 0.45; return f; } });
+        out.push({ id: "you", name: "You online (" + (mp.name || "Tree") + ")", group: "People", icon: hum({ face: "clerk", ...mpLook(mp.name || "Tree") }) });
+        const wild = { Deer: makeDeer, Rabbit: makeRabbit, Squirrel: makeSquirrel, Goat: makeGoat, Eagle: makeEagle, Fox: makeFox, Moth: makeMoth, Crow: makeCrow, Bat: makeBat, Turtle: makeTurtle, Penguin: makePenguin, "Polar Bear": makePolarBear, Seal: makeSeal, Crab: makeCrab, Frog: makeFrog };
+        for (const [n, f] of Object.entries(wild)) out.push({ id: "wild:" + n, name: n, group: "Animals", icon: () => { const a = f(); a.rotation.y = 0.6; return a; } });
+        for (const d of Array.isArray(CONTENT_ANIMALS) ? CONTENT_ANIMALS : []) if (d && d.key) out.push({ id: "ca:" + d.key, name: d.name || d.key, group: "Your animals (Studio)", icon: () => { const a = makeCustomAnimal(d); a.rotation.y = 0.6; return a; } });
+        for (const [k, P] of Object.entries(PETS)) out.push({ id: "pet:" + k, name: P.name, group: "Pets", icon: () => { const p = P.make(); p.rotation.y = 0.6; return p; } });
+        const order = ["People", "Your people (Studio)", "Animals", "Your animals (Studio)", "Pets"];
+        return out.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group)).map(c => ({ ...c, icon: () => renderIcon("char:" + c.id, c.icon) }));
+    },
+};
 async function loadAdmin() {
     if (!adminMod) {
         adminMod = await import("./admin.js");
-        adminMod.setup({ mp, mpSend, mpUrl, mpIsleName, isle: () => isle, say: (t, k = "good") => toast(t, k), key: mpAdminKey,
+        adminMod.setup({ mp, mpSend, mpUrl, mpIsleName, isle: () => isle, say: (t, k = "good") => toast(t, k), key: mpAdminKey, powers: adminPowers,
             goTo(x, z, fx, fz) { player.pos.set(x, groundY(x, z) + 1.7, z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(-(fx - x), -(fz - z)); player.pitch = 0; } });
     }
     return adminMod;
