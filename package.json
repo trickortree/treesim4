@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "2.0.4",
+  "version": "2.5.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -60,7 +60,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.0.4 (ADMIN POWERS)\n\nA small update for the public server.\n\n- The admin got some new tricks. Keep an eye on the sky."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.5.0 (MY ISLAND, PVP, TRADING AND MORE)\n\nThe biggest update yet: build your own island, and play with everyone on the public server.\n\n- My Island: your own island to build on with every prop in the game. Any Ferryman sails you there. Press B to build and E to see every prop. Walls are solid, and you can stand on floors, crates and ramps.\n- Visit anyone's island with /visit Name, or VISIT ISLAND in Friends.\n- Friends (Y): friend requests, JOIN your friends, and private messages with /msg.\n- Crews (U): make a crew with a tag over your names, a shared bank, crew chat and rankings.\n- Trading: swap cash, materials, pets and axes with other players.\n- PvP (V): fight other players who have it on too.\n- Emotes (G).\n- MY LOOK: make your own character, and buy capes, trails and axe skins.\n- Mega pets: 3 of the same pet evolve into a Mega pet with twice the perk and a trick.\n- Sly's Armory: 6 legendary axes with new looks and abilities, one for each rebirth.\n- Sail back to any island you've been to.\n- Server-wide events like double cash and golden rain, when they're on."
     }
   }
 }
