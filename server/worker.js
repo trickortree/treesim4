@@ -8,7 +8,11 @@ import { DurableObject } from "cloudflare:workers";
 
 const MAX_PLAYERS = 40;
 const MOTD = "Welcome to the Tree Sim 4 public server! Press T to chat, hold Tab to see who's here.";
-const HATS = ["", "hood", "cap", "beanie", "bandana", "straw", "top", "helmet", "horns", "crown"];
+const HATS = ["", "hood", "cap", "beanie", "bandana", "straw", "top", "helmet", "horns", "crown", "witch"];
+// 2.5 looks: what MY LOOK can pick, and the cosmetics (bought in the game) the server passes on
+const LOOK_PICK = { hairStyle: ["short", "long", "bun", "mohawk", "spiky", "bald"], beardStyle: ["none", "short", "full", "goatee", "long"], eyes: ["round", "sleepy", "wide", "angry", "closed", "glow"],
+    mouth: ["smile", "grin", "frown", "open", "flat", "fangs", "tongue"], build: ["slim", "normal", "wide"],
+    cape: ["crimson", "forest", "ocean", "royal", "night", "gold"], trail: ["leaves", "sparks", "embers", "frost", "hearts", "rainbow"], axeSkin: ["gold", "frost", "shadow", "magma", "neon", "candy"] };
 const CORS = { "access-control-allow-origin": "*" };
 
 const int = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.max(lo, Math.min(hi, Math.round(+v))) : d);
@@ -18,17 +22,26 @@ const cleanText = s => [...String(s || "")].filter(c => { const k = c.charCodeAt
 function cleanLook(l) {
     l = l && typeof l === "object" ? l : {};
     const col = v => int(v, 0, 0xffffff, 0x888888);
-    return { skin: col(l.skin), shirt: col(l.shirt), pants: col(l.pants), hat: HATS.includes(l.hat) ? l.hat : "", hatCol: col(l.hatCol) };
+    const out = { skin: col(l.skin), shirt: col(l.shirt), pants: col(l.pants), hat: HATS.includes(l.hat) ? l.hat : "", hatCol: col(l.hatCol) };
+    for (const [k, list] of Object.entries(LOOK_PICK)) if (list.includes(l[k])) out[k] = l[k];
+    for (const k of ["hair", "beard", "boots", "vest", "scarf"]) if (l[k] !== null && l[k] !== undefined) out[k] = col(l[k]);
+    return out;
 }
 function cleanState(m) {
     const x = num(m.x, -9000, 9000), y = num(m.y, -500, 2000), z = num(m.z, -9000, 9000);
     if (x === null || y === null || z === null) return null;
     const pets = Array.isArray(m.pets) ? m.pets.slice(0, 3).map(k => String(k).replace(/[^a-z]/g, "").slice(0, 12)).filter(Boolean) : [];
     const shiny = Array.isArray(m.shiny) ? m.shiny.slice(0, 3).map(v => (v ? 1 : 0)) : [];
+    const evo = Array.isArray(m.evo) ? m.evo.slice(0, 3).map(v => (v ? 1 : 0)) : [];
     return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, z: Math.round(z * 100) / 100, yaw: num(m.yaw, -100, 100) || 0, pitch: num(m.pitch, -3, 3) || 0,
-        sw: m.sw ? 1 : 0, axe: int(m.axe, 0, 99), isle: int(m.isle, 1, 99, 1), pets, shiny };
+        sw: m.sw ? 1 : 0, axe: int(m.axe, 0, 99), isle: int(m.isle, 1, 99, 1), mi: cleanName(m.mi), pets, shiny, evo, pvp: m.pvp ? 1 : 0 };
 }
-const pub = a => ({ id: a.id, name: a.name, isle: a.isle, look: a.look, st: a.st, admin: a.admin ? 1 : 0 });
+const pub = a => ({ id: a.id, name: a.name, isle: a.isle, look: a.look, st: a.st, admin: a.admin ? 1 : 0, crew: a.crew || "" });
+// 2.5 crews: a tag over your name, crew chat, a shared bank and rankings by trees felled. Saved here as crew:<TAG>, and each
+// member's name points at their crew with crewOf:<name>. Members are names (a name stays with its owner, see Names).
+const CREW_MAX = 20;
+const tagKey = t => String(t || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+const crewName = s => String(s || "").replace(/[^A-Za-z0-9 '\-]/g, "").replace(/\s+/g, " ").trim().slice(0, 20);
 // Announcements come in two kinds, each up for as long as the admin says (or until taken down):
 //  - "quick": only for whoever is on the server right now.
 //  - "full": everyone, including players who join while it's up, and the main menu.
@@ -39,6 +52,22 @@ const annWire = (x, now = Date.now()) => ({ id: x.id, kind: x.kind, text: x.text
 // (by a random token the game keeps) for 30 days after it was last used. "Tree" (the admin's name) and staff-sounding
 // names need the admin key. A 2.0.0 game can't pick another name, so instead it plays as a Woodcutter.
 const NAME_KEEP = 30 * 86400 * 1000;
+// 2.5 server events: the admin starts one for a while; everyone on the server gets it
+const EVENT_IDS = ["cash", "logs", "gold", "blood", "sale"];
+// 2.5 shared trees: trees the admin spawns on the server. Everyone on that island chops the same health; when one falls,
+// everyone who hit it gets its logs in their own game.
+const STREE_MAX = 60;
+// 2.5 trading: two players fill in what they give (cash, materials, pets, axes); when both say ready, each game makes the swap.
+// A trade lives as trade:<id> until it's done or someone leaves.
+function cleanOffer(o) {
+    o = o && typeof o === "object" ? o : {};
+    const mats = {};
+    for (const [k, n] of Object.entries(o.mats && typeof o.mats === "object" ? o.mats : {}).slice(0, 24)) if (/^[a-z0-9_]{1,24}$/.test(k)) { const v = int(n, 0, 1e12, 0); if (v) mats[k] = v; }
+    const pets = (Array.isArray(o.pets) ? o.pets : []).slice(0, 3).map(p => ({ k: String((p && p.k) || "").replace(/[^a-z]/g, "").slice(0, 16), stars: int(p && p.stars, 1, 5, 1), shiny: p && p.shiny ? 1 : 0 })).filter(p => p.k);
+    const axes = [...new Set((Array.isArray(o.axes) ? o.axes : []).slice(0, 3).map(i => int(i, 1, 99, 0)).filter(Boolean))];
+    return { cash: int(o.cash, 0, 1e15, 0), mats, pets, axes };
+}
+const EMOTE_IDS = ["wave", "cheer", "dance", "clap", "point", "bow", "laugh", "flex"];
 const nameKey = n => String(n).toLowerCase().replace(/[^a-z0-9]/g, "");
 const leet = k => k.replace(/0/g, "o").replace(/1/g, "i").replace(/3/g, "e").replace(/4/g, "a").replace(/5/g, "s").replace(/7/g, "t");
 const reserved = n => { const k = nameKey(n); return [k, leet(k)].some(x => /^(tre{2,}\d*|admin|administrator|owner|server|mod|moderator|staff|dev|developer)$/.test(x)); };
@@ -109,6 +138,12 @@ export class Lobby extends DurableObject {
         if (up.length !== all.length) await this.ctx.storage.put("anns", up);
         return up;
     }
+    async events() {
+        const all = (await this.ctx.storage.get("events")) || [], now = Date.now(), up = all.filter(x => x.until > now);
+        if (up.length !== all.length) await this.ctx.storage.put("events", up);
+        return up.map(x => ({ k: x.k, left: x.until - now }));
+    }
+    async sendEvents() { const msg = JSON.stringify({ t: "events", list: await this.events() }); for (const p of this.players()) if (p.a.v >= 2) this.send(p.w, msg); }
     // what a 2.0.0 game understands: the newest full announcement that's up
     async news() { const f = (await this.anns()).filter(x => x.kind === "full").pop(); return f ? { text: f.text, at: f.at } : null; }
     everyone(obj) { const msg = JSON.stringify(obj); for (const p of this.players()) this.send(p.w, msg); }
@@ -155,6 +190,8 @@ export class Lobby extends DurableObject {
                 for (const p of out) { this.send(p.w, { t: "replaced" }); this.gone(p.w, 4006); }
             }
             a.name = name; a.h = h; a.admin = you; a.boss = you; a.v = v;
+            const ck = await this.ctx.storage.get("crewOf:" + nameKey(name)), cr = ck && (await this.ctx.storage.get("crew:" + ck));
+            a.crew = cr && cr.members.includes(nameKey(name)) ? cr.tag : "";
             a.look = cleanLook(m.look);
             a.st = cleanState(m.st || {}) || null;
             a.isle = a.st ? a.st.isle : int(m.isle, 1, 99, 1);
@@ -163,9 +200,10 @@ export class Lobby extends DurableObject {
             const others = this.players().filter(p => p.w !== ws);
             const full = (await this.anns()).filter(x => x.kind === "full");
             this.send(ws, { t: "welcome", id: a.id, name: a.name, admin: a.admin ? 1 : 0, motd: await this.motd(), players: others.map(p => pub(p.a)),
-                ...(a.v >= 2 ? { anns: full.map(x => annWire(x)) } : { news: full.length ? { text: full[full.length - 1].text, at: full[full.length - 1].at } : null }) });
+                ...(a.v >= 2 ? { anns: full.map(x => annWire(x)), events: await this.events(), strees: (await this.ctx.storage.get("strees")) || [] } : { news: full.length ? { text: full[full.length - 1].text, at: full[full.length - 1].at } : null }) });
             const j = JSON.stringify({ t: "join", ...pub(a) });
             for (const p of others) this.send(p.w, j);
+            if (a.crew) await this.crewTell(a.crew);
             return;
         }
         if (!a.joined) return;
@@ -188,8 +226,262 @@ export class Lobby extends DurableObject {
             for (const p of this.players()) this.send(p.w, msg);
             return;
         }
+        // private messages and friend requests go to one player, found by name
+        if (m.t === "pm" || m.t === "friendReq" || m.t === "friendOk") {
+            const to = this.players().find(p => p.w !== ws && nameKey(p.a.name) === nameKey(cleanName(m.to)));
+            // each kind has its own pace (answering a request is never held up)
+            const slot = { pm: "pmT", friendReq: "frT" }[m.t], gap = m.t === "pm" ? 700 : 1000;
+            if (slot && now - (a[slot] || 0) < gap) { ws.serializeAttachment(a); this.send(ws, { t: "sys", text: "Slow down a little." }); return; }
+            if (slot) a[slot] = now; ws.serializeAttachment(a);
+            if (!to) { this.send(ws, { t: "sys", text: `${cleanName(m.to) || "They"} isn't online.` }); return; }
+            if (m.t === "pm") {
+                const text = cleanText(m.text); if (!text) return;
+                if (a.muted) { this.send(ws, { t: "sys", text: "You're muted, so nobody else sees your messages." }); return; }
+                this.send(to.w, { t: "pm", from: a.name, text, admin: a.admin ? 1 : 0 });
+                this.send(ws, { t: "pmSent", to: to.a.name, text });
+            } else {
+                this.send(to.w, { t: m.t, from: a.name });
+                if (m.t === "friendReq") this.send(ws, { t: "sys", text: `Friend request sent to ${to.a.name}.` });
+            }
+            return;
+        }
+        if (typeof m.t === "string" && m.t.startsWith("crew")) return this.crew(ws, a, m, now);
+        // 2.5 PvP: a hit on another player, if you both have PvP on, you're on the same island and close (at most 4 a second)
+        if (m.t === "pvpHit") {
+            if (now - (a.pvpW || 0) > 1000) { a.pvpW = now; a.pvpN = 0; }
+            if (++a.pvpN > 4) { ws.serializeAttachment(a); return; }
+            ws.serializeAttachment(a);
+            const t = this.players().find(p => p.a.id === m.id && p.w !== ws);
+            if (!t || !a.st || !t.a.st || !a.st.pvp || !t.a.st.pvp || a.isle !== t.a.isle) return;
+            if (Math.hypot(a.st.x - t.a.st.x, a.st.z - t.a.st.z) > 5.5) return;
+            this.send(t.w, { t: "pvpHit", fromId: a.id, from: a.name, dmg: int(m.dmg, 1, 200, 1) });
+            return;
+        }
+        if (m.t === "pvpKO") { // you were knocked out: everyone on your island hears who did it
+            if (now - (a.koT || 0) < 2000) { ws.serializeAttachment(a); return; }
+            a.koT = now; ws.serializeAttachment(a);
+            const k = this.players().find(p => p.a.id === m.by); if (!k) return;
+            const msg = JSON.stringify({ t: "kill", killer: k.a.name, victim: a.name });
+            for (const p of this.players()) if (p.a.isle === a.isle && p.a.v >= 2) this.send(p.w, msg);
+            return;
+        }
+        if (typeof m.t === "string" && m.t.startsWith("trade")) return this.trade(ws, a, m, now);
+        if (m.t === "streeHit") { // a hit on a shared tree (at most 12 a second each)
+            if (now - (a.hitW || 0) > 1000) { a.hitW = now; a.hitN = 0; }
+            if (++a.hitN > 12) { ws.serializeAttachment(a); return; }
+            ws.serializeAttachment(a);
+            const all = (await this.ctx.storage.get("strees")) || [], t = all.find(x => x.id === m.id);
+            if (!t || t.isle !== a.isle) return;
+            t.hp -= num(m.dmg, 1, 1e13) || 1;
+            if (t.hp <= 0) {
+                await this.ctx.storage.put("strees", all.filter(x => x !== t));
+                const msg = JSON.stringify({ t: "streeFell", id: t.id, by: a.name });
+                for (const p of this.players()) if (p.a.v >= 2) this.send(p.w, msg);
+            } else {
+                await this.ctx.storage.put("strees", all);
+                const msg = JSON.stringify({ t: "streeHp", id: t.id, hp: Math.ceil(t.hp) });
+                for (const p of this.players()) if (p.a.v >= 2 && p.a.isle === t.isle && p.w !== ws) this.send(p.w, msg);
+            }
+            return;
+        }
+        if (m.t === "emote") { // an emote goes to everyone on your island (at most one every 0.7 s)
+            if (!EMOTE_IDS.includes(m.e) || now - (a.emoteT || 0) < 700) { ws.serializeAttachment(a); return; }
+            a.emoteT = now; ws.serializeAttachment(a);
+            const msg = JSON.stringify({ t: "emote", id: a.id, e: m.e });
+            for (const p of this.players()) if (p.w !== ws && p.a.isle === a.isle) this.send(p.w, msg);
+            return;
+        }
+        if (m.t === "look") { // a new look from MY LOOK, passed to everyone (at most every 1.5 s)
+            if (now - (a.lookT || 0) < 1500) { ws.serializeAttachment(a); return; }
+            a.lookT = now; a.look = cleanLook(m.look); ws.serializeAttachment(a);
+            const msg = JSON.stringify({ t: "look", id: a.id, look: a.look });
+            for (const p of this.players()) if (p.w !== ws) this.send(p.w, msg);
+            return;
+        }
+        if (m.t === "isleSave") { // 2.5: your own island's layout, in parts (at most 48 of 1,300 characters), so anyone can visit it
+            const i = int(m.i, 0, 47), n = int(m.n, 1, 48);
+            if (i === null || n === null || i >= n || typeof m.d !== "string" || m.d.length > 1300 || !/^[a-z0-9_,;-]*$/.test(m.d)) { ws.serializeAttachment(a); return; }
+            ws.serializeAttachment(a);
+            const k = nameKey(a.name);
+            await this.ctx.storage.put(`isleP:${k}:${i}`, m.d);
+            if (i === n - 1) await this.ctx.storage.put(`isle:${k}`, { n, at: now });
+            return;
+        }
+        if (m.t === "isleGet") { // visiting someone's island (one ask every 2 s)
+            if (now - (a.isleT || 0) < 2000) { ws.serializeAttachment(a); this.send(ws, { t: "sys", text: "Slow down a little." }); return; }
+            a.isleT = now; ws.serializeAttachment(a);
+            const who = cleanName(m.name), k = nameKey(who), meta = who ? await this.ctx.storage.get(`isle:${k}`) : null;
+            if (!meta) { this.send(ws, { t: "isleOf", name: who }); return; }
+            const keys = Array.from({ length: meta.n }, (_, i) => `isleP:${k}:${i}`), got = await this.ctx.storage.get(keys);
+            const on = this.players().find(p => nameKey(p.a.name) === k);
+            this.send(ws, { t: "isleOf", name: on ? on.a.name : who, d: keys.map(x => got.get(x) || "").join("") });
+            return;
+        }
         if (m.t === "ping") { ws.serializeAttachment(a); this.send(ws, { t: "pong", ts: num(m.ts, 0, 1e15) }); return; }
         ws.serializeAttachment(a);
+    }
+
+    // ---------- trading ----------
+    async tradeSend(tr, extra) {
+        for (const id of [tr.a, tr.b]) {
+            const p = this.players().find(q => q.a.id === id); if (!p) continue;
+            const them = id === tr.a ? tr.b : tr.a;
+            this.send(p.w, extra || { t: "trade", trade: { id: tr.id, me: { name: tr.names[id], offer: tr.offer[id], ready: !!tr.ready[id] }, them: { name: tr.names[them], offer: tr.offer[them], ready: !!tr.ready[them] } } });
+        }
+    }
+    async tradeEnd(tr, why) {
+        await this.ctx.storage.delete("trade:" + tr.id);
+        for (const id of [tr.a, tr.b]) { const p = this.players().find(q => q.a.id === id); if (p) { p.a.trade = ""; p.w.serializeAttachment(p.a); this.send(p.w, { t: "tradeEnd", why }); } }
+    }
+    async trade(ws, a, m, now) {
+        const sys = text => this.send(ws, { t: "sys", text });
+        const tr = a.trade ? await this.ctx.storage.get("trade:" + a.trade) : null;
+        if (m.t === "tradeReq") { // ask someone to trade (one ask every 2 s)
+            if (now - (a.trT || 0) < 2000) return sys("Slow down a little.");
+            a.trT = now; ws.serializeAttachment(a);
+            if (tr) return sys("You're already trading.");
+            const to = this.players().find(p => p.w !== ws && nameKey(p.a.name) === nameKey(cleanName(m.to)));
+            if (!to) return sys(`${cleanName(m.to) || "They"} isn't online.`);
+            if (to.a.trade) return sys(`${to.a.name} is trading with someone else.`);
+            to.a.tradeInv = a.id; to.w.serializeAttachment(to.a);
+            this.send(to.w, { t: "tradeReq", from: a.name, fromId: a.id });
+            return sys(`Trade request sent to ${to.a.name}.`);
+        }
+        if (m.t === "tradeAccept") {
+            if (tr) return sys("You're already trading.");
+            const from = this.players().find(p => p.a.id === m.fromId);
+            if (!from || a.tradeInv !== m.fromId) return sys("That trade request ran out.");
+            if (from.a.trade) return sys(`${from.a.name} is trading with someone else.`);
+            const id = crypto.randomUUID().slice(0, 8), t = { id, a: from.a.id, b: a.id, names: { [from.a.id]: from.a.name, [a.id]: a.name }, offer: { [from.a.id]: cleanOffer({}), [a.id]: cleanOffer({}) }, ready: {}, at: now };
+            await this.ctx.storage.put("trade:" + id, t);
+            for (const p of [from, this.players().find(q => q.w === ws)]) { p.a.trade = id; p.a.tradeInv = ""; p.w.serializeAttachment(p.a); }
+            return this.tradeSend(t);
+        }
+        if (!tr) return;
+        if (m.t === "tradeOffer") { // a change to what you give: both have to say ready again
+            tr.offer[a.id] = cleanOffer(m.offer); tr.ready = {};
+            await this.ctx.storage.put("trade:" + tr.id, tr);
+            return this.tradeSend(tr);
+        }
+        if (m.t === "tradeReady") {
+            tr.ready[a.id] = !!m.on;
+            if (tr.ready[tr.a] && tr.ready[tr.b]) { // the swap: each game gives what it offered and gets the other side
+                for (const id of [tr.a, tr.b]) { const p = this.players().find(q => q.a.id === id); if (p) this.send(p.w, { t: "tradeDone", give: tr.offer[id], get: tr.offer[id === tr.a ? tr.b : tr.a], with: tr.names[id === tr.a ? tr.b : tr.a] }); }
+                await this.ctx.storage.delete("trade:" + tr.id);
+                for (const id of [tr.a, tr.b]) { const p = this.players().find(q => q.a.id === id); if (p) { p.a.trade = ""; p.w.serializeAttachment(p.a); } }
+                return;
+            }
+            await this.ctx.storage.put("trade:" + tr.id, tr);
+            return this.tradeSend(tr);
+        }
+        if (m.t === "tradeCancel") return this.tradeEnd(tr, `${a.name} cancelled the trade.`);
+    }
+
+    // ---------- crews ----------
+    crewWire(c) {
+        const on = new Set(this.players().map(p => nameKey(p.a.name)));
+        return { name: c.name, tag: c.tag, owner: c.names[c.owner] || c.owner, bank: c.bank, felled: c.felled,
+            members: c.members.map(k => ({ name: c.names[k] || k, owner: k === c.owner ? 1 : 0, online: on.has(k) ? 1 : 0 })) };
+    }
+    // the crew's state to its members that are online
+    async crewTell(tag) {
+        const c = await this.ctx.storage.get("crew:" + tag); if (!c) return;
+        const msg = JSON.stringify({ t: "crew", crew: this.crewWire(c) });
+        for (const p of this.players()) if (p.a.crew === tag) this.send(p.w, msg);
+    }
+    // a player's tag changed: everyone sees the new tag over their head
+    setCrewTag(p, tag) {
+        p.a.crew = tag; p.w.serializeAttachment(p.a);
+        const msg = JSON.stringify({ t: "crewTag", id: p.a.id, tag });
+        for (const q of this.players()) this.send(q.w, msg);
+    }
+    async crew(ws, a, m, now) {
+        const me = this.players().find(p => p.w === ws); if (!me) return;
+        const k = nameKey(a.name), sys = text => this.send(ws, { t: "sys", text });
+        const c = a.crew ? await this.ctx.storage.get("crew:" + a.crew) : null;
+        if (m.t === "crewTop") { // rankings: the 10 crews that felled the most trees
+            const all = [...(await this.ctx.storage.list({ prefix: "crew:" })).values()].sort((x, y) => y.felled - x.felled).slice(0, 10);
+            this.send(ws, { t: "crewTop", list: all.map(x => ({ tag: x.tag, name: x.name, felled: x.felled, members: x.members.length })) });
+            if (c) this.send(ws, { t: "crew", crew: this.crewWire(c) }); // and your own crew, up to date
+            return;
+        }
+        if (m.t === "crewMake") {
+            if (c) return sys("Leave your crew first.");
+            const tag = tagKey(m.tag), name = crewName(m.name);
+            if (tag.length < 2) return sys("A crew tag is 2 to 4 letters or numbers.");
+            if (name.length < 3) return sys("Give your crew a name (3 to 20 letters).");
+            if (await this.ctx.storage.get("crew:" + tag)) return sys(`[${tag}] is taken. Pick another tag.`);
+            await this.ctx.storage.put("crew:" + tag, { name, tag, owner: k, members: [k], names: { [k]: a.name }, bank: 0, felled: 0, made: now });
+            await this.ctx.storage.put("crewOf:" + k, tag);
+            this.setCrewTag(me, tag); await this.crewTell(tag);
+            return sys(`You made the crew [${tag}] ${name}. Invite people from the Crew panel (U).`);
+        }
+        if (m.t === "crewJoin") { // saying yes to an invite
+            const tag = tagKey(m.tag);
+            if (c) return sys("Leave your crew first.");
+            if (a.crewInv !== tag) return sys("That invite ran out. Ask for a new one.");
+            const cr = await this.ctx.storage.get("crew:" + tag); if (!cr) return sys("That crew is gone.");
+            if (cr.members.length >= CREW_MAX) return sys(`[${tag}] is full (${CREW_MAX} people).`);
+            if (!cr.members.includes(k)) cr.members.push(k); cr.names[k] = a.name;
+            await this.ctx.storage.put("crew:" + tag, cr); await this.ctx.storage.put("crewOf:" + k, tag);
+            a.crewInv = ""; this.setCrewTag(me, tag); await this.crewTell(tag);
+            for (const p of this.players()) if (p.a.crew === tag && p.w !== ws) this.send(p.w, { t: "sys", text: `${a.name} joined the crew!` });
+            return sys(`You joined [${tag}] ${cr.name}!`);
+        }
+        if (!c) { if (m.t === "crewInvite" || m.t === "crewChat" || m.t === "crewBank" || m.t === "crewLeave" || m.t === "crewKick") sys("You're not in a crew."); if (m.t === "crewBank" && +m.amount > 0) this.send(ws, { t: "crewPaid", amount: Math.floor(+m.amount) }); return; }
+        const owner = c.owner === k;
+        if (m.t === "crewInvite") {
+            if (!owner) return sys("Only the crew's leader can invite.");
+            const to = this.players().find(p => nameKey(p.a.name) === nameKey(cleanName(m.to)));
+            if (!to) return sys(`${cleanName(m.to) || "They"} isn't online.`);
+            if (to.a.crew) return sys(`${to.a.name} is already in a crew.`);
+            to.a.crewInv = c.tag; to.w.serializeAttachment(to.a);
+            this.send(to.w, { t: "crewInvite", from: a.name, tag: c.tag, name: c.name });
+            return sys(`Crew invite sent to ${to.a.name}.`);
+        }
+        if (m.t === "crewChat") {
+            const text = cleanText(m.text); if (!text || now - (a.chatT || 0) < 700) return;
+            a.chatT = now; ws.serializeAttachment(a);
+            const msg = JSON.stringify({ t: "crewChat", from: a.name, tag: c.tag, text });
+            for (const p of this.players()) if (p.a.crew === c.tag) this.send(p.w, msg);
+            return;
+        }
+        if (m.t === "crewBank") { // put money in (anyone), or take it out (the leader)
+            const amt = Math.floor(+m.amount);
+            if (!Number.isFinite(amt) || amt === 0 || Math.abs(amt) > 1e18) return;
+            if (amt < 0) {
+                if (!owner) return sys("Only the crew's leader can take money out.");
+                if (c.bank < -amt) return sys("The crew bank doesn't have that much.");
+                c.bank += amt; this.send(ws, { t: "crewPaid", amount: -amt });
+            } else c.bank = Math.min(1e18, c.bank + amt);
+            await this.ctx.storage.put("crew:" + c.tag, c); await this.crewTell(c.tag);
+            const msg = JSON.stringify({ t: "sys", text: amt > 0 ? `${a.name} put $${amt.toLocaleString()} in the crew bank.` : `${a.name} took $${(-amt).toLocaleString()} out of the crew bank.` });
+            for (const p of this.players()) if (p.a.crew === c.tag) this.send(p.w, msg);
+            return;
+        }
+        if (m.t === "crewFell") { // trees felled, for the rankings (at most every 5 s)
+            const n = int(m.n, 0, 500, 0); if (!n || now - (a.fellT || 0) < 5000) return;
+            a.fellT = now; ws.serializeAttachment(a);
+            c.felled += n; await this.ctx.storage.put("crew:" + c.tag, c);
+            return;
+        }
+        if (m.t === "crewKick") {
+            if (!owner) return sys("Only the crew's leader can kick.");
+            const tk = nameKey(cleanName(m.name)); if (!c.members.includes(tk) || tk === k) return;
+            c.members = c.members.filter(x => x !== tk); await this.ctx.storage.put("crew:" + c.tag, c); await this.ctx.storage.delete("crewOf:" + tk);
+            const p = this.players().find(q => nameKey(q.a.name) === tk);
+            if (p) { this.setCrewTag(p, ""); this.send(p.w, { t: "crew", crew: null }); this.send(p.w, { t: "sys", text: `You were kicked from [${c.tag}].` }); }
+            await this.crewTell(c.tag);
+            return sys(`${c.names[tk] || tk} is out of the crew.`);
+        }
+        if (m.t === "crewLeave") {
+            c.members = c.members.filter(x => x !== k); await this.ctx.storage.delete("crewOf:" + k);
+            this.setCrewTag(me, ""); this.send(ws, { t: "crew", crew: null });
+            if (!c.members.length) { await this.ctx.storage.delete("crew:" + c.tag); return sys(`You left, and [${c.tag}] is gone.`); }
+            if (owner) c.owner = c.members[0]; // the next member leads
+            await this.ctx.storage.put("crew:" + c.tag, c); await this.crewTell(c.tag);
+            return sys(`You left [${c.tag}].`);
+        }
     }
 
     // can this game be Tree? "" when it can; otherwise why not (reserved, badPass, slotsFull, slow)
@@ -225,7 +517,7 @@ export class Lobby extends DurableObject {
             const bans = (await this.ctx.storage.get("bans")) || {};
             const devs = (await this.ctx.storage.get("treeDevs")) || [];
             const tree = { pass: !!(await this.ctx.storage.get("treePass")), slots: TREE_SLOTS, devs: devs.map(d => ({ k: d.h.slice(-4), by: d.by, at: d.at, seen: d.seen })) };
-            this.send(ws, { t: "adminOk", op: m.op, text, tree, motd: await this.motd(), anns: (await this.anns()).map(x => annWire(x)), bans: Object.entries(bans).map(([k, b]) => ({ k: k.slice(-4), name: b.name, at: b.at })),
+            this.send(ws, { t: "adminOk", op: m.op, text, tree, events: await this.events(), motd: await this.motd(), anns: (await this.anns()).map(x => annWire(x)), bans: Object.entries(bans).map(([k, b]) => ({ k: k.slice(-4), name: b.name, at: b.at })),
                 players: this.players().map(p => ({ id: p.a.id, name: p.a.name, isle: p.a.isle, admin: p.a.admin ? 1 : 0, muted: p.a.muted ? 1 : 0, x: p.a.st ? p.a.st.x : 0, z: p.a.st ? p.a.st.z : 0 })) });
         };
         const op = m.op;
@@ -278,6 +570,36 @@ export class Lobby extends DurableObject {
             this.send(p.w, { t: "sys", text: p.a.muted ? "The admin muted you." : "The admin unmuted you." });
             return reply(`${p.a.name} ${p.a.muted ? "muted" : "unmuted"}.`);
         }
+        if (op === "treeSpawn") { // one shared tree (no reply: everyone, the admin too, gets it as a stree)
+            const key = String(m.key || ""), isle = int(m.isle, 1, 99, 1), x = num(m.x, -9000, 9000), z = num(m.z, -9000, 9000);
+            if (!/^[a-z0-9_]{1,40}$/.test(key) || x === null || z === null) return;
+            const h = num(m.h, 2, 16) || 7, hp = Math.round(num(m.hp, 0, 1e12) || 0), mut = /^[a-z]{1,12}$/.test(m.mut || "") ? m.mut : "";
+            const tree = { id: crypto.randomUUID().slice(0, 8), isle, key, x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100, h, hp: hp || 1000, maxHp: hp || 1000, mut };
+            await this.ctx.storage.put("strees", [...((await this.ctx.storage.get("strees")) || []), tree].slice(-STREE_MAX));
+            const msg = JSON.stringify({ t: "stree", tree });
+            for (const p of this.players()) if (p.a.v >= 2) this.send(p.w, msg);
+            return;
+        }
+        if (op === "treeClear") {
+            const all = (await this.ctx.storage.get("strees")) || [];
+            await this.ctx.storage.put("strees", []);
+            const msg = JSON.stringify({ t: "streeGone", ids: all.map(x => x.id) });
+            for (const p of this.players()) if (p.a.v >= 2) this.send(p.w, msg);
+            return reply(`Cleared ${all.length} shared tree${all.length === 1 ? "" : "s"}.`);
+        }
+        if (op === "event") { // start (or restart) a server event for secs
+            if (!EVENT_IDS.includes(m.k)) return reply("Unknown event.");
+            const secs = int(m.secs, 30, 7 * 86400, 900), all = ((await this.ctx.storage.get("events")) || []).filter(x => x.k !== m.k && x.until > Date.now());
+            await this.ctx.storage.put("events", [...all, { k: m.k, until: Date.now() + secs * 1000 }]);
+            await this.sendEvents();
+            return reply("Event started for everyone.");
+        }
+        if (op === "eventStop") {
+            const all = (await this.ctx.storage.get("events")) || [];
+            await this.ctx.storage.put("events", m.k === "*" ? [] : all.filter(x => x.k !== m.k));
+            await this.sendEvents();
+            return reply("Event stopped.");
+        }
         if (op === "treePass") { // the password that lets another PC be Tree (empty turns it off)
             const pass = typeof m.pass === "string" ? m.pass : "";
             if (!pass) { await this.ctx.storage.delete("treePass"); return reply("Tree password removed: only the key can be Tree now."); }
@@ -315,5 +637,7 @@ export class Lobby extends DurableObject {
         try { ws.close(code === 1005 || code === 1006 ? 1000 : code, "bye"); } catch (e) { /* already closed */ }
         if (a && a.joined) { const msg = JSON.stringify({ t: "leave", id: a.id }); for (const p of this.players()) if (p.w !== ws) this.send(p.w, msg); }
         if (a) { a.joined = false; try { ws.serializeAttachment(a); } catch (e) { /* closed */ } }
+        if (a && a.crew) this.crewTell(a.crew).catch(() => {}); // their crew sees them go offline
+        if (a && a.trade) this.ctx.storage.get("trade:" + a.trade).then(tr => tr && this.tradeEnd(tr, `${a.name} left, so the trade is off.`)).catch(() => {});
     }
 }

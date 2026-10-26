@@ -241,7 +241,7 @@ const customIsle = n => ciList[n - CI_BASE] || null;
 const CI = () => (isle >= CI_BASE ? customIsle(isle) : null);
 let studioSeeAll = false; // Tree Sim 4 Studio's editor shows every tree an island can grow, whatever axe you hold
 let groundFn = null;
-const groundY = (x, z) => (x > 4500 ? 0 : groundFn ? groundFn(x, z) : 0); // x > 4500 is the casino's hall
+const groundY = (x, z) => (x > 4500 ? 0 : x < -4500 ? miBase(x, z) : groundFn ? groundFn(x, z) : 0); // x > 4500 is the casino's hall, x < -4500 is My Island
 const curShoreAt = (x, z) => (CI() ? CI().shoreAt(x, z) : isle === 6 ? shoreAt6(x, z) : isle === 5 ? shoreAt5(x, z) : isle === 4 ? shoreAt4(x, z) : isle === 3 ? shoreAt3(x, z) : isle === 2 ? shoreAt2(x, z) : shoreAt(x, z));
 const curShoreR = a => (CI() ? CI().shoreR(a) : isle === 6 ? shoreR6(a) : isle === 5 ? shoreR5(a) : isle === 4 ? shoreR4(a) : isle === 3 ? shoreR3(a) : isle === 2 ? shoreR2(a) : shoreR(a));
 
@@ -397,21 +397,65 @@ const CASES = {
 };
 const SHINY_CHANCE = 0.025;
 const caseBase = () => Math.round(6000 * Math.pow(2, save.rebirths || 0));
-const casePrice = k => Math.round(caseBase() * CASES[k].k);
+// 2.5: server events. The admin starts them from the admin panel and everyone on the public server gets them for a while.
+const SERVER_EVENTS = {
+    cash: { name: "Double Cash", e: "💰", desc: "logs and materials sell for twice as much" },
+    logs: { name: "Double Logs", e: "🪵", desc: "every tree drops twice the logs" },
+    gold: { name: "Golden Rain", e: "✨", desc: "new trees are often Golden" },
+    blood: { name: "Blood Moon", e: "🩸", desc: "night falls and the blood moon rises for everyone" },
+    sale: { name: "Black Market Sale", e: "🏷", desc: "Sly's cases are half price" }
+};
+const srvEvents = {}; // event -> when it ends (performance.now()); only while you're on the server
+const evOn = k => (srvEvents[k] || 0) > performance.now();
+const casePrice = k => Math.round(caseBase() * CASES[k].k * (evOn("sale") ? 0.5 : 1));
 const petSlots = () => 2 + ((save.rebirths || 0) >= 8 ? 1 : 0);
+// 2.5: your own look (MY LOOK on the menu) and cosmetics bought with cash. Everyone on the server sees them.
+const LOOK_SKINS = [0xf2c8a0, 0xe8b890, 0xe0b090, 0xc89070, 0xa0704a, 0x7a5232, 0x5a3a22, 0x3a2414, 0x9fe8ff, 0x8ac08a, 0xc8a0e0, 0xd8d8e8];
+const LOOK_HAIR = [0x1a1210, 0x3a2414, 0x6a4a2a, 0x8a5a2a, 0xc8903a, 0xe8c070, 0xf0e0c0, 0xd8d8e0, 0x8a1a1a, 0xd04a3a, 0x3aa05a, 0x2a6ad0, 0x7a3ad0, 0xff7ab0];
+const LOOK_COLS = [0x2a6ad0, 0xd04a3a, 0x3aa05a, 0xd0a02a, 0x7a3ad0, 0x2ab0b0, 0xe07a2a, 0xc83a8a, 0x8a6a3a, 0x5a5a6a, 0x202830, 0x141414, 0xf2f2f2, 0x9a1a2a, 0x1a4a2a, 0xffd040];
+const LOOK_HATS = ["", "cap", "beanie", "bandana", "straw", "top", "helmet", "hood", "crown", "horns", "witch"];
+const LOOK_COLOR_FIELDS = new Set(["skin", "hair", "beard", "hatCol", "shirt", "pants", "boots", "vest", "scarf"]);
+// k: price in "cases" (one case = the Black Market's Burlap Sack, which grows with your rebirths)
+const COSMETICS = {
+    cape: {
+        crimson: { name: "Crimson Cape", col: 0xb02a2a, k: 3 }, forest: { name: "Forest Cape", col: 0x2a7a3a, k: 3 }, ocean: { name: "Ocean Cape", col: 0x1a5aa8, k: 4 },
+        royal: { name: "Royal Cape", col: 0x6a2aa8, k: 8 }, night: { name: "Midnight Cape", col: 0x14141e, k: 8 }, gold: { name: "Golden Cape", col: 0xffd040, k: 25 }
+    },
+    trail: {
+        leaves: { name: "Falling Leaves", col: 0x5ac05a, rise: -0.5, life: 1.4, k: 6 }, sparks: { name: "Sparks", col: 0xffd040, rise: 0.9, life: 0.7, k: 8 },
+        embers: { name: "Embers", col: 0xff6a2a, rise: 1.2, life: 0.9, k: 10 }, frost: { name: "Frost", col: 0x9fe8ff, rise: 0.15, life: 1.3, k: 10 },
+        hearts: { name: "Hearts", col: 0xff5a8a, rise: 0.7, life: 1.1, k: 12 }, rainbow: { name: "Rainbow", col: "rainbow", rise: 0.4, life: 1.2, k: 30 }
+    },
+    axe: {
+        gold: { name: "Gilded", steel: 0xffd040, edge: 0xfff0a0, glow: 0x6a4a00, k: 12 }, frost: { name: "Frostbite", steel: 0x9fe8ff, edge: 0xeafcff, glow: 0x2a6aa8, k: 12 },
+        shadow: { name: "Shadow", steel: 0x2a2a3a, edge: 0x8a5aff, glow: 0x3a1a6a, k: 15 }, magma: { name: "Magma", steel: 0x3a1a10, edge: 0xff7a2a, glow: 0xff3a00, k: 15 },
+        neon: { name: "Neon", steel: 0x1a1a24, edge: 0x3affc8, glow: 0x00c890, k: 20 }, candy: { name: "Candy Cane", steel: 0xf2f2f2, edge: 0xff3a5a, glow: 0x5a0a14, k: 20 }
+    }
+};
+const cosPrice = (kind, k) => Math.round(caseBase() * COSMETICS[kind][k].k);
+if (!save.look || typeof save.look !== "object") save.look = null; // null: you look like your name, until you make your own
+if (!save.cosm || typeof save.cosm !== "object") save.cosm = { own: {}, cape: "", trail: "", axe: "" };
+if (!save.cosm.own || typeof save.cosm.own !== "object") save.cosm.own = {};
+if (!Array.isArray(save.friends)) save.friends = []; // 2.5: your friends' names (both of you said yes)
 if (!save.pets || typeof save.pets !== "object") save.pets = { own: {}, eq: [], opened: 0 };
 if (!save.pets.own || typeof save.pets.own !== "object") save.pets.own = {};
 if (!Array.isArray(save.pets.eq)) save.pets.eq = [];
 save.pets.eq = save.pets.eq.filter(k => PETS[k] && save.pets.own[k]);
 // how much one owned pet does
 function petValue(k) {
-    const P = PETS[k], o = save.pets.own[k] || { stars: 1 }, base = PERKS[P.perk].base * RAR[P.r].k * (1 + 0.25 * ((o.stars || 1) - 1)) * (o.shiny ? 1.5 : 1);
+    const P = PETS[k], o = save.pets.own[k] || { stars: 1 }, base = PERKS[P.perk].base * RAR[P.r].k * (1 + 0.25 * ((o.stars || 1) - 1)) * (o.shiny ? 1.5 : 1) * (o.evo ? 2 : 1);
     return Math.round(base * 10) / 10;
 }
 // the equipped pets' bonus of one kind: petK gives a multiplier (1.12 = +12%), petAdd a plain sum
+// 2.5: pet evolution. Three of the same pet evolve it into its Mega form: bigger, a glowing crown ring, twice the perk,
+// and a trick. Fetch (log, chop, reach and bite pets) brings you logs lying around; Dig (cash, luck, speed pets) digs up cash.
+const petTrick = k => (["cash", "luck", "speed"].includes(PETS[k].perk) ? "dig" : "fetch");
+const petName = k => { const o = save.pets.own[k] || {}; return (o.evo ? "Mega " : "") + (o.shiny ? "Shiny " : "") + PETS[k].name; };
+// a Mega pet: bigger, with a crown of light over it (for yours and other players')
+function megaPet(g, h) { g.scale.multiplyScalar(1.4); const ring = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.035, 6, 20), aglow(0xffd040, 0.85)); ring.rotation.x = Math.PI / 2; ring.position.y = h / g.scale.y * 1.0 + 0.15; g.add(ring); g.userData.mega = ring; }
 const petAdd = kind => save.pets.eq.reduce((s, k) => s + (PETS[k] && PETS[k].perk === kind ? petValue(k) : 0), 0);
 const petK = kind => 1 + petAdd(kind) / 100;
-const logValue = () => Math.round((4 + save.priceLvl * 2) * rebirthMult() * (isle === 3 ? 4 : isle === 2 ? 2.5 : 1) * petK("cash"));
+const logValue = () => Math.round((4 + save.priceLvl * 2) * rebirthMult() * (isle === 3 ? 4 : isle === 2 ? 2.5 : 1) * petK("cash") * (evOn("cash") ? 2 : 1));
 const ghostIncome = () => 0; // ghosts now earn by really chopping trees
 const maxHpNow = () => 100 + save.hpLvl * 20 + 50 * (save.rebirths || 0); // every rebirth makes you +50 HP tougher, forever
 
@@ -1356,6 +1400,7 @@ function ferrymanTex() {
 }
 function clampToIsland(p, dt) {
     if (p.x > 4500) { clampCasino(p); return; }
+    if (p.x < -4500) { clampMi(p); return; }
     if (CI()) { CI().clamp(p); return; }
     if (isle === 6) { clampIsle6(p); return; }
     if (isle === 5) { clampIsle5(p, dt); return; }
@@ -1772,6 +1817,7 @@ function mutW(k) {
     return w;
 }
 function rollMut() {
+    if (evOn("gold") && Math.random() < 0.3) return "golden"; // Golden Rain
     if (Math.random() > 0.07 * (isBlood() ? 1.8 : 1) * (buffOn("lucky") ? 1.5 : 1) * petK("luck")) return null;
     let tot = 0; for (const k of MUT_KEYS) tot += mutW(k);
     let r = Math.random() * tot;
@@ -2088,7 +2134,7 @@ const player = {
 };
 const keys = {};
 let mouseDown = false;
-const inSafe = () => Math.hypot(player.pos.x, player.pos.z) < SAFE_R || player.pos.x > 4500; // the casino is a safe zone
+const inSafe = () => Math.hypot(player.pos.x, player.pos.z) < SAFE_R || player.pos.x > 4500 || player.pos.x < -4500; // the casino and My Island are safe zones
 
 
 // ---------- axe viewmodel ----------
@@ -2146,7 +2192,15 @@ const AXES = [
     { name: "Volcano's Wrath", dmg: 1100, cost: 0, steel: 0x1a0a08, edge: 0xffd040, glow: 0xc04000, scale: 1.96, rarity: "#ffd040", isle3: true },
     // forged at the Frost Forge on the Iceberg
     { name: "Frostbite",      dmg: 1700, cost: 0, steel: 0x9ad8ff, edge: 0xffffff, glow: 0x3a8ad8, scale: 2.0, rarity: "#bff4ff", isle3: true },
-    { name: "Yeti's Fang",    dmg: 2600, cost: 0, steel: 0xe8f0f8, edge: 0x7af0ff, glow: 0x2a6aa8, scale: 2.1, rarity: "#7af0ff", isle3: true }
+    { name: "Yeti's Fang",    dmg: 2600, cost: 0, steel: 0xe8f0f8, edge: 0x7af0ff, glow: 0x2a6aa8, scale: 2.1, rarity: "#7af0ff", isle3: true },
+    // 2.5: Sly's legendary axes, sold at the Black Market from a rebirth on (sly), each with its own shape and an ability no other axe has.
+    // slyK: the price in Burlap Sacks (which grow with your rebirths). isle3 keeps them out of the Reaper's and the smiths' shops.
+    { name: "Twin Fang",         dmg: 60,   cost: 0, steel: 0x2a2a34, edge: 0xffe060, glow: 0x6a4a00, scale: 1.5,  rarity: "#ffe060", isle3: true, sly: 1, slyK: 4,  shape: "double" },
+    { name: "Storm Scythe",      dmg: 240,  cost: 0, steel: 0x1a2a4a, edge: 0x7ad8ff, glow: 0x1a5aaa, scale: 1.75, rarity: "#7ad8ff", isle3: true, sly: 2, slyK: 8,  shape: "scythe" },
+    { name: "Butcher's Cleaver", dmg: 800,  cost: 0, steel: 0x8a8a96, edge: 0xff4a4a, glow: 0x5a0a0a, scale: 1.85, rarity: "#ff5a5a", isle3: true, sly: 3, slyK: 14, shape: "cleaver" },
+    { name: "Crystal Reaver",    dmg: 1500, cost: 0, steel: 0x6a2a8a, edge: 0xff9aff, glow: 0x8a2aa8, scale: 1.95, rarity: "#ff9aff", isle3: true, sly: 4, slyK: 22, shape: "crystal" },
+    { name: "Gale Splitter",     dmg: 2400, cost: 0, steel: 0xd8f0e8, edge: 0x9affd8, glow: 0x2a8a6a, scale: 2.05, rarity: "#9affd8", isle3: true, sly: 5, slyK: 30, shape: "double" },
+    { name: "Midas Edge",        dmg: 3600, cost: 0, steel: 0xffd040, edge: 0xfff6c0, glow: 0x8a6a00, scale: 2.15, rarity: "#ffd040", isle3: true, sly: 6, slyK: 45, shape: "crystal" }
 ];
 // a Studio island's own axes (content/islands.js) come straight after the game's, island by island. They're added here, before
 // anything looks at the equipped axe, and ciAxes (STUDIO ISLANDS) gives them recipes and abilities. A save remembers its axes
@@ -2178,10 +2232,12 @@ if (Array.isArray(save.hotbar)) save.hotbar = save.hotbar.map(s => (typeof s ===
 const axeDmg = () => axeDmgFor(save.equipped);
 const ownedList = () => AXES.map((a, i) => i).filter(i => save.owned[i]);
 function applyAxeLook() {
-    const a = AXES[save.equipped];
-    steelM.color.setHex(a.steel); steelM.emissive.setHex(a.glow);
-    edgeM.color.setHex(a.edge); edgeM.emissive.setHex(a.glow);
+    const a = AXES[save.equipped], S = COSMETICS.axe[save.cosm.axe]; // an axe skin recolours whichever axe you hold
+    steelM.color.setHex(S ? S.steel : a.steel); steelM.emissive.setHex(S ? S.glow : a.glow);
+    edgeM.color.setHex(S ? S.edge : a.edge); edgeM.emissive.setHex(S ? S.glow : a.glow);
     headMesh.scale.setScalar(a.scale);
+    const kind = a.shape || "classic"; // the legendary axes have their own head shapes
+    if (headMesh.userData.kind !== kind) { const geo = axeHeadGeo(kind); geo.rotateY(Math.PI / 2); headMesh.geometry.dispose(); headMesh.geometry = geo; headMesh.userData.kind = kind; }
 }
 applyAxeLook();
 if (!(save.isle >= 2)) for (let i = 0; i < 60; i++) spawnTree(false); // (needs AXES for the difficulty scale)
@@ -2309,6 +2365,7 @@ if (!save.contract) newContract();
 // ---------- combat ----------
 const fwd = new THREE.Vector3();
 function tryHit() {
+    const foe = pvpTarget(); if (foe) { pvpSwing(foe); return; } // PvP: a player in front of you takes the hit
     camera.getWorldDirection(fwd);
     const fl = Math.hypot(fwd.x, fwd.z) || 1, dx0 = fwd.x / fl, dz0 = fwd.z / fl;
     let best = null, bestD = 1e9;
@@ -2330,7 +2387,9 @@ function tryHit() {
 const HIT_COL = { xmaspine: [0x1e5a34, 0xff3a3a, 0xffd040], xmasfir: [0x1e4e3e, 0xffffff, 0xff3a3a], xmasmoon: [0x1a2a5a, 0xd8e8ff, 0xb07aff], xmasash: [0x2a2624, 0xff6a1a, 0xffd040], ghost: [0x9fe8ff, 0xffffff], blood: [0xaa1818, 0xff5a5a], gold: [0xffd040, 0xfff0a0], elder: [0x7a4aa0, 0xc8a0ff], ironwood: [0xa9bcd4, 0x6a7a8a], frostbark: [0x8fe0ff, 0xffffff], emberwood: [0xff9a3a, 0xffe070], titan: [0xd8a860, 0xfff0c0],
     larch: [0x8a9a3a, 0xb07a45], stonebark: [0x8a8a96, 0x5a5a62], copperleaf: [0xd0763a, 0xffb070], ironbark: [0xa9c0dc, 0x4a5a6a], powderwood: [0x2a2228, 0xff4a3a], goldleaf: [0xffd040, 0xfff0a0], redwood: [0x7a3a22, 0xd08a5a], snowpine: [0xe8f4ff, 0xffffff], crystal: [0x7affef, 0xff7ad8], magma: [0xff5a1a, 0xffd060], colossus: [0xd8a860, 0xfff0c0] };
 function hitTree(best, dmg, melee) {
-    best.hp -= dmg;
+    // a shared tree: the server keeps its health, and it only falls when the server says so
+    if (best.srv) { best.srvHit = true; mpSend({ t: "streeHit", id: best.srv, dmg }); best.hp = Math.max(1, best.hp - dmg); }
+    else best.hp -= dmg;
     best.hurt = 1;
     floatWorld(V3(best.x + (player.pos.x - best.x) * (best.boss ? 0.3 : 0), best.gy + Math.min(best.h * 0.55, 3.2), best.z + (player.pos.z - best.z) * (best.boss ? 0.3 : 0)), "-" + dmg, "dmg");
     if (best.boss) bossHurt(best, dmg); else showBar(best);
@@ -2344,7 +2403,7 @@ function hitTree(best, dmg, melee) {
 function fellTree(t) {
     t.dying = true; t.t = 0;
     if (t.boss) { (t.key === "yeti" ? yetiDefeated : t.key === "cinderking" ? kingDefeated : bossDefeated)(t); return; }
-    save.felled++;
+    save.felled++; crewFelled++;
     if (isBlood()) bmFelled++;
     contractProgress("fell");
     if (t.type.rare) { save.rareFelled++; contractProgress("rare"); if (!t.type.xmas) toast(`You felled a ${t.type.name}!`, "rare"); }
@@ -2405,7 +2464,8 @@ function die() {
     save.deaths++;
     mouseDown = false;
     panel = null;
-    $("deathLost").textContent = lost > 0 ? `The forest keeps your ${lost} log${lost === 1 ? "" : "s"}.` : "You had no logs. Lucky you.";
+    const by = pvpBy; pvpBy = "";
+    $("deathLost").textContent = (by ? `${by} knocked you out. ` : "") + (lost > 0 ? `The forest keeps your ${lost} log${lost === 1 ? "" : "s"}.` : "You had no logs. Lucky you.");
     $("death").classList.add("show");
     sfx(60, 1.0, "sawtooth", 0.3, 0.2);
     writeSave();
@@ -2737,7 +2797,7 @@ document.addEventListener("drop", e => {
 });
 document.addEventListener("contextmenu", e => {
     const s = e.target.closest && e.target.closest(".hslot[data-w]");
-    if (!s) return;
+    if (!s) { if (locked) e.preventDefault(); return; } // right-click removes a prop while you build
     e.preventDefault(); save.hotbar[+s.dataset.slot] = null; renderInv(); writeSave();
 });
 function showPanels() {
@@ -2758,6 +2818,14 @@ function showPanels() {
     $("panelMarket").classList.toggle("show", panel === "market");
     $("panelSpin").classList.toggle("show", panel === "spin");
     $("panelPets").classList.toggle("show", panel === "pets");
+    $("panelFriends").classList.toggle("show", panel === "friends");
+    $("panelTrade").classList.toggle("show", panel === "trade");
+    if (panel === "trade") renderTrade();
+    $("panelClan").classList.toggle("show", panel === "clan");
+    $("panelMyIsle").classList.toggle("show", panel === "myisle");
+    if (panel === "myisle") renderMiCat();
+    if (panel === "clan") { renderClan(); if (mp.on) mpSend({ t: "crewTop" }); }
+    if (panel === "friends") renderFriends();
     if (panel === "market") renderMarket();
     if (panel === "pets") renderPets();
     if (panel !== "spin" && spin && !spin.done) finishSpin();
@@ -2860,7 +2928,7 @@ function updateBars(dt) {
 const plates = [];
 const plateV = new THREE.Vector3();
 const treeDmg = t => (t.type.flee ? 0 : Math.round((8 + t.h) * t.type.dmg * (1 + 0.05 * (save.day - 1)) * dmgScale() * (isBlood() ? 1.25 : 1) * isleDm()));
-const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw() * (buffOn("lucky") ? 1.5 : 1) * (t.mut ? MUTS[t.mut].mult : 1) * petK("logs")));
+const treeLogs = t => Math.max(1, Math.round(Math.ceil(t.h / 2) * t.type.logs * rewardScale() * (isBlood() ? 2 : 1) * isleRw() * (buffOn("lucky") ? 1.5 : 1) * (t.mut ? MUTS[t.mut].mult : 1) * petK("logs") * (evOn("logs") ? 2 : 1)));
 function hidePlates() { for (const p of plates) p.style.display = "none"; }
 function updateNameplates() {
     const cands = [];
@@ -2899,6 +2967,7 @@ function updateNameplates() {
 // ---------- map ----------
 function drawMap() {
     if ($("mapLog")) $("mapLog").style.display = "none";
+    if (inMyIsle()) { drawMapMi(); return; }
     if (CI()) { drawMapC(CI()); return; }
     if (isle === 6) { drawMap6(); return; }
     if (isle === 5) { drawMap5(); return; }
@@ -2954,7 +3023,7 @@ function drawMap() {
 }
 
 // ---------- menus (title / pause) ----------
-const CONTROLS = [["WASD", "Move"], ["Mouse", "Look"], ["Click", "Swing / shoot"], ["Drag", "Weapons onto hotbar (E)"], ["Shift", "Sprint"], ["Space", "Jump"], ["Q", "Dash"], ["Z", "Axe ability"],
+const CONTROLS = [["WASD", "Move"], ["Mouse", "Look"], ["Click", "Swing / shoot"], ["Drag", "Weapons onto hotbar (E)"], ["Shift", "Sprint"], ["Space", "Jump"], ["G", "Emotes"], ["Y", "Friends"], ["U", "Crew"], ["V", "PvP on/off"], ["B", "Build (on My Island)"], ["Q", "Dash"], ["Z", "Axe ability"],
     ["E", "Inventory"], ["M", "Map"], ["F", "Interact"], ["1-5", "Hotbar slot"], ["R", "Reload"], ["Wheel", "Next weapon"], ["H", "Bandage"], ["K", "Relic"], ["L", "Lantern"], ["J", "Fish journal"]];
 function renderMenu() {
     if ($("ver")) $("ver").textContent = "TREE CHOP STUDIOS · v" + VERSION;
@@ -3065,6 +3134,7 @@ addEventListener("keydown", e => {
     if ($("intro")) return; // studio intro is playing
     if (e.target && e.target.closest && e.target.closest("input, textarea, select")) { if (e.code === "Escape") e.target.blur(); return; } // typing into a field, not playing
     if (settingsOpen()) { if (e.code === "Escape") openSettings(false); return; } // the settings screen eats keys until it's closed
+    if (lookOpen()) { if (e.code === "Escape") openLook(false); return; } // so does MY LOOK
     if (!DEBUG && e.code === "Backquote") { e.preventDefault(); toggleAdmin(); return; } // the admin panel, for Tree only
     if (DEBUG && e.code === "Backquote") { e.preventDefault(); if (state === "playing") togglePanel("dev"); else if (window.__ts4dev) window.__ts4dev.toggle(); return; }
     keys[e.code] = true;
@@ -3077,7 +3147,14 @@ addEventListener("keydown", e => {
     if (panel === "casino") { if (e.code === "Escape") { closePanel(); return; } if (casinoKey(e.code)) e.preventDefault(); return; }
     if (panel === "talk") { if (e.code === "KeyF" || e.code === "Space" || e.code === "Enter") advanceTalk(); else if (e.code === "Escape") closePanel(); return; }
     if (e.code === "Escape") { if (panel) closePanel(); return; }
+    if (panel === "myisle" && (e.code === "KeyE" || e.code === "KeyB")) { closePanel(); return; }
+    if (inMyIsle() && !panel && miKey(e)) { e.preventDefault(); return; } // building on My Island
     if (e.code === "KeyT" && mp.on && !panel) { e.preventDefault(); mpOpenChat(); return; }
+    if (e.code === "KeyG" && !panel) { emoteBar(!emoteBarOn); return; }
+    if (e.code === "KeyY" && (!panel || panel === "friends")) { togglePanel("friends"); return; }
+    if (e.code === "KeyU" && (!panel || panel === "clan")) { togglePanel("clan"); return; }
+    if (e.code === "KeyV" && !panel) { pvpToggle(); return; }
+    if (emoteBarOn && /^Digit[1-8]$/.test(e.code)) { doEmote(EMOTE_KEYS[+e.code.slice(5) - 1]); return; }
     if (e.code === "Tab") { e.preventDefault(); if (!panel && mp.on) renderMpList(); if (panel === "shop") { const tl = SHOP_TABS[shopMode].map(t => t[0]); shopPage = 0; shopTab = tl[(tl.indexOf(shopTab) + 1) % tl.length]; renderShop(); } return; }
     if (e.code === "KeyE") { togglePanel("inv"); return; }
     if (e.code === "KeyM") { togglePanel("map"); return; }
@@ -3103,9 +3180,10 @@ addEventListener("keydown", e => {
     }
 });
 addEventListener("keyup", e => { keys[e.code] = false; if (e.code === "Tab") $("mpList").classList.remove("show"); });
-addEventListener("wheel", e => { if (state === "playing" && !panel && locked && !ride) cycleWeapon(e.deltaY > 0 ? 1 : -1); }, { passive: true });
+addEventListener("wheel", e => { if (state === "playing" && !panel && locked && !ride) { if (MI.build && inMyIsle()) miCycle(e.deltaY > 0 ? 1 : -1); else cycleWeapon(e.deltaY > 0 ? 1 : -1); } }, { passive: true });
 addEventListener("mousedown", e => {
     if ($("intro")) return;
+    if (state === "playing" && locked && !panel && MI.build && inMyIsle()) { e.preventDefault(); miClick(e.button); return; } // building, not chopping
     if (e.button !== 0 || state !== "playing") return;
     if (!locked && !panel) { try { lockPointer(); } catch (er) { /* ignore */ } return; }
     if (locked) { if (fishing.on) fishAction(); else mouseDown = true; }
@@ -3137,6 +3215,7 @@ function nearest() {
 }
 function nearest0() {
     if (inCasino()) return nearestCasino();
+    if (inMyIsle()) return nearestMi();
     if (isle === 5 && B5.on) return nearest5();
     { const pn = nearestPlaced(); if (pn) return pn; } // things placed in the Studio: people, notes, chests, shrines, portals
     if (enchTable.g.visible && Math.hypot(player.pos.x - enchTable.x, player.pos.z - enchTable.z) < 2.9) return { k: "ench" };
@@ -3167,6 +3246,7 @@ function interact() {
     const n = nearest();
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
+    if (n.k === "miFerry") { ferryConfirm = 0; openPanel("ferry"); return; }
     if (n.k === "ferry6" || n.k === "ferryC") { if (n.k === "ferryC" || customIsle(7)) openFerryC(); else openFerry6(); return; }
     if (ISLE5_ACT[n.k]) { ISLE5_ACT[n.k](n); return; }
     if (n.k === "placed") { placedInteract(n.o); return; }
@@ -3279,6 +3359,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
             t.t += dt / 0.9;
             t.body.rotation.x = -Math.min(1, t.t * t.t) * Math.PI / 2;
             if (t.t >= 1) {
+                if (t.noDrop) { burst(V3(t.x, 0.6, t.z), 14, 4, chipMats); scene.remove(t.g); t.gone = true; continue; } // someone else's shared tree
                 if (t.byGhost) { burst(V3(t.x, 0.6, t.z), 14, 4, [chipMats[1], new THREE.MeshBasicMaterial({ color: 0x9fe8ff })]); sfx(120, 0.2, "square", 0.08, 0.5); scene.remove(t.g); t.gone = true; continue; }
     const bx = -Math.sin(t.g.rotation.y), bz = -Math.cos(t.g.rotation.y);
                 dropLogs(t.x, t.z, Math.round(treeLogs(t) * (1 + 0.2 * enchLv("fortune"))), { x: bx, z: bz }, t.key);
@@ -3435,7 +3516,7 @@ function update(dt) {
     pushOutBoxes(player.pos, 0.45);
     }
     if (ride) updateRide(dt);
-    const gnd = groundY(player.pos.x, player.pos.z) + 1.7;
+    const gnd = (inMyIsle() ? miGround(player.pos.x, player.pos.z, player.pos.y - 1.7) : groundY(player.pos.x, player.pos.z)) + 1.7; // on My Island you can stand on what you built
     if (!ride && !boating() && (player.pos.y <= gnd || (!flying && player.onGround && player.vel.y <= 0 && player.pos.y - gnd < 0.7))) { player.pos.y = gnd; player.vel.y = 0; player.onGround = !flying; }
     player.dashCd -= dt;
     updateAbilities(dt);
@@ -3457,7 +3538,7 @@ function update(dt) {
     camera.getWorldDirection(fwd);
     const fl = Math.hypot(fwd.x, fwd.z) || 1;
     updateTrees(dt, safe, fwd.x / fl, fwd.z / fl);
-    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt); updateIsle5(dt); updateIsle6(dt); updateCustomIsles(dt); placedTick(dt);
+    updateWorldAnim(dt); updateIsle2Anim(dt); updateIsle3(dt); updateIsle4(dt); updateIsle5(dt); updateIsle6(dt); updateCustomIsles(dt); placedTick(dt); myIsleTick(dt);
     updateWeather(dt); updateEcosystem(dt); updateGhosts(dt); updateEnchTable(dt); updateWild(dt); updateFishing(dt); ambienceTick(dt); footsteps(dt);
 
     // particles
@@ -3894,7 +3975,7 @@ function updateEcosystem(dt) {
 addTgt = null;
 //  1.0.1: weather, blood moon, ghost lumberjacks, ambience
 // =====================================================================
-function isBlood() { return isNight() && save.day % 3 === 0; }
+function isBlood() { return isNight() && (save.day % 3 === 0 || evOn("blood")); }
 let bmFelled = 0, bmBeat = 0;
 
 const WX_ICON = { clear: "☀", cloudy: "☁", rain: "🌧", storm: "⛈", fog: "🌫" };
@@ -4339,6 +4420,11 @@ function openFerry() {
     openPanel("ferry");
 }
 function renderFerry() {
+    const h2 = document.querySelector("#panelFerry h2"); if (!h2.dataset.orig) h2.dataset.orig = h2.textContent;
+    h2.textContent = h2.dataset.orig; $("ferryBuy").dataset.sail = "";
+    renderSail();
+    if (inMyIsle()) { renderFerryMy(); return; } // on My Island: back to where you came from, or anywhere
+    if (isle < (save.rebirths || 0) + 1) { renderFerryOld(); return; } // an island you've already passed: the Ferryman sails you home
     if (isle > 6 || (isle === 6 && customIsle(7))) { renderFerryC(); return; } // the way on to the Studio's islands
     if (isle === 6) { renderFerry6(); return; }
     if (isle === 5) { renderFerry5v2(); return; }
@@ -4359,11 +4445,37 @@ function renderFerry() {
     b.classList.toggle("danger", !!ferryConfirm);
 }
 $("ferryBuy").addEventListener("click", () => {
+    if ($("ferryBuy").dataset.sail) { sailTo(+$("ferryBuy").dataset.sail); return; }
     if (!rebirthReadyFrom(isle)) return;
     if (!ferryConfirm) { ferryConfirm = 1; renderFerry(); setTimeout(() => { ferryConfirm = 0; if (panel === "ferry") renderFerry(); }, 5000); return; }
     if (isle >= 2) startRebirthRide(isle); else doRebirth();
 });
 function doRebirth() { startRebirthRide(); }
+// 2.5: going back to old islands. Every Ferryman sails you, for free, to any island you've reached; your newest island
+// is the only one you rebirth from.
+const isleTitle = n => { const t = mpIsleName(n); return t.startsWith("the ") ? t[4].toUpperCase() + t.slice(5) : t; };
+function renderSail() {
+    const top = (save.rebirths || 0) + 1, list = [], here = inMyIsle() ? -1 : isle, mine = inMyIsle() && !MI.owner;
+    for (let n = 1; n <= top; n++) if (n < CI_BASE || customIsle(n)) list.push(n);
+    $("ferrySail").innerHTML = `<h4>⛵ SAIL TO AN ISLAND YOU'VE BEEN TO</h4><div class="sailRow">${list.map(n => `<button class="sailB${n === here ? " here" : ""}" data-sail="${n}" ${n === here ? "disabled" : ""}>${isleTitle(n)}${n === top ? " ★" : ""}</button>`).join("")}<button class="sailB mine${mine ? " here" : ""}" data-sail="my" ${mine ? "disabled" : ""}>🏝 MY ISLAND</button></div>`;
+}
+function renderFerryOld() {
+    const home = (save.rebirths || 0) + 1, b = $("ferryBuy");
+    document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
+    const html = `<div class="fprice">You've already passed ${mpIsleName(isle)}. Your newest island is <b>${isleTitle(home)}</b>, and that's where you rebirth from.</div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    b.disabled = false; b.classList.remove("danger"); b.textContent = "SAIL HOME TO " + isleTitle(home).toUpperCase(); b.dataset.sail = home;
+}
+function sailTo(n) {
+    if (n === "my") { goMyIsle(""); return; }
+    if (inMyIsle()) { closePanel(); leaveMyIsle(n); return; }
+    if (n === isle) return;
+    closePanel();
+    if (!travelTo(n)) { toast("You can't sail there right now.", "bad"); return; }
+    flash = 0.8; sfx(200, 0.9, "sine", 0.1, 2);
+    toast(`⛵ The Ferryman takes you to ${isleTitle(n)}.`, "good");
+}
+document.addEventListener("click", e => { const b = e.target.closest("[data-sail]"); if (b && !b.disabled && b.id !== "ferryBuy") sailTo(b.dataset.sail === "my" ? "my" : +b.dataset.sail); });
 
 function sellItems() {
     const bag = save.fishBag, total = bag.reduce((a, f) => a + f.v, 0), out = [];
@@ -4620,7 +4732,7 @@ const isleMats = () => MATS_BY_ISLE[isle] || MATS_BY_ISLE[2];
 // a Studio island's own materials exist from the start, so a save holding some never trips anything (makeCI sets their real look and price)
 for (const d of Array.isArray(CONTENT_ISLANDS) ? CONTENT_ISLANDS : []) for (const m of d && Array.isArray(d.mats) ? d.mats : []) if (m && /^m_[a-z0-9_]+$/.test(String(m.key)) && !MATS[m.key]) MATS[m.key] = { name: String(m.name || "Material").slice(0, 24), col: "#9a9aa4", price: 1, hex: 0x9a9aa4, custom: true };
 const GLOW_MATS = ["gold", "crystal", "magma", "moonstone", "void", "star", "heartwood", "ember", "phoenixf", "molten"];
-const matPrice = k => Math.round(MATS[k].price * rebirthMult() * (1 + 0.15 * (save.priceLvl || 0)) * petK("cash"));
+const matPrice = k => Math.round(MATS[k].price * rebirthMult() * (1 + 0.15 * (save.priceLvl || 0)) * petK("cash") * (evOn("cash") ? 2 : 1));
 const hasMats = r => Object.entries(r).every(([k, n]) => (save.mats[k] || 0) >= n);
 function payMats(r) { for (const [k, n] of Object.entries(r)) save.mats[k] -= n; }
 const matMeshMat = {};
@@ -4735,15 +4847,34 @@ iconScene.add(new THREE.AmbientLight(0xffffff, 1.3));
 { const d = new THREE.DirectionalLight(0xffffff, 2.4); d.position.set(1, 2, 2.5); iconScene.add(d); const d2 = new THREE.DirectionalLight(0x9fb0ff, 0.9); d2.position.set(-2, -1, 1); iconScene.add(d2); }
 const iconCache = {};
 const icM = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, emissive: e });
-function axeModel(i) {
-    const a = AXES[i], g = new THREE.Group();
+// 2.5: axe head shapes. "classic" is the bearded head every axe had; the legendary axes add the rest.
+function axeShape(kind) {
+    const sh = new THREE.Shape();
+    if (kind === "double") { // a blade on both sides of the haft
+        sh.moveTo(0.04, 0.02); sh.lineTo(0.19, -0.1); sh.quadraticCurveTo(0.31, 0.16, 0.2, 0.38); sh.lineTo(0.03, 0.29); sh.lineTo(-0.03, 0.29);
+        sh.lineTo(-0.2, 0.38); sh.quadraticCurveTo(-0.31, 0.16, -0.19, -0.1); sh.lineTo(-0.04, 0.02);
+    } else if (kind === "scythe") { // a long hooked blade
+        sh.moveTo(-0.05, 0.0); sh.lineTo(-0.05, 0.3); sh.quadraticCurveTo(0.34, 0.46, 0.62, 0.04); sh.quadraticCurveTo(0.3, 0.22, 0.04, 0.12); sh.lineTo(0.04, 0.0);
+    } else if (kind === "cleaver") { // a wide square slab
+        sh.moveTo(-0.06, 0.0); sh.lineTo(-0.06, 0.34); sh.lineTo(0.3, 0.36); sh.lineTo(0.33, -0.12); sh.lineTo(0.04, -0.08);
+    } else if (kind === "crystal") { // jagged crystal points
+        sh.moveTo(-0.07, 0.0); sh.lineTo(-0.07, 0.26); sh.lineTo(0.1, 0.42); sh.lineTo(0.14, 0.3); sh.lineTo(0.3, 0.38); sh.lineTo(0.22, 0.16);
+        sh.lineTo(0.37, 0.06); sh.lineTo(0.2, -0.02); sh.lineTo(0.25, -0.17); sh.lineTo(0.04, 0.0);
+    } else { sh.moveTo(-0.08, 0.0); sh.lineTo(-0.08, 0.27); sh.lineTo(0.03, 0.29); sh.lineTo(0.2, 0.38); sh.quadraticCurveTo(0.31, 0.16, 0.19, -0.1); sh.lineTo(0.04, 0.02); }
+    sh.closePath();
+    return sh;
+}
+function axeHeadGeo(kind) {
+    const hg = new THREE.ExtrudeGeometry(axeShape(kind), { depth: 0.035, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 1 });
+    hg.translate(0, 0, -0.0175);
+    return hg;
+}
+function axeModel(i, skin) {
+    const a = AXES[i], S = COSMETICS.axe[skin], g = new THREE.Group();
     const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 1.15, 6), icM(0x8a5a34)); handle.position.y = 0.36; g.add(handle);
     const knob = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 5), icM(0x6a4228)); knob.position.y = -0.22; g.add(knob);
-    const sh = new THREE.Shape();
-    sh.moveTo(-0.08, 0.0); sh.lineTo(-0.08, 0.27); sh.lineTo(0.03, 0.29); sh.lineTo(0.2, 0.38); sh.quadraticCurveTo(0.31, 0.16, 0.19, -0.1); sh.lineTo(0.04, 0.02); sh.closePath();
-    const hg = new THREE.ExtrudeGeometry(sh, { depth: 0.035, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 1 });
-    hg.translate(0, 0, -0.0175);
-    const head = new THREE.Mesh(hg, [icM(a.steel, a.glow), icM(a.edge, a.glow)]);
+    const hg = axeHeadGeo(a.shape);
+    const head = new THREE.Mesh(hg, [icM(S ? S.steel : a.steel, S ? S.glow : a.glow), icM(S ? S.edge : a.edge, S ? S.glow : a.glow)]);
     head.position.y = 0.6; head.scale.setScalar(a.scale); g.add(head);
     g.rotation.z = -0.75;
     return g;
@@ -7934,7 +8065,7 @@ function startEruption() {
     burst(V3(VOLC.x, floorY4() + 4, VOLC.z), 60, 14, [glowM(0xff7a2a), glowM(0xffd060), chipMats[2]]);
 }
 function updateEruption(dt) {
-    if (inCasino()) return; // nothing falls on you indoors
+    if (inCasino() || inMyIsle()) return; // nothing falls on you indoors, or on your own island
     if (eruptLeft > 0) {
         eruptLeft -= dt; eruptBomb -= dt;
         if (isle4.plume) isle4.plume.material.opacity = 0.14;
@@ -13339,7 +13470,14 @@ const ABIL = [
     { name: "Meteor", cd: 16, mult: 10, col: 0xff9a4a, desc: "Calls a meteor down where you're looking (10x in a big blast)." },
     { name: "Cataclysm", cd: 18, mult: 9, col: 0xffd040, desc: "Lava fissures split out in every direction (9x) and burn everything." },
     { name: "Blizzard", cd: 18, mult: 1.3, col: 0xbff4ff, desc: "A howling blizzard swirls round you for 4 seconds, hitting and freezing every tree near you." },
-    { name: "Yeti Stomp", cd: 20, mult: 12, col: 0x7af0ff, desc: "Leap and stomp: a shockwave of ice smashes everything around you (12x) and freezes it solid." }
+    { name: "Yeti Stomp", cd: 20, mult: 12, col: 0x7af0ff, desc: "Leap and stomp: a shockwave of ice smashes everything around you (12x) and freezes it solid." },
+    // 2.5: the legendary axes' own
+    { name: "Twin Spin", cd: 9, mult: 2.5, col: 0xffe060, desc: "Two fast spins: each one hits every tree around you (2.5x each)." },
+    { name: "Chain Lightning", cd: 12, mult: 5, col: 0x7ad8ff, desc: "A bolt hits the tree you face, then jumps to up to 7 more (5x each)." },
+    { name: "Execute", cd: 10, mult: 15, col: 0xff4a4a, desc: "One brutal chop (15x). A tree left under a quarter of its health falls at once." },
+    { name: "Shatter", cd: 15, mult: 6, col: 0xff9aff, desc: "Crystals burst up under every tree around you (6x) and hold them still." },
+    { name: "Tornado", cd: 16, mult: 3, col: 0x9affd8, desc: "A tornado races ahead, hitting every tree it passes again and again (3x a hit)." },
+    { name: "Golden Touch", cd: 18, mult: 4, col: 0xffd040, desc: "Every tree around you takes the hit (4x) and turns Golden: more logs and cash." }
 ];
 const abCd = {}; // cooldown left, per axe
 const abFx = []; // live effect objects
@@ -13410,6 +13548,16 @@ function abOrb(from, to, col, life, size = 0.35, onEnd) { // a glowing ball flyi
     const m = new THREE.Mesh(AB_ICO, abMat(col, 1)); m.scale.setScalar(size);
     const halo = abSprite(abTex.glow, col, 0.9); halo.scale.setScalar(6); m.add(halo);
     abAdd(m, life, f => { const k = f.t / f.life; m.position.lerpVectors(from, to, k); m.position.y += Math.sin(k * Math.PI) * 1.2; if (Math.random() < 0.5) burst(m.position.clone(), 1, 1, [abPM(col)]); if (f.t + 0.0001 >= f.life && onEnd) onEnd(); });
+}
+function abBolt(a, b, col, delay = 0) { // a jagged flash of lightning between two points
+    setTimeout(() => {
+        const pts = [a.clone()];
+        for (let k = 1; k < 8; k++) { const p = a.clone().lerp(b, k / 8); p.x += (Math.random() - 0.5) * 0.8; p.y += (Math.random() - 0.5) * 0.8; p.z += (Math.random() - 0.5) * 0.8; pts.push(p); }
+        pts.push(b.clone());
+        const geo = new THREE.BufferGeometry().setFromPoints(pts), m1 = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true }), m2 = new THREE.LineBasicMaterial({ color: col, transparent: true });
+        const g = new THREE.Group(), l2 = new THREE.Line(geo, m2); l2.scale.setScalar(1.002); g.add(new THREE.Line(geo, m1), l2);
+        abAdd(g, 0.35, f => { m1.opacity = m2.opacity = 1 - f.t / f.life; });
+    }, delay * 1000);
 }
 function abBoom(strength = 0.35) { shake = Math.min(0.8, shake + strength); fovKick = 1.4; hitstop = 0.05; }
 
@@ -13550,6 +13698,67 @@ function useAbility() {
                 shake = 1.2; flash = 0.4; hitstop = 0.12; sfx(40, 1, "sawtooth", 0.24, 0.4); sfx(70, 0.8, "square", 0.18, 0.4);
             }, 550);
             n = 1; break;
+        }
+        case 18: { // Twin Spin: two full spins, each one hits every tree around you
+            for (let k = 0; k < 2; k++) setTimeout(() => {
+                const x = player.pos.x, z = player.pos.z;
+                for (const t of abAlive()) if (abIn.circle(t, x, z, 6.5)) abHit(t, A.mult);
+                abArc(A.col, 0, Math.PI * 2, 6, 0.3); abArc(0xffffff, 0, Math.PI * 2, 4.5, 0.25); sfx(320 + k * 140, 0.25, "sawtooth", 0.09, 0.3);
+            }, k * 260);
+            abBoom(0.3); n = 1; break;
+        }
+        case 19: { // Chain Lightning: a bolt hits the tree you face, then jumps from tree to tree
+            let cur = null, bd = 1e9;
+            for (const t of all) { if (!abIn.cone(t, px, pz, dx, dz, 14, 0.5)) continue; const d = Math.hypot(t.x - px, t.z - pz); if (d < bd) { bd = d; cur = t; } }
+            let from = V3(px + dx, player.pos.y - 0.2, pz + dz);
+            const done = new Set();
+            for (let k = 0; k < 8 && cur; k++) {
+                const t = cur, to = V3(t.x, t.gy + Math.min(t.h * 0.5, 3), t.z);
+                abBolt(from, to, A.col, k * 0.07);
+                setTimeout(() => { abHit(t, A.mult, { stun: 1, stunCol: A.col }); burst(to, 8, 5, [abPM(0xffffff), abPM(A.col)]); }, k * 70);
+                done.add(t); from = to; n++;
+                let nx = null, nd = 12; for (const o of all) { if (done.has(o)) continue; const d = Math.hypot(o.x - t.x, o.z - t.z); if (d < nd) { nd = d; nx = o; } }
+                cur = nx;
+            }
+            if (!n) abBolt(from, V3(px + dx * 10, player.pos.y + 2, pz + dz * 10), A.col, 0);
+            flash = 0.35; sfx(1800, 0.25, "sawtooth", 0.06, 0.2); sfx(80, 0.5, "square", 0.12, 0.4); break;
+        }
+        case 20: { // Execute: one brutal chop; a tree left under a quarter of its health falls at once
+            let best = null, bd = 1e9;
+            for (const t of all) { if (!abIn.cone(t, px, pz, dx, dz, 4.5, 0.6)) continue; const d = Math.hypot(t.x - px, t.z - pz); if (d < bd) { bd = d; best = t; } }
+            if (best) {
+                abHit(best, A.mult);
+                if (!best.dying && !best.gone && !best.boss && best.hp < best.maxHp * 0.25) hitTree(best, Math.max(1, Math.ceil(best.hp)), false);
+                abRing(best.x, best.z, A.col, 5, 0.5); abSpike(best.x, best.z, A.col, 3, 0.6); n = 1;
+            }
+            abArc(A.col, -0.5, 1.0, 3.6, 0.35, 1.3); abBoom(0.6); hitstop = 0.15; sfx(70, 0.5, "square", 0.25, 0.3); sfx(500, 0.3, "sawtooth", 0.1, 0.25); break;
+        }
+        case 21: { // Shatter: crystals burst up under every tree around you and hold them still
+            hitWhere(t => abIn.circle(t, px, pz, 12), { stun: 2.5, stunCol: A.col });
+            for (const t of all) if (abIn.circle(t, px, pz, 12)) for (let k = 0; k < 3; k++) abSpike(t.x + (Math.random() - 0.5) * 1.6, t.z + (Math.random() - 0.5) * 1.6, k % 2 ? A.col : 0xffffff, 1.6 + Math.random() * 1.4, 1.1, 0.05 * k, 0.4);
+            abRing(px, pz, A.col, 13, 0.7); abBoom(0.45); sfx(1600, 0.5, "triangle", 0.06, 0.3); sfx(240, 0.4, "square", 0.1, 0.4); break;
+        }
+        case 22: { // Tornado: a whirlwind races ahead, hitting every tree it passes again and again
+            const x0 = px + dx * 2, z0 = pz + dz * 2, g = new THREE.Group(), rings = [];
+            g.position.set(x0, groundY(x0, z0), z0);
+            for (let k = 0; k < 6; k++) { const r = new THREE.Mesh(new THREE.TorusGeometry(0.6 + k * 0.35, 0.06, 5, 24), abMat(k % 2 ? A.col : 0xffffff, 0.7)); r.rotation.x = Math.PI / 2; r.position.y = 0.4 + k * 0.7; g.add(r); rings.push(r); }
+            let tick = 0;
+            abAdd(g, 2.6, (f, dt) => {
+                g.position.x += dx * 9 * dt; g.position.z += dz * 9 * dt; g.position.y = groundY(g.position.x, g.position.z);
+                rings.forEach((r, k) => { r.rotation.z += dt * (8 + k); r.material.opacity = 0.7 * (1 - f.t / f.life); });
+                if ((tick -= dt) <= 0) { tick = 0.35; for (const t of abAlive()) if (Math.hypot(t.x - g.position.x, t.z - g.position.z) < t.r + 2.6) abHit(t, A.mult); }
+            });
+            sfx(200, 1.2, "sawtooth", 0.06, 0.6); abBoom(0.3); n = 1; break;
+        }
+        case 23: { // Golden Touch: every tree around you takes the hit and turns Golden
+            for (const t of all) if (abIn.circle(t, px, pz, 10)) {
+                abHit(t, A.mult);
+                if (!t.dying && !t.gone && !t.boss && !t.mut && !t.srv) { const r = t.hp / t.maxHp; applyMut(t, "golden"); t.hp = Math.max(1, Math.round(t.maxHp * r)); }
+                n++;
+            }
+            abRing(px, pz, A.col, 11, 0.7); abRing(px, pz, 0xffffff, 7, 0.5);
+            for (let k = 0; k < 16; k++) { const a = (k / 16) * 6.283; abSpike(px + Math.cos(a) * 6, pz + Math.sin(a) * 6, A.col, 1.4, 0.9, 0.02 * k, 0.3); }
+            abBoom(0.35); sfx(1046, 0.2, "triangle", 0.08, 1); setTimeout(() => sfx(1568, 0.3, "triangle", 0.08, 1), 120); break;
         }
     }
     flash = Math.max(flash, 0.25);
@@ -13986,6 +14195,7 @@ function buyCShop(i) {
 $("shItems").addEventListener("click", e => { const b = e.target.closest("[data-buy]"); if (b && !b.disabled) buyCShop(+b.dataset.buy); });
 // ---- the ferry onwards: from the Iceberg to the first Studio island, and from each Studio island to the next ----
 function rebirthReadyFrom(from) {
+    if (from !== (save.rebirths || 0) + 1) return false; // you rebirth from your newest island only (2.5: you can sail back to old ones)
     if (from >= 6) { const nx = customIsle(from + 1); return !!nx && nx.ready(); }
     return from === 5 ? rebirth5Ready() : from === 4 ? rebirth4Ready() : from === 3 ? rebirth3Ready() : from === 2 ? rebirth2Ready() : save.money >= rebirthCost();
 }
@@ -14237,7 +14447,7 @@ function hud(dt) {
     if (c !== lastCash) { if (lastCash >= 0 && c > lastCash) { el.cash.classList.remove("bump"); void el.cash.offsetWidth; el.cash.classList.add("bump"); } lastCash = c; }
     if (isle >= 2) { const mh = isleMats().filter(k => save.mats[k] > 0).map(k => `<span class="mp"><img src="${iconURL("m:" + k)}">${save.mats[k]}</span>`).join("") || "nothing yet"; if (el.logs.dataset.h !== mh) { el.logs.innerHTML = mh; el.logs.dataset.h = mh; $("logsLbl").textContent = "MATERIALS"; } }
     else el.logs.textContent = save.logs + (sendVals.length + sending.length ? ` (+${sendVals.length + sending.length} in tube)` : "");
-    el.zone.textContent = inCasino() ? `${(casino && casino.name) || "THE CASINO"} · SAFE` : isle === 6 ? (inSafe() ? "IGLOO CAMP" : fight6.on || yetiDist() < DEN6.r ? "THE YETI'S DEN" : Math.hypot(player.pos.x - LAKE6.x, player.pos.z - LAKE6.z) < LAKE6.r ? "FROZEN LAKE" : "THE ICEBERG") : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : race5.on ? "RACING" : "AT SEA") : swim5() ? "SWIMMING" : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
+    el.zone.textContent = inMyIsle() ? (MI.owner ? `${MI.owner.toUpperCase()}'S ISLAND · SAFE` : "MY ISLAND · SAFE") : inCasino() ? `${(casino && casino.name) || "THE CASINO"} · SAFE` : isle === 6 ? (inSafe() ? "IGLOO CAMP" : fight6.on || yetiDist() < DEN6.r ? "THE YETI'S DEN" : Math.hypot(player.pos.x - LAKE6.x, player.pos.z - LAKE6.z) < LAKE6.r ? "FROZEN LAKE" : "THE ICEBERG") : isle === 5 ? (B5.on ? (save.boat.fuel <= 0 ? "OUT OF FUEL!" : race5.on ? "RACING" : "AT SEA") : swim5() ? "SWIMMING" : inSafe() ? "PORT HAVEN" : ARCH_BY[arch5].name) : isle === 4 ? (inSafe() ? "EMBER CAMP" : crater() ? "THE CRATER" : onLava() ? "LAVA! GET OUT!" : inSprings() ? "HOT SPRINGS" : "THE ASHLANDS") : inSafe() ? (isle === 3 ? "LANTERN CAMP" : isle === 2 ? "BASECAMP" : "SAFE ZONE") : (isle === 3 ? (inHollow() ? "THE HOLLOW" : "THE MOONCAP WILDS") : isle === 2 ? "THE HIGHLANDS" : "THE WOODS");
     { // active potions and blessings, with time left
         const bh = Object.keys(BUFFS).filter(buffOn).map(k => `<span style="color:${BUFFS[k].col};border-color:${BUFFS[k].col}">${BUFFS[k].icon} ${BUFFS[k].name} ${mmss(buffLeft(k))}</span>`).join("") + (save.phoenix > 0 ? `<span style="color:#ffb060;border-color:#ffb060">🔥 PHOENIX ×${save.phoenix}</span>` : "");
         const be = $("buffs"); if (be.dataset.h !== bh) { be.innerHTML = bh; be.dataset.h = bh; }
@@ -14432,6 +14642,327 @@ function defineCustomProp(d) {
 }
 function dropCustomProp(k) { if (/^u_/.test(String(k))) delete PROPS[k]; }
 for (const d of Array.isArray(CONTENT_PROPS) ? CONTENT_PROPS : []) defineCustomProp(d);
+
+// =====================================================================
+//  2.5: MY ISLAND. Your own island to build on with every prop in the game (100+, and the Studio's own props), a bit like
+//  a creative mode. It sits far out to the west (x < -4500, the way the casino's hall sits far to the east), so the island
+//  you sail from stays loaded and you come straight back to it. Any Ferryman sails you there.
+//  On it, B builds and E opens every prop. What you build is solid: walls block you, and you can climb onto crates,
+//  floors and ramps. Saved in save.myIsle; on the public server the layout is kept too, so anyone can visit (/visit Name).
+// =====================================================================
+const MYX = -7000, MI_R = 70, MI_MAX = 1500, MI_STEP = 0.55, MI_MP = 99; // MI_MP: the island number the server hears while you're on one
+const inMyIsle = () => player.pos.x < -4500;
+if (!save.myIsle || typeof save.myIsle !== "object" || !Array.isArray(save.myIsle.objs)) save.myIsle = { objs: [] };
+// owner: "" for yours, or whose island you're visiting. objs: the layout on show. solids: what you bump into and stand on.
+const MI = { G: null, props: null, owner: "", objs: null, recs: [], solids: [], lights: 0, build: false, k: "crate", ry: 0, s: 1, c: -1, snap: true,
+    ghost: null, ghostKey: "", aim: null, undo: [], back: null, cat: "build", saveT: 0, hudKey: "" };
+const MI_COLS = [0xd84a3a, 0xf08a2a, 0xf2d040, 0x6ac04a, 0x2ab8a0, 0x3a7ad8, 0x8a5ad8, 0xe86ab0, 0xf2f2f2, 0x8a8a94, 0x2a2a30, 0x8a5a34, 0xffd040];
+const MI_COL_NAMES = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink", "white", "grey", "black", "brown", "gold"];
+const miKeys = () => Object.keys(PROPS).filter(k => PROPS[k].cat === MI.cat);
+const miIcon = k => renderIcon("prop:" + k, () => { const g = new THREE.Group(); PROPS[k].make(g, PROPS[k].tint); g.rotation.set(0.32, -0.6, 0); return g; });
+function miBase(x, z) { const d = Math.hypot(x - MYX, z); return d < MI_R ? 0 : Math.max(-3.2, -(d - MI_R) * 0.22); }
+function buildMyIsle() {
+    MI.G = new THREE.Group(); MI.G.position.set(MYX, 0, 0); scene.add(MI.G);
+    const S = MI_R * 2 + 70, g = new THREE.PlaneGeometry(S, S, 110, 110); g.rotateX(-Math.PI / 2);
+    const pos = g.attributes.position, col = [], c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), z = pos.getZ(i), d = Math.hypot(x, z), y = miBase(x + MYX, z);
+        pos.setY(i, y);
+        if (y < -0.5) c.setHSL(0.1, 0.35, 0.16 + Math.random() * 0.04);                 // wet seabed
+        else if (d > MI_R - 5) c.setHSL(0.12, 0.5, 0.42 + Math.random() * 0.05);       // a ring of beach
+        else c.setHSL(0.29 + Math.random() * 0.05, 0.42, 0.25 + Math.random() * 0.04);  // grass
+        col.push(c.r, c.g, c.b);
+    }
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3)); g.computeVertexNormals();
+    const land = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })); land.receiveShadow = true; MI.G.add(land);
+    MI.water = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600).rotateX(-Math.PI / 2), waterMesh.material); MI.G.add(MI.water);
+    // the building grid (2 m squares), only while you build
+    const gv = [];
+    for (let k = -MI_R + 2; k < MI_R; k += 2) { const h = Math.sqrt(MI_R * MI_R - k * k) - 1; gv.push(k, 0.04, -h, k, 0.04, h, -h, 0.04, k, h, 0.04, k); }
+    const gg = new THREE.BufferGeometry(); gg.setAttribute("position", new THREE.Float32BufferAttribute(gv, 3));
+    MI.grid = new THREE.LineSegments(gg, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16, depthWrite: false })); MI.grid.visible = false; MI.G.add(MI.grid);
+    // the Ferryman and his boat, on the beach where you land
+    MI.man = makeFerrymanFigure(0x3a2a5a, 0xffd040, 0x8adcff); MI.man.position.set(1.6, miBase(MYX + 1.6, MI_R + 1), MI_R + 1); MI.man.rotation.y = Math.PI; MI.G.add(MI.man);
+    MI.boat = makeBoat3(0x6a4a2a, 0xe8d8b0, 0xffd040); MI.boat.position.set(0, -0.3, MI_R + 7.5); MI.boat.rotation.y = Math.PI / 2; MI.G.add(MI.boat);
+    MI.props = new THREE.Group(); MI.G.add(MI.props);
+    MI.G.visible = false;
+}
+// ---- the props on the island ----
+const miBox = new THREE.Box3();
+function miAdd(o) { // o: { k, x, y, z, ry, s, c } (x and z from the island's middle)
+    const P = PROPS[o.k]; if (!P) return null;
+    const g = new THREE.Group(), s = clamp(+o.s || 1, 0.25, 8);
+    P.make(g, o.c !== undefined && P.tint !== undefined ? o.c : P.tint);
+    g.scale.setScalar(s); g.updateMatrixWorld(true);
+    miBox.setFromObject(g); // its size before it's turned
+    const lb = [miBox.min.x, miBox.max.x, miBox.min.y, miBox.max.y, miBox.min.z, miBox.max.z];
+    g.position.set(o.x, o.y, o.z); g.rotation.y = +o.ry || 0;
+    const rec = { o, g, P, light: null, solid: null };
+    if (P.light && MI.lights < 10) { const L = P.light; rec.light = new THREE.PointLight(L[0], L[1], L[2], 1.6); rec.light.position.y = L[3]; g.add(rec.light); MI.lights++; } // only the first 10 lights are real ones
+    g.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    g.userData.miRec = rec;
+    MI.props.add(g); MI.recs.push(rec);
+    // what you bump into: its walls, its circle, or (floors, roofs, ramps) its whole footprint
+    const kind = P.box ? "box" : P.r > 0 ? "circle" : (o.k === "floor" || o.k === "roof" || o.k === "ramp") ? "foot" : null;
+    if (kind) {
+        const cs = Math.cos(+o.ry || 0), sn = Math.sin(+o.ry || 0);
+        const parts = kind === "box" ? P.box.map(([bx, bz, hx, hz]) => [bx * s, bz * s, hx * s, hz * s]) : [[(lb[0] + lb[1]) / 2, (lb[4] + lb[5]) / 2, (lb[1] - lb[0]) / 2, (lb[5] - lb[4]) / 2]];
+        const S = { rec, kind, x: MYX + o.x, z: o.z, cs, sn, y0: o.y + lb[2], y1: o.y + lb[3], r: P.r * s, parts, ramp: o.k === "ramp", lz0: lb[4], lz1: lb[5] };
+        S.b = kind === "circle" ? S.r : Math.max(...parts.map(([cx, cz, hx, hz]) => Math.hypot(Math.abs(cx) + hx, Math.abs(cz) + hz)));
+        rec.solid = S; MI.solids.push(S);
+    }
+    return rec;
+}
+function miDrop(rec) {
+    MI.props.remove(rec.g);
+    if (rec.light) MI.lights--;
+    const i = MI.recs.indexOf(rec); if (i >= 0) MI.recs.splice(i, 1);
+    if (rec.solid) { const j = MI.solids.indexOf(rec.solid); if (j >= 0) MI.solids.splice(j, 1); }
+}
+function miLoad(owner, objs) {
+    for (const r of MI.recs.slice()) miDrop(r);
+    MI.lights = 0; MI.owner = owner; MI.objs = objs; MI.undo = [];
+    for (const o of objs) miAdd(o);
+}
+// the top of a solid at a point, or null when the point isn't over it (pad widens it a little)
+function miTop(S, dx, dz, pad) {
+    if (S.kind === "circle") return dx * dx + dz * dz < (S.r + pad) ** 2 ? S.y1 : null;
+    const lx = dx * S.cs - dz * S.sn, lz = dx * S.sn + dz * S.cs;
+    for (const [cx, cz, hx, hz] of S.parts) if (Math.abs(lx - cx) < hx + pad && Math.abs(lz - cz) < hz + pad) return S.ramp ? miRampY(S, lz) : S.y1;
+    return null;
+}
+const miRampY = (S, lz) => S.y0 + (S.y1 - S.y0) * clamp((S.lz1 - lz) / (S.lz1 - S.lz0), 0, 1); // a ramp is highest at its back
+// the ground under you: the island, or the top of whatever you built that you're standing on (or can step up onto)
+function miGround(x, z, feet) {
+    let g = miBase(x, z);
+    for (const S of MI.solids) {
+        const dx = x - S.x, dz = z - S.z; if (Math.abs(dx) > S.b + 0.2 || Math.abs(dz) > S.b + 0.2) continue;
+        const top = miTop(S, dx, dz, 0.15);
+        if (top !== null && top > g && top <= feet + MI_STEP) g = top;
+    }
+    return g;
+}
+// you stay on the island (you can wade a little way out), and your builds push you back unless you can step onto them
+function clampMi(p) {
+    const ox = p.x - MYX, d = Math.hypot(ox, p.z), lim = MI_R + 5;
+    if (d > lim) { p.x = MYX + ox * lim / d; p.z *= lim / d; }
+    const feet = p.y - 1.7, R = 0.38;
+    for (const S of MI.solids) {
+        if (S.y0 > feet + 1.75 || S.y1 <= feet + MI_STEP) continue; // over your head, or low enough to step onto
+        const dx = p.x - S.x, dz = p.z - S.z; if (Math.abs(dx) > S.b + R || Math.abs(dz) > S.b + R) continue;
+        if (S.kind === "circle") { const dd = Math.hypot(dx, dz), m = S.r + R; if (dd < m && dd > 1e-4) { p.x = S.x + dx / dd * m; p.z = S.z + dz / dd * m; } continue; }
+        let lx = dx * S.cs - dz * S.sn, lz = dx * S.sn + dz * S.cs, moved = false;
+        for (const [cx, cz, hx, hz] of S.parts) {
+            const ex = hx + R - Math.abs(lx - cx), ez = hz + R - Math.abs(lz - cz);
+            if (ex <= 0 || ez <= 0) continue;
+            if (S.ramp && miRampY(S, lz) <= feet + MI_STEP) continue; // walking up it
+            if (ex < ez) lx += Math.sign(lx - cx || 1) * ex; else lz += Math.sign(lz - cz || 1) * ez;
+            moved = true;
+        }
+        if (moved) { p.x = S.x + lx * S.cs + lz * S.sn; p.z = S.z - lx * S.sn + lz * S.cs; }
+    }
+}
+function nearestMi() {
+    if (MI.man && Math.hypot(player.pos.x - (MYX + 1.6), player.pos.z - (MI_R + 1)) < 3.6) return { k: "miFerry" };
+    return null;
+}
+// ---- going there and back ----
+function goMyIsle(owner = "", objs = null) {
+    if (ride || boating() || caveFx) { toast("You can't sail right now.", "bad"); return; }
+    closePanel();
+    if (!inMyIsle()) MI.back = { x: player.pos.x, z: player.pos.z, yaw: player.yaw };
+    fadeTo(() => {
+        if (!MI.G) buildMyIsle();
+        const want = owner ? objs : save.myIsle.objs;
+        if (MI.owner !== owner || MI.objs !== want) miLoad(owner, want);
+        player.pos.set(MYX, 1.7, MI_R - 4); player.vel.set(0, 0, 0); player.yaw = 0; player.pitch = 0;
+        MI.G.visible = true; MI.G.matrixWorldAutoUpdate = true;
+        sfx(200, 0.9, "sine", 0.1, 2);
+        toast(owner ? `🏝 Welcome to ${owner}'s island! Have a look around.` : MI.objs.length ? "🏝 Home to your island. Press B to build." : "🏝 This island is all yours. Press B to build: walls, floors, rocks, lights, anything. E shows every prop.", "good");
+    });
+}
+function leaveMyIsle(n) {
+    miBuildMode(false); miSaveNow();
+    fadeTo(() => {
+        const back = () => { const b = MI.back || { x: RESPAWN.x, z: RESPAWN.z, yaw: 0 }; player.pos.set(b.x, groundY(b.x, b.z) + 1.7, b.z); player.vel.set(0, 0, 0); player.yaw = b.yaw; };
+        if (n === isle) back();
+        else if (!travelTo(n)) { back(); toast("You can't sail there right now.", "bad"); }
+        else toast(`⛵ The Ferryman takes you to ${isleTitle(n)}.`, "good");
+        sfx(200, 0.9, "sine", 0.1, 2);
+    });
+}
+function renderFerryMy() {
+    const b = $("ferryBuy"), mine = !MI.owner;
+    document.querySelector("#panelFerry h2").textContent = "THE FERRYMAN";
+    $("ferrySay").textContent = mine ? "“Your island, your rules. I'll wait here as long as you like.”" : `“${MI.owner} built all this? Not bad.”`;
+    const html = mine ? `<div class="fprice">This is <b>your own island</b>. Press <b>B</b> to build with every prop in the game (E shows them all). <span>${MI.objs.length} of ${MI_MAX.toLocaleString()} props placed${mp.on ? " · anyone on the public server can visit it with /visit " + escH(mp.name) : ""}.</span></div>`
+        : `<div class="fprice">You're visiting <b>${escH(MI.owner)}'s island</b>. You can look around, but only ${escH(MI.owner)} can build here. <span>${MI.objs.length} props.</span></div>`;
+    if ($("ferryBody").dataset.h !== html) { $("ferryBody").innerHTML = html; $("ferryBody").dataset.h = html; }
+    b.disabled = false; b.classList.remove("danger"); b.textContent = "SAIL BACK TO " + isleTitle(isle).toUpperCase(); b.dataset.sail = isle;
+}
+// ---- building ----
+function miBuildMode(on) {
+    if (on && MI.owner) { toast(`This is ${MI.owner}'s island. Only they can build here.`, "bad"); return; }
+    if (MI.build === on) return;
+    MI.build = on;
+    if (MI.grid) MI.grid.visible = on;
+    if (MI.ghost) MI.ghost.visible = false;
+    if (on) { miHud(true); if (!save.myIsle.told) { save.myIsle.told = 1; toast("Building! Wheel picks a prop, click places it, right-click removes one. E shows every prop.", "rare"); } }
+    else { mpUploadIsle(); miSaveNow(); }
+}
+const miGhostMat = new THREE.MeshBasicMaterial({ color: 0x8aff9a, transparent: true, opacity: 0.42, depthWrite: false });
+function miGhost() {
+    const key = MI.k + "|" + MI.c;
+    if (MI.ghost && MI.ghostKey === key) return MI.ghost;
+    if (MI.ghost) MI.G.remove(MI.ghost);
+    const P = PROPS[MI.k], g = new THREE.Group();
+    P.make(g, MI.c >= 0 && P.tint !== undefined ? MI_COLS[MI.c] : P.tint);
+    g.traverse(m => { if (m.isMesh) m.material = miGhostMat; });
+    MI.G.add(g); MI.ghost = g; MI.ghostKey = key;
+    return g;
+}
+const miRay = new THREE.Raycaster(), miMid = new THREE.Vector2(0, 0), miN = new THREE.Vector3(), miP = new THREE.Vector3();
+// what you're aiming at: a prop (to build on top of, beside, or remove), or a spot on the ground
+function miAim() {
+    miRay.setFromCamera(miMid, camera); miRay.far = 40;
+    const hit = miRay.intersectObject(MI.props, true)[0];
+    let rec = null, x, y, z;
+    if (hit) {
+        let o = hit.object; while (o && !o.userData.miRec) o = o.parent;
+        rec = o ? o.userData.miRec : null;
+        miN.copy(hit.face ? hit.face.normal : UP).transformDirection(hit.object.matrixWorld);
+        if (miN.y > 0.6) { x = hit.point.x; y = hit.point.y; z = hit.point.z; } // on top of it
+        else { x = hit.point.x + miN.x * 0.5 * MI.s; z = hit.point.z + miN.z * 0.5 * MI.s; y = rec ? rec.o.y : 0; } // beside it, at its height
+    } else {
+        const o = miRay.ray.origin, dv = miRay.ray.direction;
+        if (dv.y > -0.02) { MI.aim = null; if (MI.ghost) MI.ghost.visible = false; return; }
+        const t = -o.y / dv.y; if (t > 40) { MI.aim = null; if (MI.ghost) MI.ghost.visible = false; return; }
+        x = o.x + dv.x * t; z = o.z + dv.z * t; y = 0;
+    }
+    if (MI.snap) { x = MYX + Math.round((x - MYX) * 2) / 2; z = Math.round(z * 2) / 2; }
+    if (!hit) y = Math.max(0, miBase(x, z));
+    const ok = Math.hypot(x - MYX, z) < MI_R + 1 && y < 60 && MI.objs.length < MI_MAX;
+    MI.aim = { x, y, z, ok, rec };
+    const g = miGhost(); g.visible = true;
+    g.position.set(x - MYX, y, z); g.rotation.y = MI.ry; g.scale.setScalar(MI.s);
+    miGhostMat.color.setHex(ok ? 0x8aff9a : 0xff6a5a);
+    miHud();
+}
+function miSaveSoon() { clearTimeout(MI.saveT); MI.saveT = setTimeout(() => writeSave(), 1500); }
+function miSaveNow() { clearTimeout(MI.saveT); if (!MI.owner) writeSave(); }
+function miPlace() {
+    const a = MI.aim;
+    if (!a || !a.ok) { sfx(160, 0.12, "square", 0.05, 0.7); if (MI.objs.length >= MI_MAX) toast(`Your island is full (${MI_MAX.toLocaleString()} props). Remove some first.`, "bad"); return; }
+    const o = { k: MI.k, x: Math.round((a.x - MYX) * 100) / 100, y: Math.round(a.y * 100) / 100, z: Math.round(a.z * 100) / 100, ry: Math.round(MI.ry * 1000) / 1000, s: MI.s };
+    if (MI.c >= 0 && PROPS[MI.k].tint !== undefined) o.c = MI_COLS[MI.c];
+    MI.objs.push(o); miAdd(o); MI.undo.push({ add: o }); if (MI.undo.length > 200) MI.undo.shift();
+    miSaveSoon(); sfx(520, 0.07, "triangle", 0.07, 1.6);
+}
+function miRemove() {
+    const rec = MI.aim && MI.aim.rec; if (!rec) return;
+    const i = MI.objs.indexOf(rec.o); if (i >= 0) MI.objs.splice(i, 1);
+    miDrop(rec); MI.undo.push({ del: rec.o, i }); if (MI.undo.length > 200) MI.undo.shift();
+    miSaveSoon(); sfx(240, 0.1, "square", 0.05, 0.8);
+}
+function miUndo() {
+    const u = MI.undo.pop(); if (!u) { toast("Nothing to undo."); return; }
+    if (u.add) { const rec = MI.recs.find(r => r.o === u.add); if (rec) miDrop(rec); const i = MI.objs.indexOf(u.add); if (i >= 0) MI.objs.splice(i, 1); }
+    else { MI.objs.splice(Math.min(u.i, MI.objs.length), 0, u.del); miAdd(u.del); }
+    miSaveSoon(); sfx(380, 0.08, "sine", 0.06, 1);
+}
+function miCopy() { // middle click: build with what you're looking at, turned and sized the same
+    const rec = MI.aim && MI.aim.rec; if (!rec) return;
+    MI.k = rec.o.k; MI.ry = +rec.o.ry || 0; MI.s = +rec.o.s || 1; MI.c = rec.o.c === undefined ? -1 : MI_COLS.indexOf(rec.o.c);
+    miHud(true);
+}
+function miCycle(dir) { const ks = Object.keys(PROPS).filter(k => PROPS[k].cat === PROPS[MI.k].cat); MI.k = ks[(ks.indexOf(MI.k) + dir + ks.length) % ks.length]; miHud(true); }
+function miClick(b) { if (b === 0) miPlace(); else if (b === 2) miRemove(); else if (b === 1) miCopy(); }
+// keys on your island; true when the key was used
+function miKey(e) {
+    if (e.code === "KeyB") { miBuildMode(!MI.build); return true; }
+    if (!MI.build) return false;
+    if (e.code === "KeyE") { openPanel("myisle"); return true; }
+    if (e.code === "KeyR") { MI.ry = (MI.ry + (e.shiftKey ? -1 : 1) * (MI.snap ? Math.PI / 4 : Math.PI / 12) + Math.PI * 2) % (Math.PI * 2); miHud(true); return true; }
+    if (e.code === "KeyZ") { if (e.ctrlKey) miUndo(); else { MI.s = Math.max(0.25, Math.round((MI.s - 0.25) * 100) / 100); miHud(true); } return true; }
+    if (e.code === "KeyX") { MI.s = Math.min(8, Math.round((MI.s + 0.25) * 100) / 100); miHud(true); return true; }
+    if (e.code === "KeyN") { MI.c = MI.c + 1 >= MI_COLS.length ? -1 : MI.c + 1; miHud(true); return true; }
+    return false;
+}
+function miHud(force) {
+    const P = PROPS[MI.k], aimK = MI.aim && MI.aim.rec ? MI.aim.rec.o.k : "", key = [MI.k, MI.ry, MI.s, MI.c, MI.objs.length, aimK, MI.snap].join("|");
+    if (!force && key === MI.hudKey) return; MI.hudKey = key;
+    const col = MI.c < 0 || P.tint === undefined ? "its own colour" : MI_COL_NAMES[MI.c];
+    $("miHud").innerHTML = `<img src="${miIcon(MI.k)}"><div><b>${escH(P.name)}</b><span>size ${MI.s}× · turned ${Math.round(MI.ry * 180 / Math.PI)}° · ${col}${aimK && PROPS[aimK] ? " · looking at: " + escH(PROPS[aimK].name) : ""} · ${MI.objs.length}/${MI_MAX}</span>
+      <small><kbd>Wheel</kbd> prop <kbd>Click</kbd> place <kbd>Right</kbd> remove <kbd>Middle</kbd> copy <kbd>R</kbd> turn <kbd>Z</kbd><kbd>X</kbd> size <kbd>N</kbd> colour <kbd>Ctrl+Z</kbd> undo <kbd>E</kbd> all props <kbd>B</kbd> stop</small></div>`;
+}
+function renderMiCat() {
+    const cats = PROP_CATS.filter(([c]) => Object.values(PROPS).some(P => P.cat === c));
+    if (!cats.some(([c]) => c === MI.cat)) MI.cat = "build";
+    $("miCount").textContent = `${MI.objs.length}/${MI_MAX.toLocaleString()} props`;
+    $("miTabs").innerHTML = cats.map(([c, n]) => `<button class="miTab${c === MI.cat ? " on" : ""}" data-micat="${c}">${n}</button>`).join("");
+    $("miGrid").innerHTML = miKeys().map(k => `<button class="miCard${k === MI.k ? " on" : ""}" data-mik="${k}"><img src="${miIcon(k)}"><span>${escH(PROPS[k].name)}</span></button>`).join("");
+    $("miSnap").textContent = "GRID SNAP: " + (MI.snap ? "ON" : "OFF");
+    $("miClear").textContent = MI.clearArm ? "CLICK AGAIN TO CLEAR EVERYTHING" : "CLEAR MY ISLAND";
+}
+$("panelMyIsle").addEventListener("click", e => {
+    const t = e.target.closest("[data-micat]"); if (t) { MI.cat = t.dataset.micat; renderMiCat(); return; }
+    const c = e.target.closest("[data-mik]"); if (c) { MI.k = c.dataset.mik; closePanel(); miHud(true); return; }
+    if (e.target.closest("#miSnap")) { MI.snap = !MI.snap; renderMiCat(); return; }
+    if (e.target.closest("#miClear")) {
+        if (!MI.clearArm) { MI.clearArm = true; renderMiCat(); setTimeout(() => { MI.clearArm = false; if (panel === "myisle") renderMiCat(); }, 4000); return; }
+        MI.clearArm = false; save.myIsle.objs = []; miLoad("", save.myIsle.objs); miSaveNow(); renderMiCat(); toast("Your island is empty again.");
+    }
+});
+// the build bar shows only while you're actually building (not behind a menu or the pause screen)
+function miHudTick() { const on = MI.build && state === "playing" && !panel; if (on !== MI.hudOn) { MI.hudOn = on; $("miHud").classList.toggle("show", on); } }
+function myIsleTick(dt) {
+    const here = inMyIsle();
+    if (MI.G && MI.G.visible !== here) { MI.G.visible = here; MI.G.matrixWorldAutoUpdate = here; }
+    if (!here) { if (MI.build) miBuildMode(false); return; }
+    MI.water.position.y = waterMesh.position.y;
+    MI.boat.position.y = -0.3 + Math.sin(time * 1.1) * 0.07; MI.boat.rotation.z = Math.sin(time * 0.9) * 0.03;
+    if (MI.build && !panel) miAim(); else if (MI.ghost) MI.ghost.visible = false;
+}
+function drawMapMi() {
+    const cv = $("mapc"), g = cv.getContext("2d"), S = cv.width, c = S / 2, sc = (S / 2 - 14) / (MI_R + 8);
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = "#0b2236"; g.beginPath(); g.arc(c, c, c - 6, 0, 7); g.fill();
+    g.fillStyle = "#1f3a1f"; g.beginPath(); g.arc(c, c, MI_R * sc, 0, 7); g.fill(); g.strokeStyle = "#d8c078"; g.lineWidth = 4; g.stroke();
+    g.fillStyle = "#ffd040"; for (const o of MI.objs || []) g.fillRect(c + o.x * sc - 1.5, c + o.z * sc - 1.5, 3, 3);
+    g.save(); g.translate(c + (player.pos.x - MYX) * sc, c + player.pos.z * sc); g.rotate(-player.yaw);
+    g.fillStyle = "#fff"; g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 7); g.lineTo(-6, 7); g.closePath(); g.fill(); g.restore();
+    g.font = "bold 14px Consolas"; g.fillStyle = "#ffd040"; g.textAlign = "center"; g.fillText(MI.owner ? MI.owner.toUpperCase() + "'S ISLAND" : "MY ISLAND", c, 30);
+}
+// ---- on the public server: your layout is kept there so others can visit, a few hundred characters at a time ----
+const miEnc = objs => objs.map(o => [o.k, Math.round(o.x * 10), Math.round(o.y * 10), Math.round(o.z * 10), Math.round((+o.ry || 0) * 180 / Math.PI), Math.round((+o.s || 1) * 100), o.c === undefined ? "" : o.c.toString(16)].join(",")).join(";");
+function miDec(d) {
+    const out = [];
+    for (const row of String(d || "").split(";")) {
+        const [k, x, y, z, ry, s, c] = row.split(",");
+        if (!PROPS[k] || out.length >= MI_MAX) continue; // a Studio prop you don't have is left out
+        const o = { k, x: clamp(+x / 10 || 0, -MI_R - 2, MI_R + 2), y: clamp(+y / 10 || 0, -5, 60), z: clamp(+z / 10 || 0, -MI_R - 2, MI_R + 2), ry: (+ry || 0) * Math.PI / 180, s: clamp(+s / 100 || 1, 0.25, 8) };
+        if (c && /^[0-9a-f]{1,6}$/.test(c)) o.c = parseInt(c, 16);
+        out.push(o);
+    }
+    return out;
+}
+const miHash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
+function mpUploadIsle() {
+    if (!mp.on || MI.uploading) return;
+    let d = miEnc(save.myIsle.objs); const h = miHash(d);
+    if (h === save.myIsle.upH) return;
+    const parts = []; for (let i = 0; i < d.length && parts.length < 48; i += 1300) parts.push(d.slice(i, i + 1300));
+    if (!parts.length) parts.push("");
+    MI.uploading = true;
+    parts.forEach((p, i) => setTimeout(() => { mpSend({ t: "isleSave", i, n: parts.length, d: p }); if (i === parts.length - 1) { MI.uploading = false; save.myIsle.upH = h; writeSave(); } }, i * 90));
+}
+function visitIsle(n) {
+    n = String(n || "").trim();
+    if (!n) { mpLine("", "Use: /visit Name"); return; }
+    if (mp.on && n.toLowerCase() === String(mp.name).toLowerCase()) { goMyIsle(""); return; }
+    if (!mp.on) { toast("Join the public server to visit other people's islands.", "bad"); return; }
+    mpSend({ t: "isleGet", name: n }); toast(`⛵ Asking the way to ${n}'s island...`);
+}
 // ---- animals for Studio islands: the game's own (WILD_KINDS), plus the ones made in the Studio's Animal Maker (content/animals.js, keys a_) ----
 // fly: circles in the sky at that height; herd: comes in little groups; extra: what addWild needs to know
 const WILD_KINDS = {
@@ -14805,7 +15336,23 @@ function renderMarket() {
         const p = casePrice(k), can = save.money >= p;
         return `<div class="mcase" style="--c:${C.col}"><img src="${caseIcon(k)}"><b>${C.name}</b><small>${C.desc}</small>${oddsBar(C.odds)}<button data-case="${k}" ${can ? "" : "disabled"}>OPEN · ${money(p)}</button></div>`;
     }).join("");
+    // Sly's armory: one legendary axe opens at each rebirth
+    const armory = AXES.map((a, i) => ({ a, i })).filter(x => x.a.sly).map(({ a, i }) => {
+        const price = Math.round(caseBase() * a.slyK), own = save.owned[i], locked = (save.rebirths || 0) < a.sly;
+        return `<div class="mcase maxe" style="--c:${a.rarity}"><img src="${renderIcon("slyaxe:" + i, () => { const m = axeModel(i); m.rotation.set(0.2, 0.5, -0.75); return m; })}"><b>${a.name}</b>
+          <small>${a.dmg.toLocaleString()} damage · [Z] ${ABIL[i].name}: ${ABIL[i].desc}</small>
+          <button data-slyaxe="${i}" ${own || locked || save.money < price ? "disabled" : ""}>${own ? "YOURS" : locked ? "OPENS AT REBIRTH " + a.sly : "BUY · " + money(price)}</button></div>`;
+    }).join("");
+    $("marketBody").insertAdjacentHTML("beforeend", `<div class="mArmory"><h3>SLY'S ARMORY <small>legendary axes, one more at each rebirth</small></h3><div class="mArmGrid">${armory}</div></div>`);
     $("marketFoot").innerHTML = `You've found <b>${found} of ${all}</b> pets · ${save.pets.opened || 0} cases opened · shiny chance ${SHINY_CHANCE * 100}% · <b>P</b> shows your pets`;
+}
+function buySlyAxe(i) {
+    const a = AXES[i]; if (!a || !a.sly || save.owned[i] || (save.rebirths || 0) < a.sly) return;
+    const price = Math.round(caseBase() * a.slyK);
+    if (save.money < price) { toast(`Sly wants ${money(price)} for the ${a.name}.`, "bad"); return; }
+    save.money -= price; gainAxe(i); writeSave(); renderMarket();
+    toast(`"Pleasure doing business." The ${a.name} is yours! [Z] ${ABIL[i].name}`, "rare");
+    sfx(523, 0.15, "triangle", 0.1, 1.5); setTimeout(() => sfx(784, 0.25, "triangle", 0.1, 1.5), 140);
 }
 function startSpin(caseKey) {
     const got = openCase(caseKey); if (!got) { renderMarket(); return; }
@@ -14855,8 +15402,36 @@ function renderPets() {
         const P = PETS[k], R = RAR[P.r], o = own[k];
         if (!o) return `<div class="petc locked" style="--c:${R.c}"><div class="petq">?</div><b>???</b><small>${R.n}</small></div>`;
         const on = eq.includes(k);
-        return `<div class="petc${on ? " on" : ""}${o.shiny ? " shiny" : ""}" data-pet="${k}" style="--c:${R.c}"><img src="${petIcon(k)}"><b>${o.shiny ? "Shiny " : ""}${P.name}</b><span>${"★".repeat(o.stars || 1)}<i>${"★".repeat(5 - (o.stars || 1))}</i></span><small>${PERKS[P.perk].d(petValue(k))}</small>${on ? "<em>FOLLOWING</em>" : ""}</div>`;
+        const evo = o.evo ? `<small class="petEvo">MEGA · ${petTrick(k) === "dig" ? "digs up cash" : "fetches logs"}</small>` : (o.n || 1) >= 3 ? `<button class="petEvoB" data-evo="${k}">EVOLVE</button>` : `<small class="petEvo dim">${o.n || 1}/3 to evolve</small>`;
+        return `<div class="petc${on ? " on" : ""}${o.shiny ? " shiny" : ""}${o.evo ? " mega" : ""}" data-pet="${k}" style="--c:${R.c}"><img src="${petIcon(k)}"><b>${petName(k)}</b><span>${"★".repeat(o.stars || 1)}<i>${"★".repeat(5 - (o.stars || 1))}</i></span><small>${PERKS[P.perk].d(petValue(k))}</small>${evo}${on ? "<em>FOLLOWING</em>" : ""}</div>`;
     }).join("");
+}
+// a Mega pet's trick
+function petTrickDo(p) {
+    if (petTrick(p.key) === "fetch") { // the nearest log lying beyond your reach comes to you
+        p.trickT = 3;
+        let best = null, bd = 22;
+        for (const l of logs) { const d = Math.hypot(l.m.position.x - player.pos.x, l.m.position.z - player.pos.z); if (d > 4 && d < bd) { bd = d; best = l; } }
+        if (!best) return;
+        burst(best.m.position.clone(), 6, 3, [aglow(0xffd040, 0.9)]);
+        best.m.position.set(player.pos.x + (Math.random() - 0.5), groundY(player.pos.x, player.pos.z) + 1, player.pos.z + (Math.random() - 0.5)); best.vy = 0;
+        p.hop = 1;
+    } else { // dig up some cash every so often
+        p.trickT = 75;
+        const o = save.pets.own[p.key] || {}, cash = Math.round(logValue() * (6 + 3 * (o.stars || 1)));
+        save.money += cash;
+        burst(V3(p.x, p.y + 0.3, p.z), 10, 4, [aglow(0xffd040, 0.9), aglow(0x8a6a3a, 0.9)]);
+        toast(`🐾 Your ${petName(p.key)} dug up ${money(cash)}!`, "cash"); sfx(880, 0.08, "triangle", 0.08, 1.2);
+        p.hop = 1;
+    }
+}
+// three of the same pet: evolve it
+function evolvePet(k) {
+    const o = save.pets.own[k]; if (!o || o.evo || (o.n || 1) < 3) return;
+    o.evo = 1; o.n -= 2;
+    spawnPets(); writeSave(); renderPets();
+    toast(`✨ Your ${PETS[k].name} evolved into a Mega ${PETS[k].name}! Twice the perk, and it knows ${petTrick(k) === "dig" ? "Dig: it digs up cash" : "Fetch: it brings you logs"}.`, "rare");
+    sfx(523, 0.2, "triangle", 0.1, 1.5); setTimeout(() => sfx(659, 0.2, "triangle", 0.1, 1.5), 140); setTimeout(() => sfx(1046, 0.4, "triangle", 0.1, 1.5), 280);
 }
 function togglePet(k) {
     const eq = save.pets.eq, i = eq.indexOf(k);
@@ -14867,8 +15442,10 @@ function togglePet(k) {
 }
 document.addEventListener("click", e => {
     const c = e.target.closest("[data-case]"); if (c && !c.disabled) { startSpin(c.dataset.case); return; }
+    const ax = e.target.closest("[data-slyaxe]"); if (ax && !ax.disabled) { buySlyAxe(+ax.dataset.slyaxe); return; }
     if (e.target.closest("#spinAgain")) { const k = spin && spin.caseKey; if (k) startSpin(k); return; }
     if (e.target.closest("#spinPets") || e.target.closest("#marketPets")) { openPanel("pets"); return; }
+    const ev = e.target.closest("[data-evo]"); if (ev) { evolvePet(ev.dataset.evo); return; }
     const p = e.target.closest("[data-pet]"); if (p) togglePet(p.dataset.pet);
 });
 
@@ -14884,12 +15461,13 @@ function spawnPets() {
         g.updateMatrixWorld(true); icBox.setFromObject(g); icBox.getSize(icS);
         g.scale.multiplyScalar(P.h / Math.max(icS.y, 0.05)); // every pet stands its own height, whatever animal it's built from
         if (o.shiny) { const aura = new THREE.Mesh(SPH, aglow(0xffe070, 0.12)); aura.scale.setScalar(Math.max(icS.x, icS.y, icS.z) * 0.6); aura.position.y = icS.y * 0.5; g.add(aura); g.userData.aura = aura; }
+        if (o.evo) megaPet(g, P.h);
         // just ahead of you, to either side, so you can see them (a third one trots further out)
         const side = [-1.8, 1.8, -2.9][i] || 0, back = [-2.4, -2.4, -0.8][i] || 0;
         const x = player.pos.x + Math.sin(player.yaw) * back - Math.cos(player.yaw) * side, z = player.pos.z + Math.cos(player.yaw) * back + Math.sin(player.yaw) * side;
         g.position.set(x, groundY(x, z), z);
         scene.add(g);
-        pets.push({ key: k, P, g, i, side, back, x, z, y: g.position.y, yOff: 0, ph: Math.random() * 6, sp: 0, biteT: 0, hop: 0 });
+        pets.push({ key: k, P, g, i, side, back, x, z, y: g.position.y, yOff: 0, ph: Math.random() * 6, sp: 0, biteT: 0, hop: 0, evo: !!o.evo, trickT: 8 + i * 5 });
     });
 }
 function updatePets(dt) {
@@ -14897,6 +15475,7 @@ function updatePets(dt) {
     for (const p of pets) {
         p.g.visible = !hide; if (hide) continue;
         p.ph += dt;
+        if (p.evo) { if (p.g.userData.mega) p.g.userData.mega.rotation.z += dt * 2; if ((p.trickT -= dt) <= 0) petTrickDo(p); }
         // where it wants to be: just behind you, to the side (or at the tree, for a biter while you chop)
         let tx = player.pos.x + Math.sin(player.yaw) * p.back - Math.cos(player.yaw) * p.side, tz = player.pos.z + Math.cos(player.yaw) * p.back + Math.sin(player.yaw) * p.side, biting = null;
         if (p.P.perk === "bite" && lastChop && time - lastChop.at < 2.5 && !lastChop.t.dying && !lastChop.t.gone) {
@@ -14930,6 +15509,553 @@ function updatePets(dt) {
 }
 spawnPets();
 
+// the server's events: a pill for each one under the ONLINE badge, and a fanfare when one starts
+function setEvents(list, joining) {
+    const now = performance.now(), had = { ...srvEvents };
+    for (const k in srvEvents) delete srvEvents[k];
+    for (const x of list || []) if (SERVER_EVENTS[x.k]) srvEvents[x.k] = now + (x.left || 0);
+    for (const k of Object.keys(srvEvents)) {
+        if (had[k] > now) continue;
+        const E = SERVER_EVENTS[k];
+        if (!joining) { toast(`${E.e} SERVER EVENT: ${E.name.toUpperCase()}! ${E.desc[0].toUpperCase() + E.desc.slice(1)}.`, "rare"); sfx(523, 0.16, "triangle", 0.1, 1.5); setTimeout(() => sfx(659, 0.16, "triangle", 0.1, 1.5), 130); setTimeout(() => sfx(784, 0.3, "triangle", 0.1, 1.5), 260); }
+        if (k === "blood" && !isNight()) clockT = (21.5 / 24) * DAY_LEN; // night falls
+    }
+    evHud();
+}
+function clearEvents() { for (const k in srvEvents) delete srvEvents[k]; evHud(); }
+let evHudT = 0;
+function evHud() {
+    const now = performance.now(), live = Object.keys(srvEvents).filter(k => srvEvents[k] > now);
+    $("evHud").innerHTML = live.map(k => { const s = Math.ceil((srvEvents[k] - now) / 1000); return `<div title="${SERVER_EVENTS[k].desc}">${SERVER_EVENTS[k].e} ${SERVER_EVENTS[k].name.toUpperCase()} · ${s >= 3600 ? Math.floor(s / 3600) + "h " + Math.floor(s % 3600 / 60) + "m" : Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")}</div>`; }).join("");
+    $("evHud").classList.toggle("show", live.length > 0 && (state === "playing" || state === "paused"));
+}
+
+// shared trees: while the admin is on the server, the trees they spawn are the server's. Everyone on that island sees them
+// and chops the same health bar, and when one falls everyone who hit it gets its logs.
+const strees = new Map(); // id -> { id, isle, key, x, z, h, hp, maxHp, mut, t: the tree while you're on its island }
+let streeT = 0;
+function streeAdd(d) { if (d && d.id && !strees.has(d.id)) { strees.set(d.id, { ...d, t: null }); streeSync(); } }
+function streeSync() {
+    for (const S of strees.values()) {
+        if (S.t && (S.t.gone || S.isle !== isle)) { if (!S.t.gone) { scene.remove(S.t.g); S.t.gone = true; } S.t = null; }
+        if (!S.t && S.isle === isle && mp.on && TYPES[S.key]) {
+            const t = makeTree(S.x, S.z, S.h, S.key);
+            if (MUTS[S.mut]) applyMut(t, S.mut);
+            t.hp = S.hp; t.maxHp = S.maxHp; t.srv = S.id; S.t = t;
+        }
+    }
+}
+function streeClear() {
+    for (const S of strees.values()) if (S.t && !S.t.gone) { scene.remove(S.t.g); S.t.gone = true; if (S.t.bar) { S.t.bar.remove(); S.t.bar = null; } }
+    strees.clear();
+}
+function streeFell(m) {
+    const S = strees.get(m.id); if (!S) return;
+    strees.delete(m.id);
+    const t = S.t; if (!t || t.gone || t.dying) return;
+    if (t.srvHit) { t.hp = 0; fellTree(t); if (m.by !== mp.name) toast(`${m.by} finished the shared ${t.type.name}. You helped, so the logs are yours too!`, "good"); }
+    else { t.noDrop = true; t.dying = true; t.t = 0; }
+}
+
+// =====================================================================
+// 2.5: PVP. V turns fighting other players on or off. Only players who both have it on can hit each other, and nobody can
+// be hit in a safe zone (camp, the casino). A swing at someone in front of you hits them instead of a tree. Damage comes
+// from your axe's rank, not its tree damage, so a newer player can still fight back. Knocked out, you lose the logs you carry.
+// =====================================================================
+let pvpOn = false, pvpBy = "", pvpByT = 0, pvpKoT = 0;
+const pvpDmg = () => Math.round((8 + 2 * Math.max(0, save.equipped)) * (1 + 0.1 * enchLv("sharp")));
+const pvpSafeAt = (x, z) => Math.hypot(x, z) < SAFE_R || x > 4500 || x < -4500;
+function pvpToggle() {
+    if (!mp.on) { toast("PvP is for the public server.", "bad"); return; }
+    pvpOn = !pvpOn; mp.last = "";
+    toast(pvpOn ? "⚔ PvP ON: players with PvP on can hit you, and you them (never in camp)." : "PvP off.", pvpOn ? "bad" : "");
+    pvpHud();
+}
+function pvpHud() { $("pvpBadge").classList.toggle("show", pvpOn && mp.on); }
+// the player you'd hit with this swing, if any
+function pvpTarget() {
+    if (!pvpOn || !mp.on || inSafe()) return null;
+    const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+    let best = null, bd = 3.3;
+    for (const o of mp.others.values()) {
+        if (!o.pvp || o.isle !== isle || !o.seen || pvpSafeAt(o.x, o.z)) continue;
+        const dx = o.x - player.pos.x, dz = o.z - player.pos.z, d = Math.hypot(dx, dz);
+        if (d > bd || Math.abs(o.y - player.pos.y) > 2.2 || (dx * fx + dz * fz) / (d || 1) < 0.6) continue;
+        best = o; bd = d;
+    }
+    return best;
+}
+function pvpSwing(o) {
+    const dmg = pvpDmg();
+    mpSend({ t: "pvpHit", id: o.id, dmg });
+    floatWorld(V3(o.x, o.y + 0.25, o.z), "-" + dmg, "dmg");
+    burst(V3(o.x, o.y - 0.4, o.z), 9, 4, [new THREE.MeshBasicMaterial({ color: 0xff3a3a }), new THREE.MeshBasicMaterial({ color: 0xffd0d0 })]);
+    sfx(150, 0.14, "square", 0.16, 0.5); shake = Math.min(0.4, shake + 0.2); hitstop = 0.05;
+}
+// someone hit you
+function pvpHurt(m) {
+    if (!pvpOn || inSafe() || state !== "playing") return;
+    const o = mp.others.get(m.fromId);
+    pvpBy = m.from; pvpByT = time;
+    hurtPlayer(Math.max(1, Math.min(200, Math.round(+m.dmg) || 1)), o ? o.x : undefined, o ? o.z : undefined);
+    if (state === "dead" && time - pvpKoT > 2) { pvpKoT = time; mpSend({ t: "pvpKO", by: m.fromId }); }
+}
+
+// =====================================================================
+// 2.5: TRADING. Ask someone to trade (TRADE in Friends, or /trade Name). In the trade window each of you puts in cash,
+// materials, pets or axes. Any change means both say READY again; when both are ready, the swap happens in both games.
+// =====================================================================
+let tradeDraft = { cash: 0, mats: {}, pets: [], axes: [] }, tradeSendT = 0;
+const tradeEsc = t => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function tradeReq(n) { if (!mp.on) { toast("Join the public server first.", "bad"); return; } mpSend({ t: "tradeReq", to: n }); }
+// what's in an offer, in words
+function offerList(o) {
+    const out = [];
+    if (o.cash) out.push(`<div class="trItem cash">${money(o.cash)}</div>`);
+    for (const [k, n] of Object.entries(o.mats || {})) out.push(`<div class="trItem"><i style="background:${MATS[k] ? MATS[k].col : "#888"}"></i>${n.toLocaleString()} ${tradeEsc(MATS[k] ? MATS[k].name : k)}</div>`);
+    for (const p of o.pets || []) out.push(`<div class="trItem pet">${p.shiny ? "✨ " : ""}${tradeEsc(PETS[p.k] ? PETS[p.k].name : p.k)} ${"★".repeat(p.stars || 1)}</div>`);
+    for (const i of o.axes || []) out.push(`<div class="trItem axe">🪓 ${tradeEsc(AXES[i] ? AXES[i].name : "axe " + i)}</div>`);
+    return out.join("") || `<p class="frNote">nothing yet</p>`;
+}
+// can you still give all of it?
+function canGive(o) {
+    if (o.cash > save.money) return `You only have ${money(save.money)}.`;
+    for (const [k, n] of Object.entries(o.mats)) if ((save.mats[k] || 0) < n) return `You only have ${(save.mats[k] || 0).toLocaleString()} ${MATS[k] ? MATS[k].name : k}.`;
+    for (const p of o.pets) if (!save.pets.own[p.k]) return `You don't have ${PETS[p.k] ? PETS[p.k].name : p.k} anymore.`;
+    for (const i of o.axes) if (!save.owned[i]) return `You don't have ${AXES[i].name} anymore.`;
+    return "";
+}
+function tradeOffer() { mpSend({ t: "tradeOffer", offer: tradeDraft }); }
+function renderTrade() {
+    const T = mp.trade;
+    if (!T) { $("tradeBody").innerHTML = `<p class="frNote">No trade going on. Ask someone from Friends (Y), or type /trade Name.</p>`; return; }
+    const matOpts = Object.keys(MATS).filter(k => (save.mats[k] || 0) > 0).map(k => `<option value="${k}">${tradeEsc(MATS[k].name)} (${(save.mats[k] || 0).toLocaleString()})</option>`).join("");
+    const petOpts = Object.entries(save.pets.own).filter(([k]) => PETS[k] && !tradeDraft.pets.some(p => p.k === k)).map(([k, o]) => `<option value="${k}">${tradeEsc(PETS[k].name)} ${"★".repeat(o.stars || 1)}${o.shiny ? " ✨" : ""}</option>`).join("");
+    const axeOpts = AXES.map((a, i) => (i > 0 && save.owned[i] && !tradeDraft.axes.includes(i) ? `<option value="${i}">${tradeEsc(a.name)}</option>` : "")).join("");
+    const mine = T.me.offer, rows = [];
+    if (tradeDraft.cash) rows.push(`<div class="trItem cash">${money(tradeDraft.cash)}<button data-tr="rm" data-what="cash">✕</button></div>`);
+    for (const [k, n] of Object.entries(tradeDraft.mats)) rows.push(`<div class="trItem"><i style="background:${MATS[k].col}"></i>${n.toLocaleString()} ${tradeEsc(MATS[k].name)}<button data-tr="rm" data-what="mat" data-k="${k}">✕</button></div>`);
+    for (const p of tradeDraft.pets) rows.push(`<div class="trItem pet">${p.shiny ? "✨ " : ""}${tradeEsc(PETS[p.k].name)} ${"★".repeat(p.stars)}<button data-tr="rm" data-what="pet" data-k="${p.k}">✕</button></div>`);
+    for (const i of tradeDraft.axes) rows.push(`<div class="trItem axe">🪓 ${tradeEsc(AXES[i].name)}<button data-tr="rm" data-what="axe" data-k="${i}">✕</button></div>`);
+    $("tradeBody").innerHTML = `
+      <div class="trCols">
+        <div class="trCol"><h4>YOU GIVE ${T.me.ready ? '<span class="trOk">READY</span>' : ""}</h4>
+          <div class="trList">${rows.join("") || '<p class="frNote">nothing yet</p>'}</div>
+          <div class="trAdd"><input id="trCash" placeholder="Cash, like 1.5m" spellcheck="false" autocomplete="off"><button class="btn small ghost" data-tr="cash">ADD CASH</button></div>
+          ${matOpts ? `<div class="trAdd"><select id="trMat">${matOpts}</select><input id="trMatN" placeholder="How many" spellcheck="false" autocomplete="off"><button class="btn small ghost" data-tr="mat">ADD</button></div>` : ""}
+          ${petOpts ? `<div class="trAdd"><select id="trPet">${petOpts}</select><button class="btn small ghost" data-tr="pet">ADD PET</button></div>` : ""}
+          ${axeOpts ? `<div class="trAdd"><select id="trAxe">${axeOpts}</select><button class="btn small ghost" data-tr="axe">ADD AXE</button></div>` : ""}
+        </div>
+        <div class="trCol them"><h4>${tradeEsc(T.them.name).toUpperCase()} GIVES ${T.them.ready ? '<span class="trOk">READY</span>' : ""}</h4><div class="trList">${offerList(T.them.offer)}</div></div>
+      </div>
+      <p class="frNote">${T.me.ready && T.them.ready ? "Swapping..." : T.me.ready ? `Waiting for ${tradeEsc(T.them.name)} to be ready.` : "Check what they give, then press READY. If anything changes, you both press READY again."}</p>
+      <div class="trFoot"><button class="btn small ghost" data-tr="cancel">CANCEL TRADE</button><button class="btn small${T.me.ready ? " ghost" : ""}" data-tr="ready">${T.me.ready ? "NOT READY" : "READY"}</button></div>`;
+}
+const tradeNum = v => { const m = String(v).trim().toLowerCase().replace(/[$,\s_]/g, "").match(/^(\d*\.?\d+)([kmbt]?)$/); return m ? Math.floor(parseFloat(m[1]) * { "": 1, k: 1e3, m: 1e6, b: 1e9, t: 1e12 }[m[2]]) : 0; };
+$("panelTrade").addEventListener("click", e => {
+    const b = e.target.closest("[data-tr]"); if (!b || !mp.trade) return;
+    b.blur();
+    const a = b.dataset.tr, D = tradeDraft;
+    if (a === "cash") { const v = tradeNum($("trCash").value); if (!(v > 0)) return; D.cash = Math.min(save.money, v); }
+    else if (a === "mat") { const k = $("trMat").value, v = tradeNum($("trMatN").value); if (!(v > 0)) return; D.mats[k] = Math.min(save.mats[k] || 0, v); }
+    else if (a === "pet") { const k = $("trPet").value, o = save.pets.own[k]; if (!o || D.pets.length >= 3) return; D.pets.push({ k, stars: o.stars || 1, shiny: o.shiny ? 1 : 0 }); }
+    else if (a === "axe") { const i = +$("trAxe").value; if (!save.owned[i] || D.axes.length >= 3) return; D.axes.push(i); }
+    else if (a === "rm") { const k = b.dataset.k; if (b.dataset.what === "cash") D.cash = 0; else if (b.dataset.what === "mat") delete D.mats[k]; else if (b.dataset.what === "pet") D.pets = D.pets.filter(p => p.k !== k); else D.axes = D.axes.filter(i => i !== +k); }
+    else if (a === "ready") { if (!mp.trade.me.ready) { const why = canGive(D); if (why) { toast(why, "bad"); return; } } mpSend({ t: "tradeReady", on: !mp.trade.me.ready }); return; }
+    else if (a === "cancel") { mpSend({ t: "tradeCancel" }); return; }
+    tradeOffer(); renderTrade();
+});
+// the swap: give what you offered, get theirs
+function tradeDone(m) {
+    const give = m.give || {}, get = m.get || {};
+    if (canGive({ cash: give.cash || 0, mats: give.mats || {}, pets: give.pets || [], axes: give.axes || [] })) toast("Something you offered was gone, so that part didn't go.", "bad");
+    save.money = Math.max(0, save.money - Math.min(save.money, give.cash || 0)) + (get.cash || 0);
+    for (const [k, n] of Object.entries(give.mats || {})) save.mats[k] = Math.max(0, (save.mats[k] || 0) - n);
+    for (const [k, n] of Object.entries(get.mats || {})) if (MATS[k]) save.mats[k] = (save.mats[k] || 0) + n;
+    for (const p of give.pets || []) { delete save.pets.own[p.k]; save.pets.eq = save.pets.eq.filter(k => k !== p.k); }
+    for (const p of get.pets || []) {
+        if (!PETS[p.k]) continue;
+        const own = save.pets.own[p.k];
+        if (!own) { save.pets.own[p.k] = { stars: p.stars || 1, shiny: p.shiny ? 1 : 0, n: 1 }; if (save.pets.eq.length < petSlots()) save.pets.eq.push(p.k); }
+        else { own.stars = Math.min(5, Math.max(own.stars || 1, p.stars || 1) + 1); if (p.shiny) own.shiny = 1; own.n = (own.n || 1) + 1; }
+    }
+    for (const i of give.axes || []) {
+        if (!save.owned[i] || i === 0) continue;
+        save.owned[i] = 0; delete save.ench[i];
+        if (Array.isArray(save.hotbar)) save.hotbar = save.hotbar.map(h => (h === "a" + i ? null : h));
+        if (save.equipped === i) { save.equipped = -1; equipAxe(0); }
+    }
+    for (const i of get.axes || []) if (AXES[i] && !save.owned[i]) { save.owned[i] = 1; addToHotbar("a" + i); }
+    spawnPets(); writeSave();
+    mp.trade = null; tradeDraft = { cash: 0, mats: {}, pets: [], axes: [] };
+    if (panel === "trade") closePanel();
+    toast(`🤝 Trade with ${m.with} done!`, "rare"); sfx(660, 0.12, "triangle", 0.1, 1.5); setTimeout(() => sfx(990, 0.2, "triangle", 0.1, 1.5), 120);
+}
+
+// =====================================================================
+// 2.5: CREWS. U opens your crew: make one (a name and a 2-4 letter tag that shows over everyone's heads), invite people,
+// talk with /c, keep money in the shared crew bank (anyone puts in, the leader takes out), and climb the rankings by
+// the trees your crew fells. Crews live on the public server.
+// =====================================================================
+let crewFelled = 0, crewFellT = 0;
+function clanTick(dt) { // tell the server about felled trees every few seconds, for the rankings
+    if ((crewFellT -= dt) > 0) return;
+    crewFellT = 6;
+    if (mp.on && mp.crew && crewFelled > 0) { mpSend({ t: "crewFell", n: Math.min(500, crewFelled) }); crewFelled = 0; }
+}
+const crewLabel = o => (o.pvp ? "⚔ " : "") + (o.crew ? `[${o.crew}] ` : "") + (o.admin ? "[ADMIN] " : "") + o.name;
+function renderClan() {
+    const esc = t => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const C = mp.crew, me = (mp.name || "").toLowerCase(), lead = C && C.owner.toLowerCase() === me;
+    const top = (mp.crewTop || []).map((x, i) => `<div class="frRow${C && x.tag === C.tag ? " req" : ""}"><b>#${i + 1}</b><b>[${esc(x.tag)}] ${esc(x.name)}</b><span>${x.members} member${x.members === 1 ? "" : "s"}</span><span class="crNum">🌲 ${x.felled.toLocaleString()}</span></div>`).join("") || `<p class="frNote">No crews yet. Be the first!</p>`;
+    let html = mp.on ? "" : `<p class="frNote">Crews live on the public server. Join it to make or join one.</p>`;
+    if (mp.on && !C) {
+        html += mp.crewInv ? `<h4>INVITE</h4><div class="frRow req"><b>[${esc(mp.crewInv.tag)}] ${esc(mp.crewInv.name)}</b><span>${esc(mp.crewInv.from)} invited you</span><button class="btn small" data-cr="join">JOIN</button><button class="btn small ghost" data-cr="noInv">NO</button></div>` : "";
+        html += `<h4>MAKE A CREW</h4><div class="frAdd"><input id="crName" maxlength="20" placeholder="Crew name" spellcheck="false" autocomplete="off"><input id="crTag" class="crTag" maxlength="4" placeholder="TAG" spellcheck="false" autocomplete="off"><button class="btn small" data-cr="make">MAKE IT</button></div>
+          <p class="frNote">The tag shows before your name, like [${esc((mp.name || "TREE").slice(0, 4).toUpperCase())}] ${esc(mp.name || "Tree")}.</p>`;
+    }
+    if (mp.on && C) {
+        const others = [...mp.others.values()].filter(o => !o.crew);
+        html += `<div class="crHead"><b>[${esc(C.tag)}]</b> ${esc(C.name)}<span>🌲 ${C.felled.toLocaleString()} trees felled</span></div>
+          <h4>BANK <small>${lead ? "anyone puts money in · you can take it out" : "anyone puts money in · " + esc(C.owner) + " can take it out"}</small></h4>
+          <div class="frAdd"><div class="crBank">${money(C.bank)}</div><input id="crAmt" placeholder="Amount, like 250k" spellcheck="false" autocomplete="off"><button class="btn small" data-cr="dep">PUT IN</button>${lead ? `<button class="btn small ghost" data-cr="wd">TAKE OUT</button>` : ""}</div>
+          <h4>MEMBERS <small>${C.members.filter(x => x.online).length} online · talk to them with /c message</small></h4>
+          ${C.members.map(x => `<div class="frRow${x.online ? " on" : ""}"><i></i><b>${x.owner ? "👑 " : ""}${esc(x.name)}</b><span>${x.owner ? "leader" : ""}</span>${lead && !x.owner ? `<button class="btn small ghost" data-cr="kick" data-n="${esc(x.name)}">KICK</button>` : ""}</div>`).join("")}
+          ${lead ? `<h4>INVITE</h4>` + (others.length ? others.map(o => `<div class="frRow on"><i></i><b>${esc(o.name)}</b><span>${esc(mpIsleName(o.isle))}</span><button class="btn small" data-cr="inv" data-n="${esc(o.name)}">INVITE</button></div>`).join("") : `<p class="frNote">Nobody online without a crew right now.</p>`) : ""}
+          <div class="crFoot"><button class="btn small ghost" data-cr="leave">LEAVE CREW</button></div>`;
+    }
+    html += `<h4>RANKINGS <small>trees felled by each crew</small></h4>${top}`;
+    $("clanBody").innerHTML = html;
+}
+const crewAmt = () => { const v = String($("crAmt").value).trim().toLowerCase().replace(/[$,\s_]/g, "").match(/^(\d*\.?\d+)([kmbt]?)$/); return v ? Math.floor(parseFloat(v[1]) * { "": 1, k: 1e3, m: 1e6, b: 1e9, t: 1e12 }[v[2]]) : 0; };
+$("panelClan").addEventListener("click", e => {
+    const b = e.target.closest("[data-cr]"); if (!b) return;
+    b.blur();
+    const a = b.dataset.cr, n = b.dataset.n;
+    if (a === "make") mpSend({ t: "crewMake", name: $("crName").value, tag: $("crTag").value });
+    else if (a === "join" && mp.crewInv) { mpSend({ t: "crewJoin", tag: mp.crewInv.tag }); mp.crewInv = null; }
+    else if (a === "noInv") { mp.crewInv = null; renderClan(); }
+    else if (a === "inv") mpSend({ t: "crewInvite", to: n });
+    else if (a === "kick") { if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "SURE?"; return; } mpSend({ t: "crewKick", name: n }); }
+    else if (a === "leave") { if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "LEAVE FOR SURE?"; return; } mpSend({ t: "crewLeave" }); }
+    else if (a === "dep") { const v = crewAmt(); if (!(v > 0)) { $("crAmt").focus(); return; } if (save.money < v) { toast(`You only have ${money(save.money)}.`, "bad"); return; } save.money -= v; writeSave(); mpSend({ t: "crewBank", amount: v }); $("crAmt").value = ""; }
+    else if (a === "wd") { const v = crewAmt(); if (!(v > 0)) { $("crAmt").focus(); return; } mpSend({ t: "crewBank", amount: -v }); $("crAmt").value = ""; }
+});
+// crew chat lines are teal
+function mpLineCrew(tag, name, text) {
+    const line = document.createElement("div"); line.className = "mpl crew";
+    const b = document.createElement("b"); b.textContent = `[${tag}] ${name}:`;
+    line.append(b, document.createTextNode(" " + text));
+    const box = $("mpChat"); box.appendChild(line); while (box.children.length > 8) box.firstChild.remove();
+    setTimeout(() => line.classList.add("old"), 15000);
+}
+
+// =====================================================================
+// 2.5: FRIENDS. Y opens your friends: send a request to anyone online, and once they say yes you're friends (it's kept on
+// both your PCs). See which island your friends are on, Join them there (any island you've reached), and message them.
+// Chat commands: /msg Name text (or /w), /r text answers the last message, /friend Name, /join Name, /help.
+// =====================================================================
+const isFriend = n => save.friends.some(f => f.toLowerCase() === String(n).toLowerCase());
+const mpByName = n => [...mp.others.values()].find(o => o.name.toLowerCase() === String(n).toLowerCase());
+let pmLast = "";
+// any island you've reached: Pine Island is 1, and each rebirth opens the next one
+const isleReached = n => n >= 1 && n <= (save.rebirths || 0) + 1;
+function travelTo(n) {
+    if (n === isle) return true;
+    if (!isleReached(n) || ride || boating()) return false;
+    if (n >= CI_BASE) { const C = customIsle(n); if (!C) return false; enterCI(C); }
+    else [null, enterIsle1, enterIsle2, enterIsle3, enterIsle4, enterIsle5, enterIsle6][n]();
+    player.pos.set(RESPAWN.x, groundY(RESPAWN.x, RESPAWN.z) + 1.7, RESPAWN.z); player.vel.set(0, 0, 0);
+    writeSave();
+    return true;
+}
+function joinFriend(n) {
+    const o = mpByName(n);
+    if (!o) { toast(`${n} isn't online.`, "bad"); return; }
+    if (o.isle === MI_MP) { closePanel(); visitIsle(o.mi || o.name); return; } // they're on someone's own island
+    if (o.isle !== isle && !isleReached(o.isle)) { toast(`${o.name} is on ${mpIsleName(o.isle)}. You haven't been there yet.`, "bad"); return; }
+    if (!travelTo(o.isle)) { toast("You can't travel right now.", "bad"); return; }
+    const a = Math.random() * 6.28, x = o.tx + Math.cos(a) * 2.5, z = o.tz + Math.sin(a) * 2.5;
+    player.pos.set(x, groundY(x, z) + 1.7, z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(-(o.tx - x), -(o.tz - z));
+    closePanel(); toast(`You joined ${o.name} on ${mpIsleName(o.isle)}.`, "good");
+}
+function addFriend(n) {
+    if (!n || isFriend(n)) return;
+    save.friends.push(n); save.friends = save.friends.slice(-100); writeSave();
+    const o = mpByName(n); if (o) mpFriendLabel(o);
+}
+function delFriend(n) {
+    save.friends = save.friends.filter(f => f.toLowerCase() !== n.toLowerCase()); writeSave();
+    const o = mpByName(n); if (o) mpFriendLabel(o);
+}
+// a friend's name over their head is blue (the admin's stays gold)
+function mpFriendLabel(o) { if (!o.admin) o.lb.el.style.color = o.lb.el.style.borderColor = o.pvp ? "#ff8a7a" : isFriend(o.name) ? "#8adcff" : "#8aff9a"; }
+function friendReq(n) {
+    if (!mp.on) { toast("Join the public server first.", "bad"); return; }
+    n = String(n || "").trim(); if (!n) return;
+    if (isFriend(n)) { toast(`${n} is already your friend.`); return; }
+    mpSend({ t: "friendReq", to: n });
+}
+function renderFriends() {
+    const esc = t => String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const where = o => (o.isle === MI_MP ? (o.mi ? `on ${o.mi}'s island` : "on their own island") : (o.isle === isle && !inMyIsle() ? "here on " : "on ") + mpIsleName(o.isle));
+    const on = save.friends.map(n => ({ n, o: mpByName(n) }));
+    const reqs = [...mp.reqs];
+    const others = mp.on ? [...mp.others.values()].filter(o => !isFriend(o.name)) : [];
+    $("friendsBody").innerHTML = `
+      ${mp.on ? "" : `<p class="frNote">Join the public server to see who's online, send friend requests, join your friends and message them.</p>`}
+      ${mp.tradeReqs.size ? `<h4>TRADE REQUESTS</h4>` + [...mp.tradeReqs].map(([id, n]) => `<div class="frRow req"><b>${esc(n)}</b><span>wants to trade</span><button class="btn small" data-fr="tradeOk" data-id="${esc(id)}">TRADE</button><button class="btn small ghost" data-fr="tradeNo" data-id="${esc(id)}">NO</button></div>`).join("") : ""}
+      ${reqs.length ? `<h4>REQUESTS</h4>` + reqs.map(n => `<div class="frRow req"><b>${esc(n)}</b><span>wants to be friends</span><button class="btn small" data-fr="accept" data-n="${esc(n)}">ACCEPT</button><button class="btn small ghost" data-fr="decline" data-n="${esc(n)}">NO</button></div>`).join("") : ""}
+      <h4>YOUR FRIENDS <small>${on.filter(f => f.o).length} online</small></h4>
+      ${on.length ? on.sort((a, b) => !!b.o - !!a.o).map(({ n, o }) => `<div class="frRow${o ? " on" : ""}"><i></i><b>${esc(o ? o.name : n)}</b><span>${o ? esc(where(o)) : "offline"}</span>
+          ${o ? `<button class="btn small" data-fr="join" data-n="${esc(n)}">JOIN</button><button class="btn small ghost" data-fr="msg" data-n="${esc(n)}">MESSAGE</button><button class="btn small ghost" data-fr="trade" data-n="${esc(n)}">TRADE</button>` : ""}${mp.on ? `<button class="btn small ghost" data-fr="visit" data-n="${esc(n)}">VISIT ISLAND</button>` : ""}<button class="btn small ghost" data-fr="del" data-n="${esc(n)}">REMOVE</button></div>`).join("")
+        : `<p class="frNote">No friends yet. Send someone a request below.</p>`}
+      ${mp.on ? `<h4>ONLINE NOW</h4>` + (others.length ? others.map(o => `<div class="frRow on"><i></i><b>${esc(o.name)}</b><span>${esc(where(o))}</span><button class="btn small ghost" data-fr="trade" data-n="${esc(o.name)}">TRADE</button><button class="btn small" data-fr="add" data-n="${esc(o.name)}">ADD FRIEND</button></div>`).join("") : `<p class="frNote">Nobody else is on right now.</p>`) : ""}
+      ${mp.on ? `<h4>ADD BY NAME</h4><div class="frAdd"><input id="frName" maxlength="16" placeholder="Their name" spellcheck="false" autocomplete="off"><button class="btn small" data-fr="addName">SEND REQUEST</button></div>` : ""}`;
+}
+$("panelFriends").addEventListener("click", e => {
+    const b = e.target.closest("[data-fr]"); if (!b) return;
+    b.blur();
+    const n = b.dataset.n, act = b.dataset.fr;
+    if (act === "join") joinFriend(n);
+    else if (act === "visit") { closePanel(); visitIsle(n); }
+    else if (act === "msg") { closePanel(); setTimeout(() => { mpOpenChat(); $("mpInput").value = `/msg ${n} `; }, 50); }
+    else if (act === "del") { if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "SURE?"; return; } delFriend(n); toast(`${n} isn't your friend anymore.`); }
+    else if (act === "add") friendReq(n);
+    else if (act === "addName") { friendReq($("frName").value); $("frName").value = ""; }
+    else if (act === "accept") { mp.reqs.delete(n); addFriend(n); mpSend({ t: "friendOk", to: n }); toast(`${n} is your friend now!`, "good"); }
+    else if (act === "decline") mp.reqs.delete(n);
+    else if (act === "trade") tradeReq(n);
+    else if (act === "tradeOk") { mpSend({ t: "tradeAccept", fromId: b.dataset.id }); mp.tradeReqs.delete(b.dataset.id); }
+    else if (act === "tradeNo") mp.tradeReqs.delete(b.dataset.id);
+    if (panel === "friends") renderFriends();
+});
+$("panelFriends").addEventListener("keydown", e => { if (e.target.id === "frName" && e.code === "Enter") { friendReq(e.target.value); e.target.value = ""; } });
+// a private message line in the chat (pink), and the chat commands
+function mpLinePm(dir, name, text) {
+    const line = document.createElement("div"); line.className = "mpl pm";
+    const b = document.createElement("b"); b.textContent = dir === "in" ? `[from ${name}]` : `[to ${name}]`;
+    line.append(b, document.createTextNode(" " + text));
+    const box = $("mpChat"); box.appendChild(line); while (box.children.length > 8) box.firstChild.remove();
+    setTimeout(() => line.classList.add("old"), 15000);
+}
+// "/msg Bot Bertha hi": the name can have spaces, so match the longest name that's online
+function splitName(rest) {
+    const lower = rest.toLowerCase(), names = [...mp.others.values()].map(o => o.name).concat(save.friends).sort((a, b) => b.length - a.length);
+    const hit = names.find(n => lower.startsWith(n.toLowerCase() + " ") || lower === n.toLowerCase());
+    if (hit) return [hit, rest.slice(hit.length).trim()];
+    const sp = rest.indexOf(" "); return sp < 0 ? [rest, ""] : [rest.slice(0, sp), rest.slice(sp + 1).trim()];
+}
+function chatCommand(text) {
+    const m = text.match(/^\/(\w+)\s*(.*)$/); if (!m) return false;
+    const cmd = m[1].toLowerCase(), rest = m[2];
+    if (cmd === "msg" || cmd === "w" || cmd === "tell") { const [n, t] = splitName(rest); if (n && t) mpSend({ t: "pm", to: n, text: t.slice(0, 140) }); else mpLine("", "Use: /msg Name your message"); }
+    else if (cmd === "r") { if (!pmLast) mpLine("", "Nobody has messaged you yet."); else if (rest) mpSend({ t: "pm", to: pmLast, text: rest.slice(0, 140) }); }
+    else if (cmd === "c" || cmd === "crew") { if (!mp.crew) mpLine("", "You're not in a crew. Press U to make or join one."); else if (rest) mpSend({ t: "crewChat", text: rest.slice(0, 140) }); }
+    else if (cmd === "friend") { if (rest) friendReq(splitName(rest)[0]); else mpLine("", "Use: /friend Name"); }
+    else if (cmd === "trade") { if (rest) tradeReq(splitName(rest)[0]); else mpLine("", "Use: /trade Name"); }
+    else if (cmd === "join") { if (rest) joinFriend(splitName(rest)[0]); else mpLine("", "Use: /join Name"); }
+    else if (cmd === "visit") visitIsle(rest);
+    else mpLine("", "Commands: /msg Name text · /r text · /c crew message · /friend Name · /join Name · /trade Name · /visit Name (their island) · Y Friends · U Crew · G emotes");
+    return true;
+}
+
+// =====================================================================
+// 2.5: YOUR OWN LOOK. MY LOOK (on the title screen and the pause menu) makes your character: skin, body, hair, beard,
+// eyes, mouth, hat and clothes. Cosmetics bought with cash (capes, trails, axe skins) show on you, and the public server
+// shows all of it to everyone. Until you make a look you look like your name, like everyone did in 2.0.
+// =====================================================================
+const hex6 = n => "#" + ((n >>> 0) & 0xffffff).toString(16).padStart(6, "0");
+// emotes: G brings up the bar, 1-8 (or a click) does one. Everyone on your island sees your player do it, with the
+// emoji over your head; you see the emoji float up in front of you.
+const EMOTES = {
+    wave: { e: "👋", name: "Wave", t: 2.2 }, cheer: { e: "🙌", name: "Cheer", t: 2.2 }, dance: { e: "💃", name: "Dance", t: 4.5 }, clap: { e: "👏", name: "Clap", t: 2.2 },
+    point: { e: "👉", name: "Point", t: 1.8 }, bow: { e: "🙇", name: "Bow", t: 2 }, laugh: { e: "😂", name: "Laugh", t: 2.2 }, flex: { e: "💪", name: "Flex", t: 2.2 }
+};
+const EMOTE_KEYS = Object.keys(EMOTES);
+let emoteBarOn = false, emoteT = 0;
+function emoteBar(on) {
+    emoteBarOn = !!on && state === "playing";
+    const el = $("emoteBar");
+    if (emoteBarOn && !el.children.length) el.innerHTML = EMOTE_KEYS.map((k, i) => `<button data-emote="${k}"><b>${EMOTES[k].e}</b><span>${EMOTES[k].name}</span><kbd>${i + 1}</kbd></button>`).join("");
+    el.classList.toggle("show", emoteBarOn);
+}
+$("emoteBar").addEventListener("click", e => { const b = e.target.closest("[data-emote]"); if (b) { b.blur(); doEmote(b.dataset.emote); } });
+function doEmote(k) {
+    const E = EMOTES[k]; if (!E) return;
+    emoteBar(false);
+    if (time - emoteT < 0.8) return; emoteT = time;
+    const pop = document.createElement("div"); pop.className = "emotePop"; pop.textContent = E.e;
+    document.body.appendChild(pop); setTimeout(() => pop.remove(), 1600);
+    if (mp.on) mpSend({ t: "emote", e: k }); else toast(`${E.e} Other players see your emotes on the public server.`);
+}
+// another player's emote: their arms and body move for a few seconds, with the emoji over their head
+function mpEmote(o, k) {
+    const E = EMOTES[k]; if (!E) return;
+    if (o.emote && o.emote.lb) mpEmoteEnd(o);
+    const lb = label(E.e, "#ffffff", 1.4, 0.6); lb.el.classList.add("emoteLb"); lb.maxD = 60; lb.isle = -1;
+    o.emote = { k, t: 0, dur: E.t, lb };
+}
+function mpEmoteEnd(o) {
+    const lb = o.emote && o.emote.lb;
+    if (lb) { const i = labelList.indexOf(lb); if (i >= 0) labelList.splice(i, 1); lb.el.remove(); }
+    o.emote = null;
+    const H = o.h; H.armL.rotation.z = H.armR.rotation.z = 0; H.torso.rotation.set(0, 0, 0); H.head.rotation.z = 0;
+}
+function mpEmoteTick(o, dt) {
+    const m = o.emote; if (!m) return;
+    m.t += dt;
+    if (m.t > m.dur) { mpEmoteEnd(o); return; }
+    const H = o.h, t = m.t, s = Math.sin;
+    m.lb.position.set(o.x, o.y + 1.35 + s(t * 3) * 0.06, o.z); m.lb.isle = o.lb.isle;
+    if (m.k === "wave") { H.armR.rotation.x = -2.8; H.armR.rotation.z = -0.25 + s(t * 11) * 0.45; }
+    else if (m.k === "cheer") { H.armL.rotation.x = H.armR.rotation.x = -2.9; H.armL.rotation.z = 0.3; H.armR.rotation.z = -0.3; H.g.position.y += Math.abs(s(t * 7)) * 0.3; }
+    else if (m.k === "dance") { H.g.rotation.y += s(t * 3.2) * 0.9; H.armL.rotation.x = s(t * 8) * 1.3 - 1; H.armR.rotation.x = -s(t * 8) * 1.3 - 1; H.torso.rotation.z = s(t * 8) * 0.15; H.g.position.y += Math.abs(s(t * 8)) * 0.12; }
+    else if (m.k === "clap") { H.armL.rotation.x = H.armR.rotation.x = -1.35; const c = 0.35 + Math.abs(s(t * 9)) * 0.35; H.armL.rotation.z = -c; H.armR.rotation.z = c; }
+    else if (m.k === "point") { H.armR.rotation.x = -1.6; H.armL.rotation.x = 0; }
+    else if (m.k === "bow") { const b = Math.min(1, t * 3, (m.dur - t) * 3) * 0.75; H.torso.rotation.x = b; H.armL.rotation.x = H.armR.rotation.x = b * 0.4; }
+    else if (m.k === "laugh") { H.head.rotation.x = -0.35 + s(t * 16) * 0.08; H.torso.rotation.z = s(t * 16) * 0.06; H.armL.rotation.x = H.armR.rotation.x = -0.6; H.armL.rotation.z = -0.5; H.armR.rotation.z = 0.5; }
+    else if (m.k === "flex") { H.armL.rotation.x = H.armR.rotation.x = -1.5; H.armL.rotation.z = 1.1; H.armR.rotation.z = -1.1; H.torso.rotation.x = -0.1 + s(t * 6) * 0.04; }
+}
+
+// the look you go online with: yours if you made one, else your name's, with your cosmetics either way
+function myLook(name) {
+    const L = save.look ? { ...save.look } : mpLook(name || mp.name || mpSavedName() || "Woodcutter");
+    L.cape = save.cosm.cape || ""; L.trail = save.cosm.trail || ""; L.axeSkin = save.cosm.axe || "";
+    return L;
+}
+// any player's look as makeHumanoid options (a 2.0 look only has skin, shirt, pants and a hat)
+function lookHumanoid(L) {
+    const o = { face: "clerk", skin: L.skin, shirt: L.shirt, pants: L.pants, hat: L.hat || "", hatCol: L.hatCol, wide: { slim: 0.88, wide: 1.2 }[L.build] || 1 };
+    if (L.boots !== undefined) o.boots = L.boots;
+    if (L.hairStyle && L.hairStyle !== "bald" && L.hair !== undefined) { o.hairStyle = L.hairStyle; o.hair = L.hair; }
+    if (L.beardStyle && L.beardStyle !== "none" && L.beard !== undefined) { o.beardStyle = L.beardStyle; o.beard = L.beard; }
+    if (L.vest !== undefined && L.vest !== null) o.vest = L.vest;
+    if (L.scarf !== undefined && L.scarf !== null) o.scarf = L.scarf;
+    const C = COSMETICS.cape[L.cape]; if (C) o.cape = C.col;
+    if (L.eyes) o.faceSpec = { eyes: L.eyes, eyeCol: "#2a5a8a", brows: "normal", mouth: L.mouth || "smile", nose: "small", hairCol: hex6(L.hair !== undefined ? L.hair : 0x4a2a1a) };
+    return o;
+}
+// your name's look, as a full look MY LOOK can change (the first change you make starts from it)
+function baseLook() {
+    const B = mpLook(mp.name || mpSavedName() || "Woodcutter");
+    return { skin: B.skin, shirt: B.shirt, pants: B.pants, boots: 0x2a1a12, hat: B.hat, hatCol: B.hatCol, hairStyle: "short", hair: 0x3a2414, beardStyle: "none", beard: 0x3a2414,
+        eyes: "round", mouth: "smile", build: "normal", vest: null, scarf: null };
+}
+function startLook() { if (!save.look) save.look = baseLook(); }
+function randomLook() {
+    const r = a => a[Math.floor(Math.random() * a.length)], hair = r(LOOK_HAIR);
+    save.look = { skin: r(LOOK_SKINS.slice(0, 8)), shirt: r(LOOK_COLS), pants: r(LOOK_COLS), boots: r(LOOK_COLS), hat: r(LOOK_HATS), hatCol: r(LOOK_COLS),
+        hairStyle: r(PERSON_OPTS.hairStyle), hair, beardStyle: Math.random() < 0.6 ? "none" : r(PERSON_OPTS.beardStyle), beard: hair,
+        eyes: r(PERSON_OPTS.eyes), mouth: r(PERSON_OPTS.mouth), build: r(["slim", "normal", "normal", "wide"]),
+        vest: Math.random() < 0.3 ? r(LOOK_COLS) : null, scarf: Math.random() < 0.25 ? r(LOOK_COLS) : null };
+}
+function lookOpen() { return $("lookPanel").classList.contains("show"); }
+function openLook(on) {
+    $("lookPanel").classList.toggle("show", !!on);
+    if (on) { renderLook(); lookRebuild(); return; }
+    writeSave();
+    if (mp.on) mpSend({ t: "look", look: myLook() }); // everyone on the server sees the new you
+}
+function renderLook() {
+    const L = save.look || baseLook();
+    const sw = (f, list) => list.map(c => `<button class="lkSw${L[f] === c ? " on" : ""}" data-lk="${f}" data-v="${c}" style="background:${hex6(c)}" title="${hex6(c)}"></button>`).join("");
+    const chips = (f, list, names = {}) => list.map(v => `<button class="lkChip${(L[f] || "") === v ? " on" : ""}" data-lk="${f}" data-v="${v}">${names[v] || v}</button>`).join("");
+    const opt = (f, list) => `<button class="lkChip${L[f] === null || L[f] === undefined ? " on" : ""}" data-lk="${f}" data-v="null">none</button>` + sw(f, list);
+    const cos = kind => Object.entries(COSMETICS[kind]).map(([k, C]) => {
+        const own = save.cosm.own[kind + ":" + k], on = save.cosm[kind] === k, sample = C.col === "rainbow" ? "linear-gradient(90deg,#ff4a4a,#ffc84a,#4aff8a,#4ac8ff,#a44aff)" : hex6(C.col !== undefined ? C.col : C.edge);
+        return `<button class="lkCos${on ? " on" : ""}${own ? " own" : ""}" data-cos="${kind}" data-k="${k}"><i style="background:${sample}"></i><b>${C.name}</b><small>${on ? "wearing · click to take off" : own ? "yours · click to wear" : money(cosPrice(kind, k))}</small></button>`;
+    }).join("");
+    $("lookBody").innerHTML = `
+      <h4>SKIN</h4><div class="lkRow">${sw("skin", LOOK_SKINS)}</div>
+      <h4>BODY</h4><div class="lkRow">${chips("build", ["slim", "normal", "wide"])}</div>
+      <h4>HAIR</h4><div class="lkRow">${chips("hairStyle", PERSON_OPTS.hairStyle)}</div><div class="lkRow">${sw("hair", LOOK_HAIR)}</div>
+      <h4>BEARD</h4><div class="lkRow">${chips("beardStyle", PERSON_OPTS.beardStyle)}</div><div class="lkRow">${sw("beard", LOOK_HAIR)}</div>
+      <h4>EYES</h4><div class="lkRow">${chips("eyes", PERSON_OPTS.eyes)}</div>
+      <h4>MOUTH</h4><div class="lkRow">${chips("mouth", PERSON_OPTS.mouth)}</div>
+      <h4>HAT</h4><div class="lkRow">${chips("hat", LOOK_HATS, { "": "none" })}</div><div class="lkRow">${sw("hatCol", LOOK_COLS)}</div>
+      <h4>SHIRT</h4><div class="lkRow">${sw("shirt", LOOK_COLS)}</div>
+      <h4>PANTS</h4><div class="lkRow">${sw("pants", LOOK_COLS)}</div>
+      <h4>BOOTS</h4><div class="lkRow">${sw("boots", LOOK_COLS)}</div>
+      <h4>VEST</h4><div class="lkRow">${opt("vest", LOOK_COLS)}</div>
+      <h4>SCARF</h4><div class="lkRow">${opt("scarf", LOOK_COLS)}</div>
+      <h3>COSMETICS <small>you have ${money(save.money)}</small></h3>
+      <h4>CAPES</h4><div class="lkCosRow">${cos("cape")}</div>
+      <h4>TRAILS <small>behind you as you move</small></h4><div class="lkCosRow">${cos("trail")}</div>
+      <h4>AXE SKINS <small>recolour whichever axe you hold</small></h4><div class="lkCosRow">${cos("axe")}</div>`;
+}
+function afterLook() { writeSave(); const y = $("lookBody").scrollTop; renderLook(); $("lookBody").scrollTop = y; lookRebuild(); }
+// cosmetics: buy once, then wear or take off for free
+function buyCos(kind, k) {
+    const C = COSMETICS[kind][k], id = kind + ":" + k;
+    if (save.cosm.own[id]) save.cosm[kind] = save.cosm[kind] === k ? "" : k;
+    else {
+        const p = cosPrice(kind, k);
+        if (save.money < p) { toast(`${C.name} costs ${money(p)}.`, "bad"); return; }
+        save.money -= p; save.cosm.own[id] = 1; save.cosm[kind] = k;
+        toast(`${C.name} is yours!`, "rare"); sfx(660, 0.12, "triangle", 0.1, 1.5); setTimeout(() => sfx(990, 0.2, "triangle", 0.1, 1.5), 110);
+    }
+    if (kind === "axe") applyAxeLook();
+    afterLook();
+}
+$("lookPanel").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    b.blur();
+    const d = b.dataset;
+    if (d.lk) { startLook(); save.look[d.lk] = d.v === "null" ? null : LOOK_COLOR_FIELDS.has(d.lk) ? +d.v : d.v; afterLook(); }
+    else if (d.cos) buyCos(d.cos, d.k);
+    else if (b.id === "lookRandom") { randomLook(); afterLook(); }
+    else if (b.id === "lookName") { save.look = null; afterLook(); }
+    else if (b.id === "lookDone" || b.id === "lookX") openLook(false);
+});
+$("menuLook").addEventListener("click", () => openLook(true));
+// the turning figure on the left
+let lookR = null, lookScene = null, lookCam = null, lookFig = null, lookSpin = 0;
+function lookRebuild() {
+    if (!lookR) {
+        lookR = new THREE.WebGLRenderer({ canvas: $("lookCanvas"), antialias: true, alpha: true });
+        lookR.setPixelRatio(Math.min(2, devicePixelRatio || 1)); lookR.setSize(260, 340, false);
+        lookScene = new THREE.Scene(); lookCam = new THREE.PerspectiveCamera(30, 260 / 340, 0.1, 50);
+        lookCam.position.set(0, 1.3, 5.6); lookCam.lookAt(0, 1.08, 0);
+        lookScene.add(new THREE.AmbientLight(0xffffff, 1.3));
+        const d = new THREE.DirectionalLight(0xffffff, 2.2); d.position.set(1.5, 3, 3); lookScene.add(d);
+        const d2 = new THREE.DirectionalLight(0x9fb0ff, 0.8); d2.position.set(-2, 1, -2); lookScene.add(d2);
+    }
+    if (lookFig) lookScene.remove(lookFig);
+    const L = myLook(), fig = makeHumanoid(lookHumanoid(L));
+    const ax = axeModel(save.equipped, L.axeSkin); ax.scale.setScalar(0.62); ax.rotation.set(Math.PI / 2, 0, 0); ax.position.set(0, -0.62, 0.22);
+    fig.armR.add(ax); fig.armR.rotation.x = -0.35;
+    lookFig = fig.g; lookScene.add(lookFig);
+}
+function lookTick(dt) {
+    if (!lookR || !lookFig || !lookOpen()) return;
+    lookSpin += dt * 0.7; lookFig.rotation.y = Math.sin(lookSpin) * 1.1;
+    lookR.render(lookScene, lookCam);
+}
+// trails: little bits that drift off behind you (and every other player wearing one) as you move
+const trails = [], TRAIL_GEO = new THREE.OctahedronGeometry(0.07, 0), trailMats = {};
+let trailT = 0;
+const trailMat = col => trailMats[col] || (trailMats[col] = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.9, depthWrite: false }));
+function trailPuff(key, x, y, z) {
+    const T = COSMETICS.trail[key]; if (!T || trails.length > 260) return;
+    const col = T.col === "rainbow" ? new THREE.Color().setHSL(Math.floor((performance.now() / 1600 % 1) * 24) / 24, 0.9, 0.6).getHex() : T.col;
+    const m = new THREE.Mesh(TRAIL_GEO, trailMat(col));
+    m.position.set(x + (Math.random() - 0.5) * 0.45, y + Math.random() * 0.35, z + (Math.random() - 0.5) * 0.45);
+    scene.add(m);
+    trails.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * 0.5, T.rise, (Math.random() - 0.5) * 0.5), life: T.life, max: T.life });
+}
+function trailTick(dt) {
+    for (let i = trails.length - 1; i >= 0; i--) {
+        const p = trails[i]; p.life -= dt;
+        if (p.life <= 0) { scene.remove(p.m); trails.splice(i, 1); continue; }
+        p.m.position.addScaledVector(p.v, dt); p.m.rotation.y += dt * 4; p.m.scale.setScalar(Math.max(0.05, p.life / p.max));
+    }
+    if (state === "playing" && save.cosm.trail && !boating() && Math.hypot(player.vel.x, player.vel.z) > 1.2) {
+        trailT -= dt;
+        if (trailT <= 0) { trailT = 0.05; trailPuff(save.cosm.trail, player.pos.x, player.pos.y - 1.6, player.pos.z); }
+    }
+}
+
 // =====================================================================
 // 2.0.0: THE PUBLIC SERVER. "Join public server" on the main menu connects to the Tree Sim 4 server
 // (server/worker.js, on Cloudflare). Players on the same island see each other walk, swing and lead their
@@ -14938,7 +16064,7 @@ spawnPets();
 const MP_SERVER = "wss://treesim4-server.jacksongamer25.workers.dev/play"; // server/worker.js, deployed with npx wrangler deploy
 const mpUrl = () => { try { return localStorage.getItem("ts4_server") || MP_SERVER; } catch (e) { return MP_SERVER; } };
 const mpHttp = () => mpUrl().replace(/^ws/, "http").replace(/\/play$/, "");
-const mp = { ws: null, on: false, connecting: false, id: "", name: "", others: new Map(), sendT: 0, last: "", lastT: 0, retry: 0, manual: true, chat: [], typing: false, admin: false };
+const mp = { ws: null, on: false, connecting: false, id: "", name: "", others: new Map(), sendT: 0, last: "", lastT: 0, retry: 0, manual: true, chat: [], typing: false, admin: false, reqs: new Set(), crew: null, crewInv: null, crewTop: [], trade: null, tradeReqs: new Map() };
 const MP_HATS = ["hood", "cap", "beanie", "bandana", "straw", "top", "helmet"];
 const MP_SHIRTS = [0x2a6ad0, 0xd04a3a, 0x3aa05a, 0xd0a02a, 0x7a3ad0, 0x2ab0b0, 0xe07a2a, 0x5a5a6a, 0xc83a8a, 0x8a6a3a];
 const MP_SKINS = [0xf2c8a0, 0xe0b090, 0xc89070, 0xa0704a, 0x7a5232, 0x5a3a22];
@@ -14948,7 +16074,7 @@ function mpLook(name) {
     const pick = (a, s) => a[(h >>> s) % a.length];
     return { skin: pick(MP_SKINS, 3), shirt: pick(MP_SHIRTS, 7), pants: pick([0x202830, 0x3a2a1a, 0x2a3a2a, 0x1a1a1e], 11), hat: pick(MP_HATS, 13), hatCol: pick(MP_SHIRTS, 17) };
 }
-const mpIsleName = n => (customIsle(n) ? customIsle(n).name : ["", "Pine Island", "the Highland Isle", "Mooncap Isle", "Ashfall Isle", "the Archipelago", "the Iceberg"][n] || "island " + n);
+const mpIsleName = n => (n === MI_MP ? "their own island" : customIsle(n) ? customIsle(n).name : ["", "Pine Island", "the Highland Isle", "Mooncap Isle", "Ashfall Isle", "the Archipelago", "the Iceberg"][n] || "island " + n);
 function mpSavedName() { try { return localStorage.getItem("ts4_mp_name") || ""; } catch (e) { return ""; } }
 // this game's own random token: the server keeps your name for you with it, so nobody else can take it
 function mpTok() {
@@ -14960,10 +16086,11 @@ function mpTok() {
 }
 // the admin's key, only ever on the admin's own PC (the dev panel puts it here); it lets them use their reserved name
 function mpAdminKey() { if (mp.key) return mp.key; try { return localStorage.getItem("ts4_admin_key") || ""; } catch (e) { return ""; } }
+const mpIsleNow = () => (inMyIsle() ? MI_MP : isle), mpMiNow = () => (inMyIsle() ? MI.owner || mp.name : "");
 function mpState() {
     const eq = save.pets.eq.slice(0, 3);
-    return { x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, pitch: player.pitch, sw: swing.t < 0.55 ? 1 : 0, axe: save.equipped, isle,
-        pets: eq, shiny: eq.map(k => (save.pets.own[k] && save.pets.own[k].shiny ? 1 : 0)) };
+    return { x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, pitch: player.pitch, sw: swing.t < 0.55 ? 1 : 0, axe: save.equipped, isle: mpIsleNow(), mi: mpMiNow(), pvp: pvpOn ? 1 : 0,
+        pets: eq, shiny: eq.map(k => (save.pets.own[k] && save.pets.own[k].shiny ? 1 : 0)), evo: eq.map(k => (save.pets.own[k] && save.pets.own[k].evo ? 1 : 0)) };
 }
 function mpSend(o) { if (mp.ws && mp.ws.readyState === 1) try { mp.ws.send(JSON.stringify(o)); } catch (e) { /* it's closing */ } }
 function mpConnect(name, pass) {
@@ -14973,11 +16100,11 @@ function mpConnect(name, pass) {
     let ws;
     try { ws = new WebSocket(mpUrl()); } catch (e) { mp.connecting = false; toast("Couldn't reach the public server.", "bad"); updateMpHud(); return; }
     mp.ws = ws;
-    ws.onopen = () => { if (mp.ws !== ws) return; ws.send(JSON.stringify({ t: "hi", v: 2, name, tok: mpTok(), key: mpAdminKey() || undefined, pass: pass || undefined, look: mpLook(name), st: mpState() })); };
+    ws.onopen = () => { if (mp.ws !== ws) return; ws.send(JSON.stringify({ t: "hi", v: 2, name, tok: mpTok(), key: mpAdminKey() || undefined, pass: pass || undefined, look: myLook(name), st: mpState() })); };
     ws.onmessage = e => { if (mp.ws !== ws) return; let m; try { m = JSON.parse(e.data); } catch (err) { return; } mpMsg(m); };
     ws.onclose = e => {
         if (mp.ws !== ws) return;
-        const was = mp.on; mp.on = false; mp.connecting = false; mp.ws = null; mpClearOthers(); updateMpHud();
+        const was = mp.on; mp.on = false; mp.connecting = false; mp.ws = null; mpClearOthers(); clearEvents(); streeClear(); pvpOn = false; pvpHud(); updateMpHud();
         if (mp.manual) return;
         if (e.code === 1013) { toast("The public server is full. Try again in a bit.", "bad"); return; }
         if (e.code === 4005) return; // the name was taken: the name box is already up
@@ -14993,7 +16120,7 @@ function mpConnect(name, pass) {
 function mpLeave() {
     mp.manual = true;
     if (mp.ws) try { mp.ws.close(1000, "leaving"); } catch (e) { /* gone */ }
-    mp.ws = null; mp.on = false; mp.connecting = false; mpClearOthers(); annClear(); updateMpHud();
+    mp.ws = null; mp.on = false; mp.connecting = false; mpClearOthers(); annClear(); clearEvents(); streeClear(); mp.crew = null; mp.trade = null; pvpOn = false; pvpHud(); updateMpHud();
     mpLine("", "You left the public server.");
 }
 function mpMsg(m) {
@@ -15003,18 +16130,45 @@ function mpMsg(m) {
         mp.admin = !!m.admin;
         mpClearOthers();
         for (const p of m.players || []) mpAdd(p);
+        setTimeout(mpUploadIsle, 4000); // anything you built offline goes up for visitors
         mpLine("", m.motd || "Connected.");
         toast(`Connected to the public server · ${mp.others.size + 1} online`, "good");
         sfx(660, 0.12, "triangle", 0.08, 1.4); setTimeout(() => sfx(990, 0.18, "triangle", 0.08, 1.4), 110);
         for (const a of m.anns || []) annAdd(a, true);
         if (m.news) annAdd({ id: "news", kind: "full", text: m.news.text, left: 8000, dur: 8000 }, true); // a server from before 2.0.1
-    } else if (m.t === "join") { mpAdd(m); mpLine("", `${m.name} joined${m.isle === isle ? "" : " (on " + mpIsleName(m.isle) + ")"}`); }
+        setEvents(m.events, true);
+        streeClear(); for (const d of m.strees || []) streeAdd(d);
+    } else if (m.t === "join") { mpAdd(m); mpLine("", `${isFriend(m.name) ? "★ Your friend " : ""}${m.name} joined${m.isle === isle ? "" : " (on " + mpIsleName(m.isle) + ")"}`); }
     else if (m.t === "ann") annAdd(m);
     else if (m.t === "annDel") for (const id of m.ids || []) annRemove(id);
     else if (m.t === "announce") annAdd({ id: "a" + performance.now(), kind: "quick", text: m.text, left: 10000, dur: 10000 }); // a server from before 2.0.1
     else if (m.t === "sys") mpLine("", m.text);
     else if (m.t === "kicked" || m.t === "banned" || m.t === "replaced") mp.manual = true; // the close that follows says why, and no reconnecting
     else if (m.t === "nameTaken") mpNameTaken(m);
+    else if (m.t === "look") { const o = mp.others.get(m.id); if (o && m.look) mpRelook(o, m.look); }
+    else if (m.t === "isleOf") { if (typeof m.d !== "string") toast(`${m.name || "They"} hasn't built an island yet.`, "bad"); else goMyIsle(String(m.name || "Someone").slice(0, 16), miDec(m.d)); }
+    else if (m.t === "emote") { const o = mp.others.get(m.id); if (o) mpEmote(o, m.e); }
+    else if (m.t === "events") setEvents(m.list, false);
+    else if (m.t === "pvpHit") pvpHurt(m);
+    else if (m.t === "tradeReq") { mp.tradeReqs.set(m.fromId, m.from); toast(`🤝 ${m.from} wants to trade. Press Y to answer.`, "rare"); if (panel === "friends") renderFriends(); }
+    else if (m.t === "trade") { const was = mp.trade; mp.trade = m.trade; if (!was) { tradeDraft = { cash: 0, mats: {}, pets: [], axes: [] }; mp.tradeReqs.clear(); if (state === "playing") { if (panel && panel !== "trade") closePanel(); openPanel("trade"); } } else if (panel === "trade") renderTrade(); }
+    else if (m.t === "tradeDone") tradeDone(m);
+    else if (m.t === "tradeEnd") { mp.trade = null; tradeDraft = { cash: 0, mats: {}, pets: [], axes: [] }; if (panel === "trade") closePanel(); toast(m.why || "The trade is off.", "bad"); }
+    else if (m.t === "kill") mpLine("", `⚔ ${m.killer} knocked out ${m.victim}!`);
+    else if (m.t === "stree") streeAdd(m.tree);
+    else if (m.t === "streeHp") { const S = strees.get(m.id); if (S) { S.hp = m.hp; if (S.t && !S.t.dying) { S.t.hp = m.hp; showBar(S.t); } } }
+    else if (m.t === "streeFell") streeFell(m);
+    else if (m.t === "streeGone") for (const id of m.ids || []) { const S = strees.get(id); if (S && S.t && !S.t.gone) { S.t.noDrop = true; S.t.dying = true; S.t.t = 0; } strees.delete(id); }
+    else if (m.t === "crew") { mp.crew = m.crew; if (panel === "clan") renderClan(); }
+    else if (m.t === "crewTop") { mp.crewTop = m.list || []; if (panel === "clan") renderClan(); }
+    else if (m.t === "crewInvite") { mp.crewInv = { from: m.from, tag: m.tag, name: m.name }; toast(`🛡 ${m.from} invited you to [${m.tag}] ${m.name}. Press U to answer.`, "rare"); if (panel === "clan") renderClan(); }
+    else if (m.t === "crewTag") { if (m.id === mp.id) { if (!m.tag) mp.crew = null; } else { const o = mp.others.get(m.id); if (o) { o.crew = m.tag; o.lb.el.textContent = crewLabel(o); } } if (panel === "clan") renderClan(); }
+    else if (m.t === "crewChat") mpLineCrew(m.tag, m.from, m.text);
+    else if (m.t === "crewPaid") { save.money += Math.max(0, +m.amount || 0); writeSave(); toast(`+${money(m.amount)} from the crew bank.`, "cash"); }
+    else if (m.t === "pm") { pmLast = m.from; mpLinePm("in", m.from, m.text); sfx(1040, 0.08, "triangle", 0.06, 1.3); }
+    else if (m.t === "pmSent") mpLinePm("out", m.to, m.text);
+    else if (m.t === "friendReq") { if (isFriend(m.from)) mpSend({ t: "friendOk", to: m.from }); else { mp.reqs.add(m.from); toast(`👋 ${m.from} wants to be friends. Press Y to answer.`, "rare"); } if (panel === "friends") renderFriends(); }
+    else if (m.t === "friendOk") { if (!isFriend(m.from)) { addFriend(m.from); toast(`★ ${m.from} is your friend now!`, "good"); } if (panel === "friends") renderFriends(); }
     else if ((m.t === "adminOk" || m.t === "adminErr") && adminMod) adminMod.onMsg(m);
     else if (m.t === "adminTag") { if (m.id === mp.id) mp.admin = true; else { const o = mp.others.get(m.id); if (o) mpTagAdmin(o); } }
     else if (m.t === "leave") { const o = mp.others.get(m.id); if (o) { mpLine("", `${o.name} left`); mpRemove(m.id); } }
@@ -15026,16 +16180,16 @@ function mpMsg(m) {
 // another player: a person with their name over their head, their axe in hand, their pets at their heels
 function mpAdd(p) {
     if (p.id === mp.id || mp.others.has(p.id)) return;
-    const L = p.look || mpLook(p.name), h = makeHumanoid({ face: "clerk", skin: L.skin, shirt: L.shirt, pants: L.pants, hat: L.hat || "", hatCol: L.hatCol });
+    const L = p.look || mpLook(p.name), h = makeHumanoid(lookHumanoid(L));
     h.g.visible = false; scene.add(h.g);
-    const lb = label(p.name, "#8aff9a", 2.4, 0.6); lb.maxD = 70; lb.isle = -1;
-    const o = { id: p.id, name: p.name, isle: p.isle || 1, h, lb, x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, yaw: 0, tyaw: 0, pitch: 0, sw: 0, swT: 1, axe: -1, axeM: null, pets: [], petKey: "", walk: 0, sp: 0, seen: false };
+    const lb = label(p.name, isFriend(p.name) ? "#8adcff" : "#8aff9a", 2.4, 0.6); lb.maxD = 70; lb.isle = -1;
+    const o = { id: p.id, name: p.name, crew: p.crew || "", look: L, isle: p.isle || 1, h, lb, x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, yaw: 0, tyaw: 0, pitch: 0, sw: 0, swT: 1, axe: -1, axeM: null, pets: [], petKey: "", walk: 0, sp: 0, seen: false };
     mp.others.set(p.id, o);
-    if (p.admin) mpTagAdmin(o);
+    if (p.admin) mpTagAdmin(o); else if (o.crew) lb.el.textContent = crewLabel(o);
     if (p.st) mpApply(o, p.st);
 }
 // the admin: a gold name with [ADMIN] over their head
-function mpTagAdmin(o) { o.admin = true; o.lb.el.textContent = "[ADMIN] " + o.name; o.lb.el.style.color = o.lb.el.style.borderColor = "#ffd040"; }
+function mpTagAdmin(o) { o.admin = true; o.lb.el.textContent = crewLabel(o); o.lb.el.style.color = o.lb.el.style.borderColor = "#ffd040"; }
 // announcements from the admin: cards stacked at the top, newest at the bottom, up to 5 at once. When a sixth comes the
 // oldest slides off and the rest move up. Each stays as long as the admin said (the bar shows what's left) or until it's taken down.
 // "full" ones reach everyone, including anyone who joins while they're up, and show on the main menu; "quick" ones only reach who's on now.
@@ -15071,18 +16225,21 @@ function annTick() {
     $("mpAnns").classList.toggle("off", state !== "playing" || (!!panel && panel !== "dev"));
 }
 function mpApply(o, s) {
-    o.isle = s.isle || o.isle; o.tx = s.x; o.ty = s.y; o.tz = s.z; o.tyaw = s.yaw; o.pitch = s.pitch || 0;
+    o.isle = s.isle || o.isle; o.mi = s.mi || ""; o.tx = s.x; o.ty = s.y; o.tz = s.z; o.tyaw = s.yaw; o.pitch = s.pitch || 0;
     if (s.sw && !o.sw) o.swT = 0; o.sw = s.sw;
     if (!o.seen) { o.seen = true; o.x = o.tx; o.y = o.ty; o.z = o.tz; o.yaw = o.tyaw; }
-    if (s.axe !== o.axe && AXES[s.axe]) { // their axe, in their right hand
+    o.lastSt = s;
+    if (o.pvp !== !!s.pvp) { o.pvp = !!s.pvp; o.lb.el.textContent = crewLabel(o); if (o.pvp && !o.admin) o.lb.el.style.color = o.lb.el.style.borderColor = "#ff8a7a"; else if (!o.admin) mpFriendLabel(o); }
+    const skin = (o.look && o.look.axeSkin) || "";
+    if ((s.axe !== o.axe || skin !== o.axeSkin) && AXES[s.axe]) { // their axe (in their axe skin), in their right hand
         if (o.axeM) o.h.armR.remove(o.axeM);
-        o.axeM = axeModel(s.axe); o.axeM.scale.setScalar(0.62); o.axeM.rotation.set(Math.PI / 2, 0, 0); o.axeM.position.set(0, -0.62, 0.22);
-        o.h.armR.add(o.axeM); o.axe = s.axe;
+        o.axeM = axeModel(s.axe, skin); o.axeM.scale.setScalar(0.62); o.axeM.rotation.set(Math.PI / 2, 0, 0); o.axeM.position.set(0, -0.62, 0.22);
+        o.h.armR.add(o.axeM); o.axe = s.axe; o.axeSkin = skin;
     }
-    const key = (s.pets || []).join(",") + "|" + (s.shiny || []).join(",");
-    if (key !== o.petKey) { o.petKey = key; mpPets(o, s.pets || [], s.shiny || []); }
+    const key = (s.pets || []).join(",") + "|" + (s.shiny || []).join(",") + "|" + (s.evo || []).join(",");
+    if (key !== o.petKey) { o.petKey = key; mpPets(o, s.pets || [], s.shiny || [], s.evo || []); }
 }
-function mpPets(o, keys, shiny) {
+function mpPets(o, keys, shiny, evo = []) {
     for (const p of o.pets) scene.remove(p.g);
     o.pets = [];
     keys.forEach((k, i) => {
@@ -15090,20 +16247,33 @@ function mpPets(o, keys, shiny) {
         const g = P.make(); g.updateMatrixWorld(true); icBox.setFromObject(g); icBox.getSize(icS);
         g.scale.multiplyScalar(P.h / Math.max(icS.y, 0.05));
         if (shiny[i]) { const aura = new THREE.Mesh(SPH, aglow(0xffe070, 0.12)); aura.scale.setScalar(Math.max(icS.x, icS.y, icS.z) * 0.6); aura.position.y = icS.y * 0.5; g.add(aura); }
+        if (evo[i]) megaPet(g, P.h);
         g.visible = false; scene.add(g);
         o.pets.push({ key: k, P, g, side: [-1.2, 1.2, 0][i], back: [1.2, 1.2, 2.2][i], x: o.x, z: o.z, y: o.y - 1.7, ph: Math.random() * 6, sp: 0, yOff: 0 });
     });
 }
+// someone changed their look: a new figure in the same spot, with their axe back in hand
+function mpRelook(o, L) {
+    const old = o.h; o.look = L;
+    o.h = makeHumanoid(lookHumanoid(L)); o.h.g.visible = old.g.visible; o.h.g.position.copy(old.g.position); o.h.g.rotation.copy(old.g.rotation);
+    scene.remove(old.g); scene.add(o.h.g);
+    o.axe = -1; o.axeM = null; if (o.lastSt) mpApply(o, o.lastSt);
+}
 function mpRemove(id) {
     const o = mp.others.get(id); if (!o) return;
+    if (o.emote) mpEmoteEnd(o);
     scene.remove(o.h.g); for (const p of o.pets) scene.remove(p.g);
     const i = labelList.indexOf(o.lb); if (i >= 0) labelList.splice(i, 1); o.lb.el.remove();
     mp.others.delete(id);
 }
 function mpClearOthers() { for (const id of [...mp.others.keys()]) mpRemove(id); }
 // every frame, whatever the game is doing: announcements count down (and hide behind menus), and chat never stays open behind one
-function mpHudTick() {
-    annTick();
+function mpHudTick(dt) {
+    annTick(); lookTick(dt); trailTick(dt); miHudTick();
+    if ((evHudT -= dt) <= 0) { evHudT = 1; evHud(); }
+    clanTick(dt);
+    if ((streeT -= dt) <= 0) { streeT = 0.5; if (strees.size) streeSync(); } // after an island change, the shared trees come back
+    if (emoteBarOn && (state !== "playing" || panel)) emoteBar(false);
     if (mp.typing && (state !== "playing" || !mp.on || panel)) mpCloseChat(false);
 }
 function mpTick(dt) {
@@ -15112,14 +16282,15 @@ function mpTick(dt) {
     mp.sendT -= dt; mp.lastT += dt;
     if (mp.sendT <= 0 && state === "playing") {
         mp.sendT = 0.125;
-        const s = mpState(), k = [s.x.toFixed(2), s.y.toFixed(2), s.z.toFixed(2), s.yaw.toFixed(2), s.pitch.toFixed(2), s.sw, s.axe, s.isle, s.pets.join(",")].join("|");
+        const s = mpState(), k = [s.x.toFixed(2), s.y.toFixed(2), s.z.toFixed(2), s.yaw.toFixed(2), s.pitch.toFixed(2), s.sw, s.axe, s.isle, s.mi, s.pets.join(","), s.evo.join(","), s.pvp].join("|");
         if (k !== mp.last || mp.lastT > 2) { mp.last = k; mp.lastT = 0; mpSend({ t: "st", ...s }); }
     }
     const here = state === "playing" || state === "paused";
     for (const o of mp.others.values()) {
-        const vis = here && o.seen && o.isle === isle;
+        const vis = here && o.seen && o.isle === mpIsleNow() && (o.mi || "") === mpMiNow();
         o.h.g.visible = vis; o.lb.isle = vis ? isle : -1;
         for (const p of o.pets) p.g.visible = vis;
+        if (vis && o.look && o.look.trail && o.sp > 1.2) { o.trT = (o.trT || 0) - dt; if (o.trT <= 0) { o.trT = 0.05; trailPuff(o.look.trail, o.x, o.y - 1.6, o.z); } }
         if (!vis) continue;
         // glide towards where they really are (their updates come 8 times a second)
         const k = 1 - Math.exp(-dt * 12), ox = o.x, oz = o.z;
@@ -15137,6 +16308,7 @@ function mpTick(dt) {
         o.swT = Math.min(1, o.swT + dt / 0.36);
         H.armR.rotation.x = o.swT < 1 ? (o.swT < 0.35 ? -2.6 * (o.swT / 0.35) : -2.6 + 3.3 * ((o.swT - 0.35) / 0.65)) : -Math.sin(o.walk) * 0.7 * sw - 0.35;
         o.lb.position.set(o.x, o.y + 0.75, o.z);
+        mpEmoteTick(o, dt);
         // their pets
         for (const p of o.pets) {
             p.ph += dt;
@@ -15176,7 +16348,7 @@ function mpOpenChat() {
 }
 function mpCloseChat(send) {
     const inp = $("mpInput");
-    if (send && inp.value.trim()) mpSend({ t: "chat", text: inp.value.trim().slice(0, 140) });
+    if (send && inp.value.trim()) { const t = inp.value.trim(); if (!chatCommand(t)) mpSend({ t: "chat", text: t.slice(0, 140) }); }
     mp.typing = false; inp.classList.remove("show"); inp.blur(); $("mpChat").classList.remove("typing");
     if (state === "playing" && !panel) { try { lockPointer(); } catch (e) { /* click to re-lock */ } }
 }
@@ -15187,7 +16359,7 @@ $("mpInput").addEventListener("keydown", e => {
     e.stopPropagation();
 });
 function renderMpList() {
-    const rows = [{ name: (mp.admin ? "[ADMIN] " : "") + mp.name + " (you)", isle }, ...[...mp.others.values()].map(o => ({ name: (o.admin ? "[ADMIN] " : "") + o.name, isle: o.isle }))];
+    const rows = [{ name: (mp.admin ? "[ADMIN] " : "") + mp.name + " (you)", isle }, ...[...mp.others.values()].map(o => ({ name: (isFriend(o.name) ? "★ " : "") + crewLabel(o), isle: o.isle }))];
     const el = $("mpList");
     el.innerHTML = `<h3>PUBLIC SERVER · ${rows.length} ONLINE</h3>`;
     for (const r of rows) { const d = document.createElement("div"); d.className = r.isle === isle ? "here" : ""; const b = document.createElement("b"); b.textContent = r.name; const s = document.createElement("span"); s.textContent = mpIsleName(r.isle); d.append(b, s); el.appendChild(d); }
@@ -15247,14 +16419,18 @@ const adminPowers = {
     spawnTree(key, hp, h, mut, n) {
         if (!TYPES[key]) return 0;
         n = clamp(Math.round(+n) || 1, 1, 25);
+        const shared = mp.on && mp.admin; // on the server, they're shared trees everyone on this island sees and chops
         for (let k = 0; k < n; k++) {
             const a = player.yaw + (k % 7 - Math.min(n - 1, 6) / 2) * 0.32, d = 6 + Math.floor(k / 7) * 3.5;
-            const t = makeTree(player.pos.x - Math.sin(a) * d, player.pos.z - Math.cos(a) * d, clamp(+h || 7, 2, 16), key);
+            const x = player.pos.x - Math.sin(a) * d, z = player.pos.z - Math.cos(a) * d, hh = clamp(+h || 7, 2, 16);
+            if (shared) { mpSend({ t: "admin", op: "treeSpawn", isle, key, x, z, h: hh, hp: +hp > 0 ? Math.round(clamp(+hp, 1, 1e12)) : 0, mut: MUTS[mut] ? mut : "" }); continue; }
+            const t = makeTree(x, z, hh, key);
             if (MUTS[mut]) applyMut(t, mut);
             if (+hp > 0) t.hp = t.maxHp = Math.round(clamp(+hp, 1, 1e12));
         }
         return n;
     },
+    shared: () => mp.on && mp.admin,
     // any axe, with whatever enchantments you pick, in your hand
     giveAxe(i, ench) {
         if (!AXES[i]) return false;
@@ -15280,7 +16456,7 @@ const adminPowers = {
         for (const [k, L] of Object.entries(NPC_LOOKS)) out.push({ id: "npc:" + k, name: L.name || k[0].toUpperCase() + k.slice(1), group: L.custom ? "Your people (Studio)" : "People", icon: hum(L) });
         out.push({ id: "sly", name: "Sly", group: "People", icon: hum(SLY_LOOK) });
         out.push({ id: "ferryman", name: "The Ferryman", group: "People", icon: () => { const f = makeFerrymanFigure(0x22163a, 0x6a4a9a, 0xe8d8ff); f.rotation.y = 0.45; return f; } });
-        out.push({ id: "you", name: "You online (" + (mp.name || "Tree") + ")", group: "People", icon: hum({ face: "clerk", ...mpLook(mp.name || "Tree") }) });
+        out.push({ id: "you", name: "You online (" + (mp.name || "Tree") + ")", group: "People", icon: hum(lookHumanoid(myLook(mp.name || "Tree"))) });
         const wild = { Deer: makeDeer, Rabbit: makeRabbit, Squirrel: makeSquirrel, Goat: makeGoat, Eagle: makeEagle, Fox: makeFox, Moth: makeMoth, Crow: makeCrow, Bat: makeBat, Turtle: makeTurtle, Penguin: makePenguin, "Polar Bear": makePolarBear, Seal: makeSeal, Crab: makeCrab, Frog: makeFrog };
         for (const [n, f] of Object.entries(wild)) out.push({ id: "wild:" + n, name: n, group: "Animals", icon: () => { const a = f(); a.rotation.y = 0.6; return a; } });
         for (const d of Array.isArray(CONTENT_ANIMALS) ? CONTENT_ANIMALS : []) if (d && d.key) out.push({ id: "ca:" + d.key, name: d.name || d.key, group: "Your animals (Studio)", icon: () => { const a = makeCustomAnimal(d); a.rotation.y = 0.6; return a; } });
@@ -15292,7 +16468,7 @@ const adminPowers = {
 async function loadAdmin() {
     if (!adminMod) {
         adminMod = await import("./admin.js");
-        adminMod.setup({ mp, mpSend, mpUrl, mpIsleName, isle: () => isle, say: (t, k = "good") => toast(t, k), key: mpAdminKey, powers: adminPowers,
+        adminMod.setup({ mp, mpSend, mpUrl, mpIsleName, isle: () => isle, say: (t, k = "good") => toast(t, k), key: mpAdminKey, powers: adminPowers, events: SERVER_EVENTS,
             goTo(x, z, fx, fz) { player.pos.set(x, groundY(x, z) + 1.7, z); player.vel.set(0, 0, 0); player.yaw = Math.atan2(-(fx - x), -(fz - z)); player.pitch = 0; } });
     }
     return adminMod;
@@ -15347,7 +16523,7 @@ function frameBody(now) {
     last = now;
     let dt = real;
     if (hitstop > 0) { hitstop -= real; dt *= 0.08; }
-    mpHudTick();
+    mpHudTick(real);
     if (state === "playing") {
         if (panel !== "inv" && panel !== "map") { update(dt); updatePets(dt); }
         if (panel === "spin") spinTick(real);
@@ -15401,8 +16577,9 @@ $("gfxPick").classList.remove("show");
 
 // debug/test handle (used by automated checks, harmless in play)
 if (DEBUG) window.__ts4 = {
-    mp: { mp, mpConnect, mpLeave, mpState, mpLook, mpCheckOnline, mpShowJoin, mpJoinGo, mpOpenChat, mpCloseChat, renderMpList, mpUrl, mpSend, mpIsleName, anns, annAdd, annRemove, loadAdmin },
-    pets: { PETS, CASES, RAR, PERKS, list: () => pets, openCase, startSpin, finishSpin, togglePet, spawnPets, petK, petAdd, petValue, casePrice, slyCart, placeDealer, rollPet, getSpin: () => spin },
+    mp: { mp, mpConnect, mpLeave, mpState, mpLook, mpCheckOnline, mpShowJoin, mpJoinGo, mpOpenChat, mpCloseChat, renderMpList, mpUrl, mpSend, mpIsleName, anns, annAdd, annRemove, loadAdmin, pvpTarget, get pvpOn() { return pvpOn; } },
+    myIsle: { MI, MYX, MI_R, inMyIsle, goMyIsle, leaveMyIsle, miAim, miPlace, miRemove, miUndo, miCopy, miCycle, miKey, miGround, clampMi, miBuildMode, visitIsle, mpUploadIsle, miEnc, miDec, renderMiCat },
+    pets: { PETS, CASES, RAR, PERKS, list: () => pets, evolvePet, petTrickDo, openCase, startSpin, finishSpin, togglePet, spawnPets, petK, petAdd, petValue, casePrice, slyCart, placeDealer, rollPet, getSpin: () => spin },
     save, player, trees, camera, renderer, gfx: { GQ, FX, sunL, grass, TSU, MODERN, hemiL, skyDome }, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,
     docks: () => (CI() ? CI().DOCKS : isle === 6 ? DOCKS6 : []).map(D => ({ kind: D.kind, B: { x: D.B.x, z: D.B.z }, DIR: { x: D.DIR.x, z: D.DIR.z }, LEN: D.LEN })), // where this island's docks are, for walking tests
     get state() { return state; },

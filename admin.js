@@ -50,7 +50,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;"
 const fmtLeft = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return t >= 86400 ? `${Math.floor(t / 86400)}d ${Math.floor(t % 86400 / 3600)}h` : t >= 3600 ? `${Math.floor(t / 3600)}h ${Math.floor(t % 3600 / 60)}m` : t >= 60 ? `${Math.floor(t / 60)}m ${t % 60}s` : `${t}s`; };
 
 let G = null, box = null, isOpen = () => false, panelEl = null;
-const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", anns: [], tree: null, myK: "", kind: "quick", armed: "" };
+const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", anns: [], tree: null, myK: "", kind: "quick", armed: "", events: [], ev: "cash" };
 const q = id => box.querySelector("#" + id);
 // the game's part: { mp, mpSend, mpUrl, mpIsleName, isle(), goTo(x, z, faceX, faceZ), say(text, kind), key(), powers }
 export function setup(game) { G = game; }
@@ -78,7 +78,8 @@ function adSend(op, o = {}) {
 export function onMsg(m) {
     if (m.t === "adminOk") {
         const now = performance.now();
-        Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, tree: m.tree || null, anns: (m.anns || []).map(a => ({ ...a, until: a.left ? now + a.left : 0 })) });
+        Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, tree: m.tree || null, anns: (m.anns || []).map(a => ({ ...a, until: a.left ? now + a.left : 0 })),
+            events: (m.events || []).map(x => ({ ...x, until: now + x.left })) });
         if (m.text) G.say(m.text);
         draw();
         myPcK().then(k => { if (k !== AD.myK) { AD.myK = k; draw(); } });
@@ -112,7 +113,8 @@ const HTML = `
     <div class="adH">SPAWN A TREE</div>
     <select class="adSel adWide" id="adTreeKey"></select>
     <div class="adGrid2"><label>Mutation<select class="adSel" id="adTreeMut"></select></label><label>How many (1-25)<input class="adN" id="adTreeN" value="1"></label><label>Height (2-16)<input class="adN" id="adTreeH" value="7"></label><label>Health<input class="adN" id="adTreeHp" value="1000"></label></div>
-    <div class="adBtns"><button class="adB on" id="adTreeGo">🌲 Spawn in front of me</button></div>
+    <div class="adBtns"><button class="adB on" id="adTreeGo">🌲 Spawn in front of me</button><button class="adB warn" id="adTreeClear">Clear shared trees</button></div>
+    <div class="adHint" id="adTreeHint"></div>
     <div class="adH">GIVE ME AN AXE</div>
     <select class="adSel adWide" id="adAxe"></select>
     <div class="adGrid2" id="adEnch"></div>
@@ -120,6 +122,10 @@ const HTML = `
     <div class="adH">CHARACTERS <button class="adB" id="adChars" style="padding:3px 8px">show them</button></div>
     <div class="adChars" id="adCharGrid"></div>
     <div class="adSec">PUBLIC SERVER</div>
+    <div class="adH">SERVER EVENTS <small>everyone on the server gets them</small></div>
+    <div class="adBtns" id="adEvPick"></div>
+    <div class="adSet"><label>For</label><select class="adSel" id="adEvFor"><option value="300">5 minutes</option><option value="900" selected>15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option><option value="86400">1 day</option></select><button class="adB on" id="adEvGo">🎉 Start it</button></div>
+    <div id="adEvList"></div>
     <div class="adBtns"><button class="adB on" data-annkind="quick">⚡ Quick · whoever's on now</button><button class="adB" data-annkind="full">📢 Announcement · everyone + menu</button></div>
     <input class="adText" id="adAnn" maxlength="200" spellcheck="true" autocomplete="off">
     <div class="adDur"><label>Stays up</label><input class="adN" id="adAnnN" value="15"><select class="adSel" id="adAnnU"><option value="1">seconds</option><option value="60">minutes</option><option value="3600">hours</option><option value="86400">days</option><option value="0">until I take it down</option></select></div>
@@ -161,6 +167,7 @@ function pickAxe() {
 }
 function drawPowers() {
     const st = P().state();
+    q("adTreeHint").textContent = P().shared && P().shared() ? "you're on the server: trees you spawn are shared, so everyone on this island sees and chops them" : "offline: trees you spawn are only in your game";
     q("adFly").classList.toggle("on", st.fly); q("adGod").classList.toggle("on", st.god);
     q("adPowL").textContent = "Damage ×" + (+st.pow).toLocaleString(); q("adSpeedL").textContent = "Speed ×" + st.speed;
     for (const b of box.querySelectorAll("[data-apow]")) b.classList.toggle("on", +b.dataset.apow === st.pow);
@@ -195,6 +202,9 @@ function draw() {
     q("adStat").textContent = !can ? "not Tree on this PC" : AD.err ? AD.err : AD.ok ? `connected · ${AD.players.length} online` : AD.ws ? "connecting..." : "offline";
     if (!can) return;
     drawPowers();
+    const EV = G.events || {};
+    setHTML("adEvPick", Object.entries(EV).map(([k, E]) => `<button class="adB${AD.ev === k ? " on" : ""}" data-aev="${k}" title="${esc(E.desc)}">${E.e} ${esc(E.name)}</button>`).join(""));
+    setHTML("adEvList", AD.events.length ? AD.events.map(x => `<div class="adRow"><b class="adm">${(EV[x.k] || {}).e || ""} ${esc((EV[x.k] || { name: x.k }).name)}</b><span data-evleft="${esc(x.k)}"></span><button class="adB warn" data-ad="eventStop" data-k="${esc(x.k)}">Stop</button></div>`).join("") : `<div class="adHint">no events running</div>`);
     setHTML("adAnnList", AD.anns.length ? AD.anns.map(a => `<div class="adRow"><b class="${a.kind === "full" ? "adm" : "quick"}" title="${esc(a.text)}">${a.kind === "full" ? "📢" : "⚡"} ${esc(a.text)}</b><span data-annleft="${esc(a.id)}"></span><button class="adB warn" data-ad="annDel" data-id="${esc(a.id)}">Take down</button></div>`).join("") : `<div class="adHint">nothing up right now</div>`);
     q("adAnnAll").style.display = AD.anns.length > 1 ? "" : "none";
     annLeft();
@@ -214,6 +224,7 @@ function draw() {
 // how long each announcement has left, counted down every second while the card is open
 function annLeft() {
     const now = performance.now();
+    for (const sp of box.querySelectorAll("[data-evleft]")) { const x = AD.events.find(e => e.k === sp.dataset.evleft); if (x) sp.textContent = fmtLeft(x.until - now); }
     for (const sp of box.querySelectorAll("[data-annleft]")) { const a = AD.anns.find(x => x.id === sp.dataset.annleft); if (a) sp.textContent = a.until ? fmtLeft(a.until - now) : "until you take it down"; }
 }
 // quick ones are for whoever's on right now (15 seconds unless you say); full ones reach everyone and the menu (an hour unless you say)
@@ -235,11 +246,12 @@ function act(b) {
     if (d.aspeed) { P().setSpeed(+d.aspeed); G.say(`speed ×${d.aspeed}`); return drawPowers(); }
     if (d.ahour) { P().setTime(+d.ahour); return G.say("time set"); }
     if (d.awx) return P().weather(d.awx);
+    if (d.aev) { AD.ev = d.aev; return draw(); }
     if (d.annkind) return annKind(d.annkind);
     if (d.anndur !== undefined) return annDur(+d.anndur);
     if (d.ad === "goto") { const p = AD.players.find(x => x.id === d.id); if (p) { G.goTo(p.x + 2.5, p.z, p.x, p.z); G.say("next to " + p.name); } return; }
     if (d.ad === "ban" && AD.armed !== d.id) { AD.armed = d.id; draw(); setTimeout(() => { if (AD.armed === d.id) { AD.armed = ""; draw(); } }, 3000); return; }
-    if (d.ad) { AD.armed = ""; return d.ad === "unban" || d.ad === "treeFree" ? adSend(d.ad, { k: d.k }) : adSend(d.ad, { id: d.id }); }
+    if (d.ad) { AD.armed = ""; return d.ad === "unban" || d.ad === "treeFree" || d.ad === "eventStop" ? adSend(d.ad, { k: d.k }) : adSend(d.ad, { id: d.id }); }
     switch (b.id) {
         case "adFly": { const on = !P().state().fly; P().setFly(on); G.say(on ? "flying: Space goes up, C goes down" : "flying off"); drawPowers(); break; }
         case "adGod": { const on = !P().state().god; P().setGod(on); G.say("god mode " + (on ? "on" : "off")); drawPowers(); break; }
@@ -250,13 +262,15 @@ function act(b) {
         }
         case "adTreeGo": {
             const n = P().spawnTree(q("adTreeKey").value, num(q("adTreeHp").value), num(q("adTreeH").value), q("adTreeMut").value, num(q("adTreeN").value));
-            G.say(n ? `${n} ${q("adTreeKey").selectedOptions[0].text}${n > 1 ? " trees" : ""} with ${Math.round(num(q("adTreeHp").value) || 0).toLocaleString()} health` : "that tree couldn't grow here", n ? "good" : "bad"); break;
+            G.say(n ? `${n} ${q("adTreeKey").selectedOptions[0].text}${n > 1 ? " trees" : ""} with ${Math.round(num(q("adTreeHp").value) || 0).toLocaleString()} health${P().shared && P().shared() ? ", shared with everyone here" : ""}` : "that tree couldn't grow here", n ? "good" : "bad"); break;
         }
         case "adAxeGo": {
             const ench = {}; for (const sel of box.querySelectorAll("[data-ench]")) ench[sel.dataset.ench] = +sel.value;
             P().giveAxe(+q("adAxe").value, ench); fillPowers(); break;
         }
         case "adChars": showChars(!charsShown); break;
+        case "adTreeClear": adSend("treeClear"); break;
+        case "adEvGo": adSend("event", { k: AD.ev, secs: +q("adEvFor").value }); break;
         case "adAnnGo": {
             const v = q("adAnn").value.trim(); if (!v) { q("adAnn").focus(); return; }
             const u = +q("adAnnU").value, secs = u ? Math.round(parseFloat(q("adAnnN").value) * u) : 0;

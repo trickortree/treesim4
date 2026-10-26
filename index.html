@@ -189,6 +189,11 @@
   #mpList div { display: flex; justify-content: space-between; gap: 20px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.06); font: 14px "Segoe UI"; color: #c8ccd4; } #mpList div.here { color: #fff; } #mpList span { font: 12px Consolas; color: #aab0bc; }
   #mpBadge { position: fixed; top: 14px; left: 50%; transform: translateX(-50%) translateY(34px); z-index: 12; display: none; padding: 4px 12px; border-radius: 999px; background: rgba(20,60,30,.75); border: 1px solid #8aff9a; color: #8aff9a; font: 800 11px Consolas; letter-spacing: 2px; pointer-events: none; }
   #mpBadge.show { display: block; }
+  #evHud { position: fixed; top: 14px; right: 268px; z-index: 12; display: none; flex-direction: column; align-items: flex-end; gap: 4px; pointer-events: auto; }
+  #evHud.show { display: flex; }
+  #pvpBadge { position: fixed; top: 14px; left: 50%; transform: translateX(-50%) translateY(66px); z-index: 12; display: none; padding: 4px 12px; border-radius: 999px; background: rgba(90,10,10,.8); border: 1px solid #ff6a5a; color: #ffb0a0; font: 800 11px Consolas; letter-spacing: 2px; pointer-events: none; }
+  #pvpBadge.show { display: block; }
+  #evHud div { padding: 4px 12px; border-radius: 999px; background: rgba(70,40,0,.85); border: 1px solid #ffd040; color: #ffe9a0; font: 800 11px Consolas, monospace; letter-spacing: 1px; box-shadow: 0 0 16px rgba(255,200,60,.25); }
   .mpl.adm b { color: #ffd040; } .mpl.adm b::before { content: "[ADMIN] "; color: #ff8a3a; }
   #menuNews { display: none; max-width: min(520px, 90vw); text-align: center; font: 700 13px "Segoe UI"; color: #ffe9a0; background: rgba(90,50,0,.45); border: 1px solid #ffd04088; border-radius: 8px; padding: 6px 12px; overflow-wrap: anywhere; }
   #menuNews.show { display: block; }
@@ -210,6 +215,97 @@
   .full .annH { color: #1a0e00; background: #ffd040; } .quick .annH { color: #04121e; background: #6ad0ff; }
   .annT { flex: 1; min-width: 0; font: 700 15px/1.3 "Segoe UI"; color: #fff; text-shadow: 0 1px 3px #000; overflow-wrap: anywhere; }
   .annCard i { position: absolute; left: 0; bottom: 0; width: 100%; height: 3px; transform-origin: left; } .full i { background: #ffd040; } .quick i { background: #6ad0ff; }
+  /* 2.5: My Island */
+  #panelMyIsle { width: min(860px, 94vw); max-height: 86vh; overflow-y: auto; box-sizing: border-box; }
+  .miTabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+  .miTab { cursor: pointer; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: rgba(0,0,0,.25); color: var(--ink); font: 700 13px "Segoe UI"; }
+  .miTab.on { background: var(--amber); color: #1a0e00; border-color: var(--amber); }
+  .miGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+  .miCard { cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 6px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0,0,0,.28); color: var(--ink); font: 600 12px "Segoe UI"; }
+  .miCard img { width: 64px; height: 64px; object-fit: contain; } .miCard:hover { border-color: var(--amber); } .miCard.on { box-shadow: 0 0 0 2px var(--amber); }
+  .miOpts { display: flex; gap: 8px; margin-top: 12px; }
+  #miHud { position: fixed; left: 50%; bottom: 136px; transform: translateX(-50%); display: none; align-items: center; gap: 12px; padding: 8px 14px 8px 8px; border-radius: 12px; background: rgba(10,16,24,.82); border: 1px solid rgba(138,255,154,.45); color: #e8f6ff; font: 13px "Segoe UI"; z-index: 6; pointer-events: none; max-width: 92vw; }
+  #miHud.show { display: flex; } #miHud img { width: 54px; height: 54px; object-fit: contain; }
+  #miHud b { display: block; font: 800 15px "Segoe UI"; color: #8aff9a; } #miHud span { display: block; color: #c8d8e8; }
+  #miHud small { display: block; margin-top: 3px; color: #9ab0c4; font-size: 11px; } #miHud kbd { margin: 0 2px 0 6px; }
+  .sailB.mine { border-color: rgba(138,255,154,.6); background: rgba(30,80,40,.5); }
+  /* 2.5: sailing back to old islands */
+  #ferrySail h4 { margin: 14px 0 8px; font: 800 12px "Segoe UI"; letter-spacing: 3px; color: #8adcff; }
+  .sailRow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sailB { cursor: pointer; padding: 7px 12px; border-radius: 8px; border: 1px solid rgba(138,220,255,.5); background: rgba(20,60,90,.5); color: #e8f6ff; font: 700 13px "Segoe UI"; }
+  .sailB:hover { border-color: #8adcff; } .sailB.here { opacity: .45; cursor: default; }
+  /* 2.5: Mega pets */
+  .petc.mega { box-shadow: 0 0 0 2px #ffd040, 0 0 18px rgba(255,208,64,.35); }
+  .petEvo { display: block; margin-top: 3px; font: 800 10px "Segoe UI" !important; letter-spacing: 1px; color: #ffd040 !important; } .petEvo.dim { color: #a89cc4 !important; font-weight: 600 !important; }
+  .petEvoB { margin-top: 5px; cursor: pointer; padding: 4px 10px; border-radius: 7px; border: 0; background: linear-gradient(#ffd040, #ffb020); color: #1a0e00; font: 900 11px "Segoe UI"; letter-spacing: 2px; }
+  /* 2.5: Sly's armory (legendary axes) */
+  .mArmory { grid-column: 1 / -1; margin-top: 8px; } .mArmory h3 { margin: 6px 0 10px; font: 900 15px "Segoe UI"; letter-spacing: 4px; color: #ffd040; } .mArmory h3 small { letter-spacing: 0; font-weight: 600; font-size: 12px; color: #c4c0cc; }
+  .mArmGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .mcase.maxe small { min-height: 48px; }
+  /* 2.5: MY LOOK, the character creator and cosmetics */
+  #lookPanel { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center; background: rgba(4,2,10,.72); }
+  #lookPanel.show { display: flex; }
+  .lkBox { position: relative; width: min(920px, 94vw); max-height: 92vh; display: flex; flex-direction: column; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.7); animation: pop .15s; }
+  .lkBox h2 { margin: 0 0 12px; font: 800 22px "Segoe UI"; letter-spacing: 4px; color: var(--amber); }
+  .lkWrap { display: flex; gap: 22px; min-height: 0; flex: 1; }
+  .lkLeft { flex: none; width: 260px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  #lookCanvas { width: 260px; height: 340px; border-radius: 12px; background: radial-gradient(circle at 50% 38%, #3a2a5a, #140c24 72%); }
+  .lkBtns { display: flex; gap: 8px; width: 100%; } #lookPanel .lkBtns .btn { flex: 1; padding: 9px 8px; font: 800 12px "Segoe UI"; letter-spacing: 1px; white-space: nowrap; }
+  .lkHint { margin: 0; font: 12px/1.4 "Segoe UI"; color: #c8bce0; text-align: center; }
+  .lkBody { flex: 1; min-width: 0; overflow-y: auto; padding-right: 8px; }
+  .lkBody h3 { display: flex; justify-content: space-between; align-items: baseline; margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.1); font: 900 13px "Segoe UI"; letter-spacing: 4px; color: var(--amber); }
+  .lkBody h4 { margin: 12px 0 6px; font: 800 11px "Segoe UI"; letter-spacing: 3px; color: #b8acd4; } .lkBody small { font: 600 11px "Segoe UI"; letter-spacing: 0; color: #c8bce0; }
+  .lkRow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 5px; }
+  .lkSw { width: 26px; height: 26px; border-radius: 7px; border: 2px solid rgba(255,255,255,.2); cursor: pointer; padding: 0; } .lkSw.on { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber); }
+  .lkChip { cursor: pointer; background: #2a2040; color: var(--ink); border: 1px solid #44365f; border-radius: 8px; padding: 6px 10px; font: 700 12px "Segoe UI"; } .lkChip:hover { border-color: var(--amber); } .lkChip.on { background: var(--amber); color: #1a0e00; border-color: var(--amber); }
+  .lkCosRow { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .lkCos { cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; background: #221830; color: var(--ink); border: 1px solid #44365f; border-radius: 10px; padding: 9px 11px; }
+  .lkCos i { width: 100%; height: 8px; border-radius: 4px; } .lkCos b { font: 800 13px "Segoe UI"; } .lkCos small { font: 11px Consolas, monospace; color: #c8bce0; }
+  .lkCos:hover { border-color: var(--amber); } .lkCos.own { border-color: rgba(138,255,154,.5); } .lkCos.on { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+  #lookDone { margin-top: 14px; align-self: flex-end; padding: 10px 34px; }
+  @media (max-width: 720px) { .lkWrap { flex-direction: column; } .lkLeft { width: 100%; } }
+  /* 2.5: friends and private messages */
+  #panelTrade { width: min(760px, 94vw); max-height: 84vh; overflow-y: auto; box-sizing: border-box; }
+  #panelTrade .btn.small { padding: 7px 12px; font-size: 12px; letter-spacing: 1px; box-shadow: 0 3px 0 #8a5a00; } #panelTrade .btn.small.ghost { box-shadow: none; }
+  .trCols { display: flex; gap: 14px; } .trCol { flex: 1; min-width: 0; padding: 12px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); }
+  .trCol.them { border-color: rgba(138,220,255,.4); }
+  .trCol h4 { margin: 0 0 10px; font: 800 12px "Segoe UI"; letter-spacing: 3px; color: #b8acd4; } .trOk { margin-left: 6px; padding: 2px 8px; border-radius: 6px; background: #6dffa0; color: #04200e; letter-spacing: 1px; }
+  .trList { min-height: 70px; margin-bottom: 10px; }
+  .trItem { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 5px; border-radius: 8px; background: rgba(0,0,0,.3); font: 700 13px "Segoe UI"; color: #fff; }
+  .trItem i { width: 12px; height: 12px; border-radius: 3px; flex: none; } .trItem.cash { color: #6dffa0; } .trItem.pet { color: #ffe9a0; } .trItem.axe { color: #8adcff; }
+  .trItem button { margin-left: auto; cursor: pointer; background: none; border: 0; color: #ff9a8a; font: 800 13px "Segoe UI"; }
+  .trAdd { display: flex; gap: 6px; margin-bottom: 6px; } .trAdd input, .trAdd select { flex: 1; min-width: 0; padding: 7px 9px; border-radius: 8px; border: 1px solid #44365f; background: rgba(0,0,0,.35); color: #fff; font: 600 13px "Segoe UI"; outline: none; }
+  .trFoot { display: flex; justify-content: space-between; margin-top: 10px; }
+  @media (max-width: 640px) { .trCols { flex-direction: column; } }
+  #panelFriends, #panelClan { width: min(640px, 92vw); max-height: 82vh; overflow-y: auto; box-sizing: border-box; }
+  #clanBody h4 { margin: 16px 0 8px; font: 800 12px "Segoe UI"; letter-spacing: 3px; color: #b8acd4; } #clanBody h4 small { letter-spacing: 0; font-weight: 600; color: #c8bce0; }
+  #panelClan .btn.small { padding: 7px 12px; font-size: 12px; letter-spacing: 1px; box-shadow: 0 3px 0 #8a5a00; } #panelClan .btn.small.ghost { box-shadow: none; }
+  .crHead { display: flex; align-items: baseline; gap: 10px; padding: 12px 14px; border-radius: 12px; background: rgba(90,200,200,.1); border: 1px solid rgba(90,220,220,.45); font: 800 20px "Segoe UI"; color: #fff; }
+  .crHead b { color: #6ae8e8; } .crHead span { margin-left: auto; font: 13px Consolas, monospace; color: #c8bce0; }
+  .crBank { padding: 8px 14px; border-radius: 8px; background: rgba(0,0,0,.35); border: 1px solid #44365f; font: 800 16px Consolas, monospace; color: #6dffa0; white-space: nowrap; }
+  input.crTag { flex: none !important; width: 74px; text-transform: uppercase; text-align: center; }
+  .crNum { flex: none !important; font-weight: 700; color: #ffe9a0 !important; }
+  .crFoot { margin-top: 14px; display: flex; justify-content: flex-end; }
+  .mpl.crew { background: rgba(20,90,90,.55); } .mpl.crew b { color: #6ae8e8; }
+  #friendsBody h4 { margin: 16px 0 8px; font: 800 12px "Segoe UI"; letter-spacing: 3px; color: #b8acd4; } #friendsBody h4 small { letter-spacing: 0; font-weight: 600; color: #c8bce0; }
+  .frRow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 6px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+  .frRow i { width: 10px; height: 10px; border-radius: 50%; background: #5a5470; flex: none; } .frRow.on i { background: #6dffa0; box-shadow: 0 0 8px #6dffa0; }
+  .frRow b { font: 700 15px "Segoe UI"; color: #fff; } .frRow span { flex: 1; font: 12px Consolas, monospace; color: #c8bce0; }
+  .frRow.req { border-color: rgba(255,208,64,.5); background: rgba(255,208,64,.08); }
+  #panelFriends .btn.small { padding: 7px 12px; font-size: 12px; letter-spacing: 1px; box-shadow: 0 3px 0 #8a5a00; }
+  #panelFriends .btn.small.ghost { box-shadow: none; }
+  .frAdd { display: flex; gap: 8px; } .frAdd input { flex: 1; padding: 9px 12px; border-radius: 8px; border: 1px solid #44365f; background: rgba(0,0,0,.35); color: #fff; font: 600 15px "Segoe UI"; outline: none; }
+  .frNote { margin: 6px 0; font: 13px/1.5 "Segoe UI"; color: #c8bce0; }
+  .mpl.pm { background: rgba(120,30,90,.55); } .mpl.pm b { color: #ff9ad8; }
+  /* 2.5: emotes */
+  #emoteBar { position: fixed; left: 50%; bottom: 128px; transform: translateX(-50%); z-index: 14; display: none; gap: 6px; padding: 8px; border-radius: 14px; background: rgba(8,4,18,.86); border: 1px solid rgba(255,208,64,.5); box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  #emoteBar.show { display: flex; }
+  #emoteBar button { position: relative; cursor: pointer; width: 68px; padding: 8px 4px 6px; border-radius: 10px; border: 1px solid #44365f; background: #221830; color: var(--ink); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #emoteBar button:hover { border-color: var(--amber); } #emoteBar b { font-size: 26px; line-height: 1.1; } #emoteBar span { font: 700 11px "Segoe UI"; }
+  #emoteBar kbd { position: absolute; top: 3px; left: 5px; font: 800 10px Consolas; color: var(--amber); }
+  .emotePop { position: fixed; left: 50%; top: 42%; z-index: 15; transform: translate(-50%, 0); font-size: 46px; pointer-events: none; animation: emoteUp 1.6s ease-out forwards; }
+  @keyframes emoteUp { 0% { opacity: 0; transform: translate(-50%, 20px) scale(.6); } 15% { opacity: 1; transform: translate(-50%, 0) scale(1.1); } 100% { opacity: 0; transform: translate(-50%, -90px) scale(1); } }
+  .wl.emoteLb { font-size: 30px !important; background: none; border: 0; box-shadow: none; padding: 0; }
   /* 2.0.0: Sly's Black Market, opening a case, and your pets */
   #panelMarket { width: min(860px, 95vw); border-color: rgba(138,255,154,.55); }
   #panelMarket h2 span, #panelPets h2 span { font-size: 13px; letter-spacing: 2px; color: #8aff9a; opacity: .85; margin-left: 10px; }
@@ -652,6 +748,30 @@
   <div id="spinResult"></div>
   <div class="foot">Space skips the spin</div>
 </div>
+<div id="panelClan" class="panel">
+  <button class="xbtn" data-close>✕ CLOSE <kbd>U</kbd></button>
+  <h2>CREW</h2>
+  <div id="clanBody"></div>
+</div>
+<div id="panelTrade" class="panel">
+  <button class="xbtn" data-close>✕ CLOSE <kbd>Esc</kbd></button>
+  <h2>TRADE</h2>
+  <div id="tradeBody"></div>
+</div>
+<div id="panelFriends" class="panel">
+  <button class="xbtn" data-close>✕ CLOSE <kbd>Y</kbd></button>
+  <h2>FRIENDS</h2>
+  <div id="friendsBody"></div>
+</div>
+<div id="panelMyIsle" class="panel">
+  <button class="xbtn" data-close>✕ CLOSE <kbd>E</kbd></button>
+  <h2>BUILD <span id="miCount"></span></h2>
+  <div id="miTabs" class="miTabs"></div>
+  <div id="miGrid" class="miGrid"></div>
+  <div class="miOpts"><button id="miSnap" class="btn small ghost">GRID SNAP: ON</button><button id="miClear" class="btn small ghost">CLEAR MY ISLAND</button></div>
+  <div class="foot">Click a prop to build with it · Wheel: next prop · Click: place · Right-click: remove · Middle-click: copy · R: turn · Z/X: size · N: colour · Ctrl+Z: undo</div>
+</div>
+<div id="miHud"></div>
 <div id="panelPets" class="panel">
   <button class="xbtn" data-close>✕ CLOSE <kbd>P</kbd></button>
   <h2>YOUR PETS <span id="petsHead"></span></h2>
@@ -686,6 +806,7 @@
   <h2>REBIRTH 1: THE FERRY TO THE HIGHLAND ISLE</h2>
   <div id="ferrySay"></div>
   <div id="ferryBody"></div>
+  <div id="ferrySail"></div>
   <div class="ferrybtns"><button class="btn" id="ferryBuy">BUY TICKET</button><button class="btn ghost" data-close>NOT YET</button></div>
 </div>
 <div id="panelRelic" class="panel">
@@ -722,7 +843,7 @@
   <button id="menuBtn" class="btn">PLAY</button>
   <div class="menuJoinRow"><button id="menuJoin" class="btn join">JOIN PUBLIC SERVER</button><small id="menuOnline"></small><button id="menuName"></button><div id="menuNews"></div></div>
   <div id="menuControls"></div>
-  <div class="menuRow"><button id="menuLeave" class="btn ghost" style="display:none">LEAVE SERVER</button><button id="menuSettings" class="btn ghost">SETTINGS</button><button id="menuQuit" class="btn ghost">QUIT</button></div>
+  <div class="menuRow"><button id="menuLeave" class="btn ghost" style="display:none">LEAVE SERVER</button><button id="menuLook" class="btn ghost">MY LOOK</button><button id="menuSettings" class="btn ghost">SETTINGS</button><button id="menuQuit" class="btn ghost">QUIT</button></div>
   <div class="ver" id="ver">TREE CHOP STUDIOS</div>
 </div>
 
@@ -736,10 +857,24 @@
 </div>
 
 <div id="mpJoin"><div class="mjBox"><button class="xbtn" id="mpJoinX">✕</button><h2>JOIN THE PUBLIC SERVER</h2><p>Other players on your island will see you, your axe and your pets. Your progress stays your own.</p><label>YOUR NAME</label><input id="mpName" maxlength="16" spellcheck="false" autocomplete="off"><div id="mpJoinErr"></div><div id="mpPassRow"><label>TREE PASSWORD</label><input id="mpPass" type="password" maxlength="64" autocomplete="off"></div><button id="mpJoinGo" class="btn">JOIN</button></div></div>
+<div id="lookPanel"><div class="lkBox">
+  <button class="xbtn" id="lookX">✕ CLOSE <kbd>Esc</kbd></button>
+  <h2>MY LOOK</h2>
+  <div class="lkWrap">
+    <div class="lkLeft"><canvas id="lookCanvas" width="260" height="340"></canvas>
+      <div class="lkBtns"><button class="btn ghost" id="lookRandom">🎲 RANDOM</button><button class="btn ghost" id="lookName">MY NAME'S LOOK</button></div>
+      <p class="lkHint">Everyone on the public server sees you like this.</p></div>
+    <div class="lkBody" id="lookBody"></div>
+  </div>
+  <button class="btn" id="lookDone">DONE</button>
+</div></div>
+<div id="emoteBar"></div>
 <div id="mpChat"></div>
 <input id="mpInput" maxlength="140" placeholder="Say something... (Enter to send, Esc to cancel)" spellcheck="false" autocomplete="off">
 <div id="mpList"></div>
 <div id="mpBadge"></div>
+<div id="evHud"></div>
+<div id="pvpBadge">⚔ PVP ON · V</div>
 <div id="mpAnns"></div>
 
 <div id="death"><h1>YOU DIED</h1><div id="deathLost"></div><small>click or press space to wake up in the safehouse</small></div>
