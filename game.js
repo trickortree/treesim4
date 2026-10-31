@@ -3047,7 +3047,16 @@ function renderMenu() {
         if ($("menuLeave")) $("menuLeave").style.display = mp.on || mp.connecting ? "" : "none";
     }
     $("menuControls").innerHTML = CONTROLS.map(c => `<div><kbd>${c[0]}</kbd><span>${c[1]}</span></div>`).join("");
+    fitMenu();
 }
+// the main menu shrinks to fit the window, so nothing on it runs off a small (or zoomed-in) laptop screen
+function fitMenu() {
+    const m = $("menuIn"); if (!m || !$("menu").classList.contains("show")) return;
+    m.style.zoom = "";
+    const k = Math.min(1, (innerHeight - 64) / Math.max(1, m.offsetHeight), (innerWidth - 24) / Math.max(1, m.offsetWidth));
+    if (k < 1) m.style.zoom = String(Math.max(0.45, Math.floor(k * 100) / 100));
+}
+addEventListener("resize", () => fitMenu());
 function startPlaying() {
     if (!actx) { try { actx = new AudioContext(); master = actx.createGain(); master.gain.value = settings.vol; master.connect(actx.destination); } catch (e) { /* no audio */ } }
     if (actx && actx.state === "suspended") actx.resume();
@@ -3056,6 +3065,10 @@ function startPlaying() {
     state = "playing";
     renderMenu();
     if (document.pointerLockElement !== canvas) { try { lockPointer(); } catch (e) { /* needs gesture */ } }
+    if (save.rbBack) { // 2.5.1 gave back rebirths that 2.5.0 took
+        const n = save.rbBack; delete save.rbBack; writeSave();
+        setTimeout(() => toast(`★ Your ${n} lost rebirth${n > 1 ? "s are" : " is"} back! (2.5.0 took them if you started the game on an island you'd sailed back to. Sorry!)`, "rare"), 1500);
+    }
 }
 $("menuBtn").addEventListener("click", startPlaying);
 $("menuQuit").addEventListener("click", () => { writeSave(); window.close(); });
@@ -14413,7 +14426,23 @@ for (const k of Object.keys(save.mats)) if (!MATS[k]) delete save.mats[k]; // a 
 // a save that's already on another island starts there (this must run after everything above is defined)
 if (save.isle >= CI_BASE) { if (customIsle(save.isle)) enterCI(customIsle(save.isle)); else enterIsle6(); } else if (save.isle === 6) enterIsle6(); else if (save.isle === 5) enterIsle5(); else if (save.isle === 4) enterIsle4(); else if (save.isle === 3) enterIsle3(); else if (save.isle === 2) enterIsle2();
 placeEnchTable();
-if (save.isle >= 2) save.rebirths = save.isle - 1; // Highland Isle = Rebirth 1, Mooncap Isle = Rebirth 2, Ashfall Isle = Rebirth 3
+// your rebirths never go down: a save on an island has at least that island's rebirths (very old saves had no count at all).
+// 2.5.0 set the count from the island you started on, so starting the game on an island you'd sailed back to took rebirths
+// away. 2.5.1 gives them back, once, from what only the islands themselves leave in a save (nothing you can trade)
+if (!save.rbFix) {
+    save.rbFix = 1;
+    const was = save.rebirths || 0, done = save.studioDone && typeof save.studioDone === "object" ? save.studioDone : {};
+    let top = 1;
+    if (save.ferry2Talk || save.caveFound || save.mineFound) top = Math.max(top, 2);                  // the Highland Isle
+    if (save.relicSpent || save.ferry3Talk || save.bossKills || save.starsCaught) top = Math.max(top, 3); // Mooncap Isle
+    if (save.kingKills) top = Math.max(top, 4);                                                        // Ashfall Isle
+    if (save.capTalk || save.crewHauled || save.crateLvl || save.bessGot) top = Math.max(top, 5);      // the Archipelago
+    if (save.yetiKills) top = Math.max(top, 6);                                                         // the Iceberg
+    for (const o of CONTENT_WORLD && Array.isArray(CONTENT_WORLD.objects) ? CONTENT_WORLD.objects : []) // a chest or shrine on a Studio island
+        if (done["s" + o.id] && +o.isle > top && (+o.isle < CI_BASE || customIsle(+o.isle))) top = +o.isle;
+    if (top - 1 > was) { save.rebirths = top - 1; save.rbBack = save.rebirths - was; }
+}
+save.rebirths = Math.max(save.rebirths || 0, (save.isle || 1) - 1);
 
 // ---------- HUD ----------
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
@@ -14898,7 +14927,7 @@ function miHud(force) {
 function renderMiCat() {
     const cats = PROP_CATS.filter(([c]) => Object.values(PROPS).some(P => P.cat === c));
     if (!cats.some(([c]) => c === MI.cat)) MI.cat = "build";
-    $("miCount").textContent = `${MI.objs.length}/${MI_MAX.toLocaleString()} props`;
+    $("miCount").textContent = `${(MI.objs || save.myIsle.objs).length}/${MI_MAX.toLocaleString()} props`;
     $("miTabs").innerHTML = cats.map(([c, n]) => `<button class="miTab${c === MI.cat ? " on" : ""}" data-micat="${c}">${n}</button>`).join("");
     $("miGrid").innerHTML = miKeys().map(k => `<button class="miCard${k === MI.k ? " on" : ""}" data-mik="${k}"><img src="${miIcon(k)}"><span>${escH(PROPS[k].name)}</span></button>`).join("");
     $("miSnap").textContent = "GRID SNAP: " + (MI.snap ? "ON" : "OFF");
@@ -15329,10 +15358,13 @@ let spin = null; // the case being opened: { caseKey, got, t, done }
 function openMarket(say) { marketSay = say || ""; openPanel("market"); }
 let marketSay = "";
 function oddsBar(odds) { return `<div class="modds">${odds.map((p, i) => p ? `<i style="flex:${p};background:${RAR[i].c}" title="${RAR[i].n} ${p}%"></i>` : "").join("")}</div><div class="moddt">${odds.map((p, i) => p ? `<span style="color:${RAR[i].c}">${RAR[i].n[0]}${RAR[i].n.slice(1).toLowerCase()} ${p}%</span>` : "").join("")}</div>`; }
+let marketTab = "cases";
 function renderMarket() {
     const found = Object.keys(save.pets.own).length, all = Object.keys(PETS).length;
     $("marketSay").textContent = marketSay ? `"${marketSay}"` : "";
-    $("marketBody").innerHTML = Object.entries(CASES).map(([k, C]) => {
+    const canBuy = AXES.filter((a, i) => a.sly && !save.owned[i] && (save.rebirths || 0) >= a.sly).length; // legendary axes you could get now
+    $("marketTabs").innerHTML = `<button class="mTab${marketTab === "cases" ? " on" : ""}" data-mtab="cases">🎁 PET CASES</button><button class="mTab${marketTab === "armory" ? " on" : ""}" data-mtab="armory">🪓 SLY'S ARMORY${canBuy ? `<i>${canBuy}</i>` : ""}</button>`;
+    $("marketBody").innerHTML = marketTab !== "cases" ? "" : Object.entries(CASES).map(([k, C]) => {
         const p = casePrice(k), can = save.money >= p;
         return `<div class="mcase" style="--c:${C.col}"><img src="${caseIcon(k)}"><b>${C.name}</b><small>${C.desc}</small>${oddsBar(C.odds)}<button data-case="${k}" ${can ? "" : "disabled"}>OPEN · ${money(p)}</button></div>`;
     }).join("");
@@ -15343,7 +15375,7 @@ function renderMarket() {
           <small>${a.dmg.toLocaleString()} damage · [Z] ${ABIL[i].name}: ${ABIL[i].desc}</small>
           <button data-slyaxe="${i}" ${own || locked || save.money < price ? "disabled" : ""}>${own ? "YOURS" : locked ? "OPENS AT REBIRTH " + a.sly : "BUY · " + money(price)}</button></div>`;
     }).join("");
-    $("marketBody").insertAdjacentHTML("beforeend", `<div class="mArmory"><h3>SLY'S ARMORY <small>legendary axes, one more at each rebirth</small></h3><div class="mArmGrid">${armory}</div></div>`);
+    if (marketTab === "armory") $("marketBody").innerHTML = `<div class="mArmory"><h3>SLY'S ARMORY <small>legendary axes, one more at each rebirth</small></h3><div class="mArmGrid">${armory}</div></div>`;
     $("marketFoot").innerHTML = `You've found <b>${found} of ${all}</b> pets · ${save.pets.opened || 0} cases opened · shiny chance ${SHINY_CHANCE * 100}% · <b>P</b> shows your pets`;
 }
 function buySlyAxe(i) {
@@ -15443,6 +15475,7 @@ function togglePet(k) {
 document.addEventListener("click", e => {
     const c = e.target.closest("[data-case]"); if (c && !c.disabled) { startSpin(c.dataset.case); return; }
     const ax = e.target.closest("[data-slyaxe]"); if (ax && !ax.disabled) { buySlyAxe(+ax.dataset.slyaxe); return; }
+    const mt = e.target.closest("[data-mtab]"); if (mt) { mt.blur(); marketTab = mt.dataset.mtab; renderMarket(); return; }
     if (e.target.closest("#spinAgain")) { const k = spin && spin.caseKey; if (k) startSpin(k); return; }
     if (e.target.closest("#spinPets") || e.target.closest("#marketPets")) { openPanel("pets"); return; }
     const ev = e.target.closest("[data-evo]"); if (ev) { evolvePet(ev.dataset.evo); return; }
@@ -16386,6 +16419,7 @@ async function mpCheckOnline() {
         news.replaceChildren(...list.map(a => Object.assign(document.createElement("div"), { textContent: "📢 " + a.text })));
         news.classList.toggle("show", list.length > 0);
     } catch (e) { el.textContent = "can't reach the server"; news.classList.remove("show"); }
+    fitMenu(); // the news can make the menu taller
 }
 // the name box: only the first time (after that your name is saved and JOIN goes straight in), when you change it, or when it's taken
 function mpShowJoin(name, err, claim) {
@@ -16510,29 +16544,40 @@ mpCheckOnline();
 updateMpHud();
 
 // ---------- loop ----------
-let last = performance.now();
-// one bad frame shouldn't freeze the whole game: report it and keep going
-let frameErrs = 0;
+let last = performance.now(), frameReal = 0;
+// one bad part of a frame can't freeze the whole game: everything else still runs, the world still draws, and the error
+// is shown once and sent to the public server's crash list (2.5.1)
 function frame(now) {
-    try { frameBody(now); }
-    catch (e) { console.error(e); if (frameErrs++ < 3) toast("Something broke: " + e.message + " (the game kept running)", "bad"); }
+    try { frameSim(now); } catch (e) { gameErr(e, "update"); }
+    try { frameDraw(frameReal); } catch (e) { gameErr(e, "draw"); }
     requestAnimationFrame(frame);
 }
-function frameBody(now) {
-    const real = Math.min(0.05, (now - last) / 1000);
+const errSeen = new Map();
+const errAt = e => { const m = String((e && e.stack) || "").match(/([A-Za-z0-9_.-]+\.js):(\d+):(\d+)/); return m ? `${m[1]}:${m[2]}:${m[3]}` : ""; };
+function gameErr(e, where) {
+    const msg = String((e && e.message) || e).slice(0, 200), at = errAt(e), k = where + "|" + msg + "|" + at;
+    errSeen.set(k, (errSeen.get(k) || 0) + 1);
+    if (errSeen.get(k) > 1) return;
+    console.error(e);
+    if (errSeen.size <= 3) toast(`Something broke: ${msg}${at ? " (" + at + ")" : ""}. The game kept going.`, "bad");
+    try { if (window.__ts4Crash) window.__ts4Crash(msg, at, where, { isle, online: typeof mp !== "undefined" && mp.on ? 1 : 0, state }); } catch (er) { /* never let reporting break anything */ }
+}
+const tryRun = (where, f) => { try { f(); } catch (e) { gameErr(e, where); } };
+function frameSim(now) {
+    const real = frameReal = Math.min(0.05, (now - last) / 1000);
     last = now;
     let dt = real;
     if (hitstop > 0) { hitstop -= real; dt *= 0.08; }
-    mpHudTick(real);
+    tryRun("hud", () => mpHudTick(real));
     if (state === "playing") {
-        if (panel !== "inv" && panel !== "map") { update(dt); updatePets(dt); }
-        if (panel === "spin") spinTick(real);
-        mpTick(real);
+        if (panel !== "inv" && panel !== "map") { tryRun("update", () => update(dt)); tryRun("pets", () => updatePets(dt)); }
+        if (panel === "spin") tryRun("spin", () => spinTick(real));
+        tryRun("players", () => mpTick(real));
         animateAxe();
         if (holdingGun()) animateGun(real);
         updateBars(real);
     } else if (state === "dead") {
-        mpTick(real);
+        tryRun("players", () => mpTick(real));
         deadT += real;
         hurtEl.style.opacity = 0.55;
     } else if (state === "title") {
@@ -16554,6 +16599,8 @@ function frameBody(now) {
         applySky();
         if (studioHook && studioHook.afterSky) studioHook.afterSky(); // the editor can thin the fog out to see a whole island
     }
+}
+function frameDraw(real) {
     camera.updateMatrixWorld();
     updateLabels();
     if (state === "playing" && panel !== "inv" && panel !== "map") updateNameplates(); else hidePlates();
@@ -16573,6 +16620,11 @@ player.maxHp = maxHpNow(); player.hp = player.maxHp;
 renderMenu();
 applySky();
 requestAnimationFrame(frame);
+// from here on the game shows and reports its own errors (index.html's catcher only covers loading); a click or a server
+// message that breaks something lands here
+window.__ts4Up = true;
+addEventListener("error", e => gameErr(e.error || e.message, "event"));
+addEventListener("unhandledrejection", e => gameErr(e.reason || "promise", "promise"));
 $("gfxPick").classList.remove("show");
 
 // debug/test handle (used by automated checks, harmless in play)

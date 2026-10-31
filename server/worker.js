@@ -94,6 +94,11 @@ async function keyOk(env, key) {
 export default {
     async fetch(req, env) {
         const url = new URL(req.url);
+        if (url.pathname === "/crash") { // 2.5.1: crash reports from games
+            if (req.method === "OPTIONS") return new Response(null, { headers: { ...CORS, "access-control-allow-methods": "POST", "access-control-allow-headers": "content-type" } });
+            if (req.method !== "POST") return new Response("Games send crash reports here.", { status: 405, headers: CORS });
+            return env.LOBBY.get(env.LOBBY.idFromName("public")).fetch(req);
+        }
         if (url.pathname === "/play" || url.pathname === "/status") {
             const lobby = env.LOBBY.get(env.LOBBY.idFromName("public"));
             if (url.pathname === "/play" && req.headers.get("Upgrade") !== "websocket") return new Response("Join from the game: this address only takes game connections.", { status: 426 });
@@ -109,6 +114,7 @@ export class Lobby extends DurableObject {
 
     async fetch(req) {
         const url = new URL(req.url);
+        if (url.pathname === "/crash") return this.crash(req);
         if (url.pathname === "/status") {
             const ps = this.players();
             return Response.json({ online: ps.length, max: MAX_PLAYERS, names: ps.map(p => p.a.name).slice(0, MAX_PLAYERS), motd: await this.motd(), news: await this.news(), anns: (await this.anns()).filter(x => x.kind === "full").slice(-5).map(x => annWire(x)) }, { headers: CORS });
@@ -505,6 +511,30 @@ export class Lobby extends DurableObject {
     }
 
     // ---------- admin: every message carries the key, so nothing depends on the connection surviving a sleep ----------
+    // 2.5.1: a game hit an error. Only the message, where in the code, the version and which island are kept (never who),
+    // as the newest 60 different errors with how often each came in, for the admin card's CRASH REPORTS
+    async crash(req) {
+        const now = Date.now(), ip = req.headers.get("CF-Connecting-IP") || "";
+        this.crashT = this.crashT || new Map();
+        const recent = (this.crashT.get(ip) || []).filter(t => now - t < 60000);
+        if (recent.length >= 8) return new Response(null, { status: 429, headers: CORS });
+        recent.push(now); this.crashT.set(ip, recent);
+        let m = null;
+        try { const raw = await req.text(); if (raw.length <= 2500) m = JSON.parse(raw); } catch (e) { /* not a report */ }
+        if (!m || typeof m !== "object") return new Response(null, { status: 400, headers: CORS });
+        const cl = (v, n) => String(v ?? "").replace(/[\u0000-\u001f<>]/g, " ").slice(0, n).trim();
+        const r = { v: cl(m.v, 12), msg: cl(m.msg, 200), at: cl(m.at, 80), where: cl(m.where, 20) };
+        if (!r.msg) return new Response(null, { status: 400, headers: CORS });
+        const isleN = m.ctx && typeof m.ctx === "object" ? int(m.ctx.isle, 0, 99, 0) : 0;
+        const all = (await this.ctx.storage.get("crashes")) || [], k = [r.v, r.where, r.msg, r.at].join("|");
+        let c = all.find(x => x.k === k);
+        if (!c) { c = { k, ...r, n: 0, first: now, isles: [] }; all.push(c); }
+        c.n++; c.last = now; if (isleN && !c.isles.includes(isleN) && c.isles.length < 12) c.isles.push(isleN);
+        all.sort((x, y) => y.last - x.last);
+        await this.ctx.storage.put("crashes", all.slice(0, 60));
+        return new Response(null, { status: 204, headers: CORS });
+    }
+
     async admin(ws, a, m) {
         // the key, or a connection that joined as Tree (with the key, or from a Tree slot)
         if (!(a.joined && a.boss) && !(await keyOk(this.env, m.key))) {
@@ -517,11 +547,13 @@ export class Lobby extends DurableObject {
             const bans = (await this.ctx.storage.get("bans")) || {};
             const devs = (await this.ctx.storage.get("treeDevs")) || [];
             const tree = { pass: !!(await this.ctx.storage.get("treePass")), slots: TREE_SLOTS, devs: devs.map(d => ({ k: d.h.slice(-4), by: d.by, at: d.at, seen: d.seen })) };
-            this.send(ws, { t: "adminOk", op: m.op, text, tree, events: await this.events(), motd: await this.motd(), anns: (await this.anns()).map(x => annWire(x)), bans: Object.entries(bans).map(([k, b]) => ({ k: k.slice(-4), name: b.name, at: b.at })),
+            const crashes = ((await this.ctx.storage.get("crashes")) || []).slice(0, 30).map(c => ({ v: c.v, msg: c.msg, at: c.at, where: c.where, n: c.n, first: c.first, last: c.last, isles: c.isles }));
+            this.send(ws, { t: "adminOk", op: m.op, text, tree, crashes, events: await this.events(), motd: await this.motd(), anns: (await this.anns()).map(x => annWire(x)), bans: Object.entries(bans).map(([k, b]) => ({ k: k.slice(-4), name: b.name, at: b.at })),
                 players: this.players().map(p => ({ id: p.a.id, name: p.a.name, isle: p.a.isle, admin: p.a.admin ? 1 : 0, muted: p.a.muted ? 1 : 0, x: p.a.st ? p.a.st.x : 0, z: p.a.st ? p.a.st.z : 0 })) });
         };
         const op = m.op;
         if (op === "list") return reply();
+        if (op === "crashClear") { await this.ctx.storage.delete("crashes"); return reply("Crash reports cleared."); }
         if (op === "tag") { // marks this connection as the admin's own player: a gold name and [ADMIN] in chat
             a.admin = true; ws.serializeAttachment(a);
             if (a.joined) this.everyone({ t: "adminTag", id: a.id });

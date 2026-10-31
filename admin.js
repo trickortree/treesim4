@@ -32,7 +32,7 @@ const CSS = `
 .adSel { background: #0e0818; color: #fff; border: 1px solid #3a2c55; border-radius: 8px; padding: 6px 8px; font: 700 13px "Segoe UI"; }
 .adRow { display: flex; align-items: center; gap: 6px; background: #261c3a; border-radius: 9px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
 .adRow b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .adRow b.adm { color: #ffd040; } .adRow b.quick { color: #8adcff; }
-.adRow span { font: 11px Consolas, monospace; color: #a89cc4; white-space: nowrap; } .adRow .adB { padding: 4px 8px; font-size: 11px; }
+.adRow span { font: 11px Consolas, monospace; color: #a89cc4; white-space: nowrap; } .adCrash { flex-direction: column; align-items: stretch; } .adCrash b { white-space: normal; overflow-wrap: anywhere; color: #ff9a8a; } .adCrash span { white-space: normal; } .adRow .adB { padding: 4px 8px; font-size: 11px; }
 .adHint { font: 11px Consolas, monospace; color: #a89cc4; margin: 0 0 6px; }
 .adSec { margin: 14px 0 8px; padding-top: 10px; border-top: 1px solid #3a2c55; font: 900 12px "Segoe UI"; letter-spacing: 4px; color: #ffd040; }
 .adSet { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; } .adSet > label { min-width: 92px; font-weight: 700; }
@@ -50,7 +50,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;"
 const fmtLeft = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return t >= 86400 ? `${Math.floor(t / 86400)}d ${Math.floor(t % 86400 / 3600)}h` : t >= 3600 ? `${Math.floor(t / 3600)}h ${Math.floor(t % 3600 / 60)}m` : t >= 60 ? `${Math.floor(t / 60)}m ${t % 60}s` : `${t}s`; };
 
 let G = null, box = null, isOpen = () => false, panelEl = null;
-const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", anns: [], tree: null, myK: "", kind: "quick", armed: "", events: [], ev: "cash" };
+const AD = { ws: null, ok: false, err: "", players: [], bans: [], motd: "", anns: [], tree: null, myK: "", kind: "quick", armed: "", events: [], ev: "cash", crashes: [] };
 const q = id => box.querySelector("#" + id);
 // the game's part: { mp, mpSend, mpUrl, mpIsleName, isle(), goTo(x, z, faceX, faceZ), say(text, kind), key(), powers }
 export function setup(game) { G = game; }
@@ -79,7 +79,7 @@ export function onMsg(m) {
     if (m.t === "adminOk") {
         const now = performance.now();
         Object.assign(AD, { ok: true, err: "", players: m.players, bans: m.bans, motd: m.motd, tree: m.tree || null, anns: (m.anns || []).map(a => ({ ...a, until: a.left ? now + a.left : 0 })),
-            events: (m.events || []).map(x => ({ ...x, until: now + x.left })) });
+            events: (m.events || []).map(x => ({ ...x, until: now + x.left })), crashes: Array.isArray(m.crashes) ? m.crashes : [] });
         if (m.text) G.say(m.text);
         draw();
         myPcK().then(k => { if (k !== AD.myK) { AD.myK = k; draw(); } });
@@ -141,6 +141,8 @@ const HTML = `
     <div id="adBans"></div>
     <div class="adH">NAMES <small>a name stays with whoever used it for 30 days</small></div>
     <div class="adPair"><input class="adText" id="adFreeName" maxlength="16" placeholder="Free up a name someone's holding..." spellcheck="false" autocomplete="off"><button class="adB" id="adFreeGo">Free it</button></div>
+    <div class="adH">CRASH REPORTS <small>errors players' games ran into</small> <button class="adB warn" id="adCrashClear" style="padding:3px 8px">clear</button></div>
+    <div id="adCrashes"></div>
     <div class="adH">TREE ON 2 PCS <small id="adTreeInfo"></small></div>
     <div class="adPair"><input class="adText" id="adTreePass" type="password" maxlength="64" placeholder="Tree password for your other PC (6+ characters)" autocomplete="off"><button class="adB" id="adTreePassGo">Set</button></div>
     <div id="adTreeDevs"></div>
@@ -216,6 +218,10 @@ function draw() {
         + (p.admin ? "" : `<button class="adB" data-ad="goto" data-id="${esc(p.id)}" ${me.on && p.isle === here ? "" : "disabled"}>Go to</button><button class="adB" data-ad="mute" data-id="${esc(p.id)}">${p.muted ? "Unmute" : "Mute"}</button><button class="adB warn" data-ad="kick" data-id="${esc(p.id)}">Kick</button><button class="adB warn" data-ad="ban" data-id="${esc(p.id)}">${AD.armed === p.id ? "Sure?" : "Ban"}</button>`) + `</div>`).join(""));
     setHTML("adBans", AD.bans.length ? AD.bans.map(b => `<div class="adRow"><b>${esc(b.name)}</b><span>${new Date(b.at).toLocaleDateString()}</span><button class="adB" data-ad="unban" data-k="${esc(b.k)}">Unban</button></div>`).join("") : `<div class="adHint">no bans</div>`);
     q("adUnbanAll").style.display = AD.bans.length ? "" : "none";
+    const ago = t => { const s = Math.max(0, (Date.now() - t) / 1000); return s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + "m ago" : s < 129600 ? Math.round(s / 3600) + "h ago" : Math.round(s / 86400) + "d ago"; };
+    setHTML("adCrashes", AD.crashes.length ? AD.crashes.map(c => `<div class="adRow adCrash"><b title="${esc(c.msg)}">${esc(c.msg)}</b><span>×${c.n} · v${esc(c.v)} · ${esc(c.where)}${c.at ? " · " + esc(c.at) : ""}${(c.isles || []).length ? " · isle " + c.isles.join(",") : ""} · ${ago(c.last)}</span></div>`).join("")
+        : `<div class="adHint">no crash reports</div>`);
+    q("adCrashClear").style.display = AD.crashes.length ? "" : "none";
     const TR = AD.tree;
     q("adTreeInfo").textContent = TR ? `${TR.devs.length} of ${TR.slots} PCs · password ${TR.pass ? "set" : "not set"}` : "";
     setHTML("adTreeDevs", TR && TR.devs.length ? TR.devs.map(d => `<div class="adRow"><b>${d.k === AD.myK ? "This PC" : "PC ····" + esc(d.k)}</b><span>${d.by === "key" ? "your key" : "password"} · last on ${new Date(d.seen).toLocaleDateString()}</span><button class="adB warn" data-ad="treeFree" data-k="${esc(d.k)}">Free</button></div>`).join("")
@@ -280,6 +286,7 @@ function act(b) {
         case "adAnnAll": adSend("annDel", { id: "*" }); break;
         case "adMotdGo": adSend("motd", { text: q("adMotd").value.trim() }); q("adMotd").value = ""; break;
         case "adUnbanAll": adSend("unban", { k: "*" }); break;
+        case "adCrashClear": adSend("crashClear"); break;
         case "adFreeGo": { const v = q("adFreeName").value.trim(); if (!v) { q("adFreeName").focus(); return; } adSend("freeName", { name: v }); q("adFreeName").value = ""; break; }
         case "adTreePassGo": { const v = q("adTreePass").value; if (v.length < 6) { G.say("the Tree password needs 6 characters or more", "bad"); q("adTreePass").focus(); return; } adSend("treePass", { pass: v }); q("adTreePass").value = ""; break; }
         case "adKeySave": { const v = q("adKey").value.trim(); if (!v) return; try { localStorage.setItem("ts4_admin_key", v); } catch (e) { /* no storage */ } q("adKey").value = ""; adOpen(); draw(); break; }
