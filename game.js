@@ -580,6 +580,7 @@ function applySky() {
     if (m3) sky3(d);
     if (m4) { scene.fog.near *= 1.6; scene.fog.far *= 2.4; sky4(d); } // the volcano should always loom over the island
     if (isle === 5) { scene.fog.near *= 2.2; scene.fog.far *= 3.6; } // the other islands stay in sight across the water
+    { const C = CI(); if (C && C.WT && !inCasino()) { scene.fog.near *= 1.8; scene.fog.far *= 2.7; } } // a world tree looms over the whole island
     if (isle === 6 && !inCasino()) sky6(d, dusk, gray);
     if (inCasino()) casinoSky(); else if (inCave()) caveSky();
     if (MODERN) gfxSky();
@@ -1401,7 +1402,7 @@ function ferrymanTex() {
 function clampToIsland(p, dt) {
     if (p.x > 4500) { clampCasino(p); return; }
     if (p.x < -4500) { clampMi(p); return; }
-    if (CI()) { CI().clamp(p); return; }
+    if (CI()) { const C = CI(); C.clamp(p); if (C.solids.length) solClamp(C.solids, p); return; }
     if (isle === 6) { clampIsle6(p); return; }
     if (isle === 5) { clampIsle5(p, dt); return; }
     if (isle === 4) { clampIsle4(p); return; }
@@ -1783,6 +1784,7 @@ function customType(c) {
     if (c.arch) T.arch = c.arch;
     if (c.mat) T.mat = c.mat;
     for (const f of ["rare", "night", "flee", "titan", "tall"]) if (c[f]) T[f] = true;
+    if (Array.isArray(c.alt) && c.alt.length === 2 && c.alt.every(v => Number.isFinite(+v))) T.alt = [+c.alt[0], +c.alt[1]]; // only grows between these heights (sky trees)
     return T;
 }
 for (const c of Array.isArray(CONTENT_TREES) ? CONTENT_TREES : []) if (c && isCustomKey(c.key)) TYPES[c.key] = customType(c);
@@ -2034,11 +2036,11 @@ function armGeometry(len) {
 const trees = [];
 let time = 0;
 
-function makeTree(x, z, h, key = "pine") {
+function makeTree(x, z, h, key = "pine", fixY) { // fixY: it grows up on a structure (a sky island), not on the land
     const T = TYPES[key], M = typeMats[key];
     const r = 0.42 + h * 0.075;
     const g = new THREE.Group();
-    const gy0 = groundY(x, z);
+    const gy0 = fixY !== undefined ? fixY : groundY(x, z);
     g.position.set(x, gy0 - (isle >= 2 ? 0.25 : 0), z);
     const body = new THREE.Group();
     g.add(body);
@@ -2080,7 +2082,7 @@ function makeTree(x, z, h, key = "pine") {
     scene.add(g);
     const hp = Math.ceil(h * 0.7 * T.hp * (1 + 0.05 * (save.day - 1)) * hpScale() * isleHp());
     const t = {
-        g, body, face, arms, h, r, x, z, gy: gy0, key, type: T, hp, maxHp: hp, solid: [trunk, foliage],
+        g, body, face, arms, h, r, x, z, gy: gy0, fixY, key, type: T, hp, maxHp: hp, solid: [trunk, foliage],
         dying: false, burn: false, t: 0, hurt: 0, phase: Math.random() * 6, gone: false,
         mode: "calm", atk: "idle", atkT: 0, cool: 1 + Math.random() * 3, armUp: 0, swing: 0, bar: null, barT: 0, _d: 99, _seen: false
     };
@@ -2088,8 +2090,8 @@ function makeTree(x, z, h, key = "pine") {
     return t;
 }
 
-function pickType(px = 0, pz = 0) {
-    const night = isNight(), here = isle >= 2 ? groundY(px, pz) : 0, C = CI();
+function pickType(px = 0, pz = 0, py) {
+    const night = isNight(), here = isle >= 2 ? (py !== undefined ? py : groundY(px, pz)) : 0, C = CI();
     let total = 0;
     // a Studio island can make a tree more or less common (treeW), or let every tree grow from the start (allTiers)
     const tier = Math.max(bestIdx(), gunTier()), blood = isBlood(), tw = (k, T) => (night ? T.wn : T.wd) * (blood && T.rare ? 2.2 : 1) * (C && C.treeW[k] !== undefined ? C.treeW[k] : 1);
@@ -2104,7 +2106,7 @@ function spawnTree(announce = true) {
     for (let tries = 0; tries < 40; tries++) {
         const a = Math.random() * Math.PI * 2, d = SAFE_R + 4 + Math.random() * (curShoreR(a) - 10 - SAFE_R - 4), sp5 = isle === 5 ? arch5Spot() : CI() ? CI().landSpot() : null; // a Studio island's walkable islands grow trees too
         if (isle === 5 && !sp5) continue;
-        const x = sp5 ? sp5.x : Math.cos(a) * d, z = sp5 ? sp5.z : Math.sin(a) * d;
+        const x = sp5 ? sp5.x : Math.cos(a) * d, z = sp5 ? sp5.z : Math.sin(a) * d, sy = sp5 && sp5.y !== undefined ? sp5.y : undefined; // sy: a spot up on a sky island
         if (Math.hypot(x - player.pos.x, z - player.pos.z) < 18) continue;
         let bad = false;
         for (const lm of curLM()) if (!lm.camp && Math.hypot(x - lm.x, z - lm.z) < lm.r + 2) { bad = true; break; }
@@ -2113,13 +2115,13 @@ function spawnTree(announce = true) {
         if (isle === 3 && !treeOk3(x, z)) continue;
         if (isle === 4 && !treeOk4(x, z)) continue;
         if (isle === 6 && !treeOk6(x, z)) continue;
-        if (CI() && !CI().treeOk(x, z)) continue;
-        for (const o of trees) if (!o.gone && Math.hypot(x - o.x, z - o.z) < 6) { bad = true; break; }
+        if (CI() && sy === undefined && !CI().treeOk(x, z)) continue;
+        for (const o of trees) if (!o.gone && Math.hypot(x - o.x, z - o.z) < 6 && (sy === undefined) === (o.fixY === undefined)) { bad = true; break; }
         if (bad) continue;
-        const key = pickType(x, z), T = TYPES[key], mk = T.rush ? null : rollMut();
+        const key = pickType(x, z, sy), T = TYPES[key], mk = T.rush ? null : rollMut();
         let hh = T.titan ? 10 + Math.random() * 2 : T.tall ? 8 + Math.random() * 5 : 3 + Math.random() * 7;
         if (mk === "giant") hh = Math.min(hh * MUTS.giant.giant, 16);
-        const t = makeTree(x, z, hh, key);
+        const t = makeTree(x, z, hh, key, sy);
         if (isle === 5) { t.arch = arch5; t.hp = t.maxHp = Math.ceil(t.maxHp * ARCH_BY[arch5].hp); } // the far islands grow tougher trees
         if (mk) { applyMut(t, mk); if (announce && time - lastMutToast > 20) { lastMutToast = time; toast(`✦ A ${MUTS[mk].name} ${T.name} appeared somewhere! (×${MUTS[mk].mult} drops)`, "rare"); } }
         if (announce && (T.night || T.titan || T.xmas) && time - lastRareToast > 25) { lastRareToast = time; toast(T.xmas ? `Jingle bells... a ${T.name} sprouted somewhere in the woods!` : T.titan ? `A ${T.name} towers somewhere in the woods...` : `A ${T.name} stirs somewhere in the woods...`, "rare"); }
@@ -2281,14 +2283,14 @@ function burst(pos, n, speed = 4, mats = chipMats) {
 const logs = [];
 // what a tree drops here (a Studio island turns any tree's material into one of its own)
 const treeMat = T => (CI() ? CI().matOf(T) : T.mat || (isle >= 6 ? isleMats()[0] : isle === 5 ? "driftwood" : isle === 4 ? "ash" : isle === 3 ? "spore" : "wood"));
-function dropLogs(x, z, n, back, key = "pine") {
+function dropLogs(x, z, n, back, key = "pine", y0) { // y0: the tree stood up on a structure
     const T = TYPES[key];
     const meshes = Math.min(n, 14), base = Math.floor(n / meshes), extra = n % meshes; // big drops are stacks of logs, not hundreds of meshes
     for (let i = 0; i < meshes; i++) {
         const mk = isle >= 2 ? treeMat(T) : null;
         const m = mk ? new THREE.Mesh(matGeo, matMeshMat[mk]) : new THREE.Mesh(logGeo, logMats[key] || logMat);
         const d = Math.random() * 2.5;
-        m.position.set(x + back.x * d, groundY(x + back.x * d, z + back.z * d) + 0.4, z + back.z * d);
+        m.position.set(x + back.x * d, (y0 !== undefined ? y0 : groundY(x + back.x * d, z + back.z * d)) + 0.4, z + back.z * d);
         m.rotation.y = Math.random() * 3;
         scene.add(m);
         logs.push({ m, vy: 3 + Math.random() * 3, bonus: T.bonus, w: base + (i < extra ? 1 : 0), mat: mk });
@@ -2371,6 +2373,7 @@ function tryHit() {
     let best = null, bestD = 1e9;
     for (const t of trees) {
         if (t.dying || t.gone || t.burn) continue;
+        if (Math.abs(player.pos.y - 1.7 - t.gy) > 5) continue; // up on a sky island, or down below one
         const dx = t.x - player.pos.x, dz = t.z - player.pos.z;
         const d = Math.hypot(dx, dz) - t.r;
         if (d > 3.5) continue;
@@ -3260,6 +3263,7 @@ function interact() {
     if (!n) return;
     const pick = a => a[Math.floor(Math.random() * a.length)];
     if (n.k === "miFerry") { ferryConfirm = 0; openPanel("ferry"); return; }
+    if (n.k === "rootlift") { rootLift(n.L); return; }
     if (n.k === "ferry6" || n.k === "ferryC") { if (n.k === "ferryC" || customIsle(7)) openFerryC(); else openFerry6(); return; }
     if (ISLE5_ACT[n.k]) { ISLE5_ACT[n.k](n); return; }
     if (n.k === "placed") { placedInteract(n.o); return; }
@@ -3350,10 +3354,10 @@ function updateTrees(dt, safe, lookX, lookZ) {
     for (const t of trees) {
         if (t.gone || t.dying || t.burn || t.boss) continue;
         const dx = player.pos.x - t.x, dz = player.pos.z - t.z, dist = Math.hypot(dx, dz) || 1;
-        t._d = dist; t._nx = dx / dist; t._nz = dz / dist;
+        t._d = dist; t._nx = dx / dist; t._nz = dz / dist; t._vd = Math.abs(player.pos.y - 1.7 - t.gy); // how far above or below you it is
         t._seen = dist < 50 && (-t._nx * lookX - t._nz * lookZ) > 0.55;
-        if (t.type.rush) { if (!safe && dist < 40 && dist > t.r + 2.1 && t.atk === "idle") rushers.add(t); continue; } // thornlings come at you, looking or not
-        if (!t.type.flee && !safe && !t._seen && dist < activateR() && dist > t.r + 2.1 && t.atk === "idle") cands.push(t);
+        if (t.type.rush) { if (!safe && dist < 40 && dist > t.r + 2.1 && t.atk === "idle" && t._vd < 5) rushers.add(t); continue; } // thornlings come at you, looking or not
+        if (!t.type.flee && !safe && !t._seen && dist < activateR() && dist > t.r + 2.1 && t.atk === "idle" && t._vd < 5 && t.fixY === undefined) cands.push(t);
     }
     cands.sort((a, b) => a._d - b._d);
     const movers = new Set(cands.slice(0, isBlood() ? 5 : 3)); // at most three (five on a blood moon) trees stalk you at once, so they never swarm
@@ -3375,7 +3379,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
                 if (t.noDrop) { burst(V3(t.x, 0.6, t.z), 14, 4, chipMats); scene.remove(t.g); t.gone = true; continue; } // someone else's shared tree
                 if (t.byGhost) { burst(V3(t.x, 0.6, t.z), 14, 4, [chipMats[1], new THREE.MeshBasicMaterial({ color: 0x9fe8ff })]); sfx(120, 0.2, "square", 0.08, 0.5); scene.remove(t.g); t.gone = true; continue; }
     const bx = -Math.sin(t.g.rotation.y), bz = -Math.cos(t.g.rotation.y);
-                dropLogs(t.x, t.z, Math.round(treeLogs(t) * (1 + 0.2 * enchLv("fortune"))), { x: bx, z: bz }, t.key);
+                dropLogs(t.x, t.z, Math.round(treeLogs(t) * (1 + 0.2 * enchLv("fortune"))), { x: bx, z: bz }, t.key, t.fixY);
                 burst(V3(t.x + bx * t.h * 0.5, t.gy + 0.3, t.z + bz * t.h * 0.5), 18, 5);
                 sfx(70, 0.35, "square", 0.2, 0.3);
                 shake = Math.min(0.6, shake + 0.2);
@@ -3390,7 +3394,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         let mx = 0, mz = 0, sp = 0;
         if (t.type.flee) {
             if (dist < 14) { mx = -t._nx; mz = -t._nz; sp = 3.6; }
-        } else if (movers.has(t) && !(t.stun > 0)) { mx = t._nx; mz = t._nz; sp = 1.9 * t.type.speed * (t.mut === "frozen" ? 0.55 : 1); }
+        } else if (movers.has(t) && !(t.stun > 0) && t.fixY === undefined) { mx = t._nx; mz = t._nz; sp = 1.9 * t.type.speed * (t.mut === "frozen" ? 0.55 : 1); }
         if (sp > 0) {
             t.x += mx * sp * dt; t.z += mz * sp * dt;
             const od = Math.hypot(t.x, t.z);
@@ -3402,20 +3406,20 @@ function updateTrees(dt, safe, lookX, lookZ) {
             if (od < SAFE_R + t.r) { t.x += t.x / (od || 1) * 6 * dt; t.z += t.z / (od || 1) * 6 * dt; }
         }
         const pd = Math.hypot(player.pos.x - t.x, player.pos.z - t.z), pmin = t.r + 0.45;
-        if (pd < pmin) { const ux = (player.pos.x - t.x) / (pd || 1), uz = (player.pos.z - t.z) / (pd || 1); player.pos.x = t.x + ux * pmin; player.pos.z = t.z + uz * pmin; }
+        if (pd < pmin && !(t._vd > 4)) { const ux = (player.pos.x - t.x) / (pd || 1), uz = (player.pos.z - t.z) / (pd || 1); player.pos.x = t.x + ux * pmin; player.pos.z = t.z + uz * pmin; }
 
         // attacks: only sometimes, with a warning wind-up
         t.cool -= dt;
         const reach = t.r + 2.7;
         if (!t.type.flee && !(t.stun > 0)) {
-            if (t.atk === "idle" && !safe && dist < reach && t.cool <= 0) {
+            if (t.atk === "idle" && !safe && dist < reach && t.cool <= 0 && !(t._vd > 4)) {
                 if (Math.random() < (isBlood() ? 0.6 : 0.4)) { t.atk = "wind"; t.atkT = 0; sfx(180, 0.3, "sawtooth", 0.05, 0.5); floatWorld(V3(t.x, t.gy + Math.min(t.h * 0.7, 3.4), t.z), "!", "warn"); }
                 else t.cool = 1 + Math.random() * 2.5; // it hesitates
             } else if (t.atk === "wind") {
                 t.atkT += dt;
                 if (t.atkT >= 0.7) {
                     t.atk = "strike"; t.atkT = 0;
-                    if (dist < reach + 0.6 && !safe) hurtPlayer(treeDmg(t), t.x, t.z);
+                    if (dist < reach + 0.6 && !safe && !(t._vd > 4)) hurtPlayer(treeDmg(t), t.x, t.z);
                 }
             } else if (t.atk === "strike") {
                 t.atkT += dt;
@@ -3427,7 +3431,7 @@ function updateTrees(dt, safe, lookX, lookZ) {
         t.hurt = Math.max(0, t.hurt - dt * 4);
         const mode = faceMode(t, dist);
         if (mode !== t.mode) { t.mode = mode; t.face.material = faceMats[mode]; }
-        t.gy = groundY(t.x, t.z);
+        t.gy = t.fixY !== undefined ? t.fixY : groundY(t.x, t.z);
         t.g.position.set(t.x + (Math.random() - 0.5) * t.hurt * 0.15, t.gy - (isle >= 2 ? 0.25 : 0), t.z + (Math.random() - 0.5) * t.hurt * 0.15);
         t.body.rotation.z = Math.sin(time * 0.9 + t.phase) * 0.025 * swayK + (sp > 0 ? Math.sin(time * 9 + t.phase) * 0.04 : 0);
         t.body.rotation.x = t.hurt * 0.1;
@@ -3523,13 +3527,14 @@ function update(dt) {
     } else {
         if (keys.Space && player.onGround && !panel) { player.vel.y = 7; player.onGround = false; }
         player.vel.y -= 22 * dt;
+        glideTick(dt);
     }
     player.pos.addScaledVector(player.vel, dt);
     clampToIsland(player.pos, dt);
-    pushOutBoxes(player.pos, 0.45);
+    if (player.pos.y - 1.7 - groundY(player.pos.x, player.pos.z) < 2.5) pushOutBoxes(player.pos, 0.45); // the ground's walls and rocks don't reach you up on a walkway
     }
     if (ride) updateRide(dt);
-    const gnd = (inMyIsle() ? miGround(player.pos.x, player.pos.z, player.pos.y - 1.7) : groundY(player.pos.x, player.pos.z)) + 1.7; // on My Island you can stand on what you built
+    const gnd = structGround(player.pos.x, player.pos.z, player.pos.y - 1.7) + 1.7; // on My Island you can stand on what you built
     if (!ride && !boating() && (player.pos.y <= gnd || (!flying && player.onGround && player.vel.y <= 0 && player.pos.y - gnd < 0.7))) { player.pos.y = gnd; player.vel.y = 0; player.onGround = !flying; }
     player.dashCd -= dt;
     updateAbilities(dt);
@@ -3568,7 +3573,7 @@ function update(dt) {
     for (let i = logs.length - 1; i >= 0; i--) {
         const l = logs[i], p = l.m.position;
         const dx = player.pos.x - p.x, dz = player.pos.z - p.z, d = Math.hypot(dx, dz);
-        const lgy = groundY(p.x, p.z), LR = 5 + 2.5 * (save.magnetLvl || 0) + petAdd("reach");
+        const lgy = structGround(p.x, p.z, p.y), LR = 5 + 2.5 * (save.magnetLvl || 0) + petAdd("reach");
         if (d < LR) { const pull = (LR - d) * 6 * dt; p.x += dx / (d || 1) * pull; p.z += dz / (d || 1) * pull; p.y += (lgy + 1 - p.y) * 0.1; }
         l.vy -= 14 * dt; p.y += l.vy * dt;
         if (p.y < lgy + 0.2 && d >= LR) { p.y = lgy + 0.2; l.vy = 0; }
@@ -4081,7 +4086,7 @@ function updateGhosts(dt) {
             o.tgt = null;
             let best = null, bd = 95;
             for (const t of trees) {
-                if (t.gone || t.dying || t.burn || t.boss || t.type.flee || claimed.has(t)) continue;
+                if (t.gone || t.dying || t.burn || t.boss || t.type.flee || t.fixY !== undefined || claimed.has(t)) continue;
                 if (Math.hypot(t.x, t.z) < SAFE_R + 2) continue;
                 const d = Math.hypot(t.x - o.g.position.x, t.z - o.g.position.z);
                 if (d < bd) { bd = d; best = t; }
@@ -13805,12 +13810,12 @@ const giveHammer = h => { const hm = new THREE.Group(); hm.position.set(0, -0.64
 const ciHex = (c, d) => (/^#[0-9a-f]{6}$/i.test(String(c)) ? hexN(c) : d);
 const ciEsc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 function makeCI(d, n) {
-    const C = { d, n, built: false, G: new THREE.Group(), npcs: [], emit: [], waterGeo: null, boatArr: null, boatNext: null, man: null, fireLight: null, mapBg: null };
+    const C = { d, n, built: false, solids: [], G: new THREE.Group(), npcs: [], emit: [], waterGeo: null, boatArr: null, boatNext: null, man: null, fireLight: null, mapBg: null };
     C.G.visible = false; scene.add(C.G);
-    const R = C.R = clamp(+d.radius || 130, 70, 220), wob = clamp(d.wobble === undefined ? 0.1 : +d.wobble, 0, 0.35), sd = +d.seed || 1.3;
+    const R = C.R = clamp(+d.radius || 130, 70, 360), wob = clamp(d.wobble === undefined ? 0.1 : +d.wobble, 0, 0.35), sd = +d.seed || 1.3;
     const ph = [sd * 1.7, sd * 2.3 + 1, sd * 3.1 + 2, sd * 0.7 + 3];
     // features: any number of mountains, hills, spires, craters, plateaus, ridges, valleys, lakes, islets and bays (the old single mountain and lake still load)
-    const FDEF = { mountain: { r: 40, h: 35 }, hill: { r: 30, h: 10 }, spire: { r: 12, h: 45 }, crater: { r: 26, h: 16 }, plateau: { r: 28, h: 12 }, ridge: { r: 14, h: 22, len: 80 }, valley: { r: 10, len: 70 }, lake: { r: 14 }, islet: { r: 16, h: 6, dist: 1.4 }, isle: { r: 28, h: 4, dist: 1.7 }, bay: { width: 0.35, depth: 0.25 } };
+    const FDEF = { mountain: { r: 40, h: 35 }, hill: { r: 30, h: 10 }, spire: { r: 12, h: 45 }, crater: { r: 26, h: 16 }, plateau: { r: 28, h: 12 }, ridge: { r: 14, h: 22, len: 80 }, valley: { r: 10, len: 70 }, lake: { r: 14 }, islet: { r: 16, h: 6, dist: 1.4 }, isle: { r: 28, h: 4, dist: 1.7 }, bay: { width: 0.35, depth: 0.25 }, worldtree: { r: 16, h: 120, dist: 0.42 } };
     // the island's outline: round, long (stretched one way) or lobed (a clover of 2-7 lobes)
     const shp = d.shape || {}, sk = ["long", "lobed"].includes(shp.kind) ? shp.kind : "round", sAng = (+shp.angle || 0) * Math.PI / 180, sStr = clamp(+shp.stretch || 1.6, 1, 2.4), sLobes = clamp(Math.round(+shp.lobes || 3), 2, 7), sAmp = clamp(shp.amount === undefined ? 0.3 : +shp.amount, 0, 0.45);
     const shapeK = th => (sk === "long" ? 1 / Math.sqrt(Math.cos(th - sAng) ** 2 / sStr + Math.sin(th - sAng) ** 2 * sStr) : sk === "lobed" ? 1 + sAmp * Math.cos(sLobes * (th - sAng)) : 1);
@@ -13820,8 +13825,9 @@ function makeCI(d, n) {
     if (d.lake && d.lake.on) feats.push({ ...d.lake, type: "lake" });
     C.F = feats.filter(q => q && FDEF[q.type]).map(q => {
         const D = FDEF[q.type], th = (+q.dir || 0) * Math.PI / 180, dist = clamp(q.dist === undefined ? (D.dist || 0.5) : +q.dist, 0, q.type === "islet" ? 2.2 : q.type === "isle" ? 3 : 0.95), Rk = R * shapeK(th);
-        const o = { type: q.type, name: String(q.name || ""), th, x: Math.cos(th) * Rk * dist, z: Math.sin(th) * Rk * dist, r: clamp(+q.r || D.r || 20, 4, 120), h: clamp(q.h === undefined ? D.h || 10 : +q.h, 0, 120), len: clamp(+q.len || D.len || 60, 10, 400),
-            rot: (q.rot === undefined ? (+q.dir || 0) + 90 : +q.rot) * Math.PI / 180, width: clamp(+q.width || D.width || 0.35, 0.08, 1.2), depth: clamp(+q.depth || D.depth || 0.25, 0.05, 0.6), lava: !!q.lava, bridge: q.bridge !== false };
+        const o = { type: q.type, name: String(q.name || ""), th, x: Math.cos(th) * Rk * dist, z: Math.sin(th) * Rk * dist, r: clamp(+q.r || D.r || 20, 4, 120), h: clamp(q.h === undefined ? D.h || 10 : +q.h, 0, q.type === "worldtree" ? 200 : 120), len: clamp(+q.len || D.len || 60, 10, 400),
+            rot: (q.rot === undefined ? (+q.dir || 0) + 90 : +q.rot) * Math.PI / 180, width: clamp(+q.width || D.width || 0.35, 0.08, 1.2), depth: clamp(+q.depth || D.depth || 0.25, 0.05, 0.6), lava: !!q.lava, bridge: q.bridge !== false, isles: clamp(Math.round(q.isles === undefined ? 4 : +q.isles), 0, 6) };
+        if (o.type === "worldtree") { o.r = clamp(o.r, 8, 30); o.h = clamp(o.h, 60, 200); }
         if (o.type === "isle") { o.r = clamp(o.r, 12, 70); o.h = clamp(o.h, 1, 20); const far = Rk * (1 + wob * 1.2) + o.r + 10; if (Math.hypot(o.x, o.z) < far) { o.x = Math.cos(th) * far; o.z = Math.sin(th) * far; } const lim = 400 - o.r, d0 = Math.hypot(o.x, o.z); if (d0 > lim) { o.x *= lim / d0; o.z *= lim / d0; } } // ...and stays on the sea // a walkable island never runs into the main one
         return o;
     });
@@ -13835,6 +13841,7 @@ function makeCI(d, n) {
     C.extent = Math.max(R * maxK * (1 + wob * 1.2) + 14, ...[...islets, ...isles].map(q => Math.hypot(q.x, q.z) + q.r * 1.2 + 12));
     C.seaDist = (x, z) => { let k = Math.hypot(x, z) - C.shoreAt(x, z); for (const q of [...islets, ...isles]) k = Math.min(k, Math.hypot(x - q.x, z - q.z) - q.r); return k; }; // how far out to sea (islets and isles count as land)
     const P = C.P = clamp(d.plateau === undefined ? 2 : +d.plateau, 0.6, 14);
+    for (const q of C.F) if (q.type === "worldtree") { q.B = P + q.r * 0.3; q.roots = Array.from({ length: 7 }, (_, k) => q.th + 0.45 + k * 0.8976 + Math.sin(k * 2.3) * 0.22); } // a world tree's ground level and its seven roots
     const hills = clamp(d.hills === undefined ? 8 : +d.hills, 0, 40), hs = clamp(+d.hillSize || 1, 0.3, 3), cliffs = clamp(+d.cliffs || 0, 0, 1);
     C.beach = clamp(d.beach === undefined ? 6 : +d.beach, 2, 24);
     const at = (deg, f) => ({ x: Math.cos(deg * Math.PI / 180) * R * f, z: Math.sin(deg * Math.PI / 180) * R * f });
@@ -13864,6 +13871,7 @@ function makeCI(d, n) {
             const dm = Math.hypot(x - q.x, z - q.z);
             if (q.type === "mountain") { if (dm < q.r) h = Math.max(h, P + q.h * Math.pow(1 - dm / q.r, 1.6) * (0.9 + fbm2(x * 0.05, z * 0.05, 2) * 0.2)); }
             else if (q.type === "spire") { if (dm < q.r) h = Math.max(h, P + q.h * Math.pow(1 - dm / q.r, 3)); }
+            else if (q.type === "worldtree") h = wtGround(q, x, z, h, P);
             else if (q.type === "hill") h += q.h * Math.exp(-(dm * dm) / (q.r * q.r) * 2.2);
             else if (q.type === "plateau") h = lerp(h, Math.max(h, P + q.h + fbm2(x * 0.06, z * 0.06, 2) * 0.8), sstep(q.r + 4, q.r - 1.5, dm));
             else if (q.type === "crater") { if (dm < q.r) h = lerp(P + q.h * 0.2, P + q.h, Math.pow(dm / q.r, 3)); else h = Math.max(h, P + q.h * Math.exp(-Math.pow((dm - q.r) / (q.r * 0.35), 2))); }
@@ -13915,7 +13923,7 @@ function makeCI(d, n) {
         const a = Math.random() * 6.283, rr = Math.sqrt(Math.random()) * (q.r - 6);
         return { x: q.x + Math.cos(a) * rr, z: q.z + Math.sin(a) * rr };
     };
-    C.treeOk = (x, z) => C.bridges.every(b => segDist(x, z, b.ax, b.az, b.bx, b.bz)[0] > 4) && C.DOCKS.every(D => Math.hypot(x - D.B.x, z - D.B.z) > 16) && C.F.every(q => { const dm = Math.hypot(x - q.x, z - q.z); return q.type === "lake" ? dm > q.r + 4 : q.type === "crater" ? dm > q.r * 0.9 : q.type === "mountain" || q.type === "spire" ? dm > 8 : true; });
+    C.treeOk = (x, z) => C.bridges.every(b => segDist(x, z, b.ax, b.az, b.bx, b.bz)[0] > 4) && C.DOCKS.every(D => Math.hypot(x - D.B.x, z - D.B.z) > 16) && C.F.every(q => { const dm = Math.hypot(x - q.x, z - q.z); return q.type === "worldtree" ? dm > q.r + 9 : q.type === "lake" ? dm > q.r + 4 : q.type === "crater" ? dm > q.r * 0.9 : q.type === "mountain" || q.type === "spire" ? dm > 8 : true; });
     const col = d.colors || {};
     C.cols = { grass: ciHex(col.grass, 0x4a8a3a), grass2: ciHex(col.grass2, 0x3a7a30), sand: ciHex(col.sand, 0xe0d0a0), rock: ciHex(col.rock, 0x7a7a84), snow: ciHex(col.snow, 0xf4f8ff), camp: ciHex(col.camp, 0x8a7458), shallow: ciHex(col.shallow, 0x5ac8d8), deep: ciHex(col.deep, 0x0e2a4a), bush: ciHex(col.bush, 0x2f6a3a) };
     C.snowline = d.snowline === undefined || d.snowline === "" ? 9999 : +d.snowline;
@@ -13962,9 +13970,23 @@ function makeCI(d, n) {
         if (near(C.WITCH_AT, 3.4)) return { k: "witch" };
         if (near(C.BED, C.BED_R || 3.6)) return { k: "bed" };
         if (near(C.FERRY, 3.4)) return { k: "ferryC" };
-        for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6) return { k: "chest", c };
+        for (const c of chests) if (!c.opened && Math.hypot(px - c.x, pz - c.z) < 2.6 && (c.y === undefined || Math.abs(player.pos.y - 1.7 - c.y) < 3)) return { k: "chest", c };
         return null;
     };
+    // a world tree: its walkways, decks and sky islands, and the Rootlift's doors (only the first one gets built)
+    for (const q of C.F) if (q.type === "worldtree" && !C.WT) q.wt = ciWorldTree(C, q);
+    if (C.WT) {
+        const near0 = C.nearest;
+        C.nearest = () => {
+            const px = player.pos.x, pz = player.pos.z, feet = player.pos.y - 1.7;
+            for (const L of C.WT.lifts) if (Math.hypot(px - L.x, pz - L.z) < 3.2 && Math.abs(feet - L.y) < 3) return { k: "rootlift", L };
+            if (feet - groundY(px, pz) > 4) { // up in the tree, only what's up there
+                for (const c of chests) if (!c.opened && c.y !== undefined && Math.hypot(px - c.x, pz - c.z) < 2.6 && Math.abs(feet - c.y) < 3) return { k: "chest", c };
+                return null;
+            }
+            return near0();
+        };
+    }
     return C;
 }
 // what an island says on the ferry ride and what its ticket costs: worked out again by the Studio when only those change, with no rebuild
@@ -14013,7 +14035,8 @@ function buildCI(C) {
     C.cs = {}; for (const k in cols) C.cs[k] = new THREE.Color(cols[k]);
     for (const q of C.lakes) { const w = new THREE.Mesh(new THREE.CircleGeometry(q.r + 0.6, 40), new THREE.MeshLambertMaterial({ color: cols.shallow, emissive: 0x05121a, transparent: true, opacity: 0.85 })); w.rotation.x = -Math.PI / 2; w.position.set(q.x, P - 0.5, q.z); scene.add(w); }
     for (const q of C.F) if (q.type === "crater" && q.lava) { const y = P + q.h * 0.2 + 0.15, w = new THREE.Mesh(new THREE.CircleGeometry(q.r * 0.55, 32), glowM(0xff6a1a)); w.rotation.x = -Math.PI / 2; w.position.set(q.x, y, q.z); scene.add(w); const pl = new THREE.PointLight(0xff7a2a, 20, q.r * 2.5, 1.6); pl.position.set(q.x, y + 3, q.z); scene.add(pl); } // a crater full of lava
-    for (const lm of C.LM) if (lm.f) { const q = lm.f, l = label(lm.name, lm.col, 3.3, 0.8); l.position.set(q.x, q.type === "lake" ? P + 4 : q.type === "islet" ? q.h + 5 : C.terrain(q.x, q.z) + 8, q.z); if (q.type !== "lake") { l.maxD = 400; l.blurK = 0.3; } }
+    for (const lm of C.LM) if (lm.f) { const q = lm.f, l = label(lm.name, lm.col, 3.3, 0.8); l.position.set(q.x, q.type === "lake" ? P + 4 : q.type === "islet" ? q.h + 5 : q.type === "worldtree" ? q.B + q.h + 34 : C.terrain(q.x, q.z) + 8, q.z); if (q.type !== "lake") { l.maxD = 400; l.blurK = 0.3; } }
+    for (const q of C.F) if (q.wt) buildWorldTree(C, q);
     // ----- the camp: a fire, a bed, the forge, the trading post and the witch -----
     {
         const stones = batch(lamb(0x6a6a74)); for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.28; stones.add(ICO, Math.cos(a) * 1.3, P + 0.18, -3 + Math.sin(a) * 1.3, 0, 0, 0, 0.28, 0.22, 0.28); } stones.build();
@@ -14130,6 +14153,313 @@ function buildCI(C) {
     buildCasino(n);
     addTgt = prevAdd; curBuild = prevB;
 }
+// =====================================================================
+//  2.6: THE WORLD TREE, a Studio island feature: { type: "worldtree", dir, dist, r: trunk size, h: height, isles: sky islands }.
+//  A tree so big its roots are hills. A path spirals up its trunk to the Crownring, a deck right round it under the canopy.
+//  From there branches lead out to decks, and rope bridges to islands floating in the sky, where the rarest trees grow.
+//  Once you've climbed it, the Rootlift takes you up and down, and the island's wind lets you glide down from anywhere high.
+// =====================================================================
+const WT_CYL = new THREE.CylinderGeometry(1, 1, 1, 16), WT_HALF = new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+const WT_SKY_NAMES = ["SKYROOT ISLE", "LANTERN ISLE", "WINDREST ISLE", "STARFALL ISLE", "MOSSCLOUD ISLE", "SUNSEED ISLE"];
+// the land round it: seven great roots running out like ridges, a low mound, and a flat ring right round the trunk
+function wtGround(q, x, z, h, P) {
+    const dx = x - q.x, dz = z - q.z, dm = Math.hypot(dx, dz), r = q.r;
+    if (dm > r * 9) return h;
+    const a = Math.atan2(dz, dx), along = Math.max(0, dm - r);
+    let root = 0;
+    for (const ak of q.roots) {
+        const side = Math.abs(angDiff(a, ak)) * Math.max(dm, 1), w = r * 0.42 * (1 + along / (r * 4)), hh = r * 0.62 * Math.exp(-along / (r * 2.2));
+        root = Math.max(root, hh * Math.exp(-(side * side) / (w * w)));
+    }
+    h = Math.max(h, P + r * 0.3 * Math.exp(-(along * along) / ((r * 3) ** 2)) + root);
+    return lerp(h, q.B, sstep(r + 11, r + 6.5, dm));
+}
+// where everything goes, and what you walk on
+function ciWorldTree(C, q) {
+    const r = q.r, B = q.B, top = B + q.h * 0.72, rp = r + 3.2;
+    const W = { q, x: q.x, z: q.z, r, B, Hd: top, Ht: B + q.h, rp, path: [], ring: [], branches: [], skies: [], bridges: [], lifts: [] };
+    const at = (a, rr) => [q.x + Math.cos(a) * rr, q.z + Math.sin(a) * rr];
+    const add = s => { C.solids.push(s); return s; };
+    const plank = (ax, az, ha, bx, bz, hb, w, t) => add({ kind: "plank", ax, az, bx, bz, ha, hb, w, t, x: (ax + bx) / 2, z: (az + bz) / 2, b: Math.hypot(bx - ax, bz - az) / 2 + w + 0.6 });
+    const rail = (ax, az, ha, bx, bz, hb) => plank(ax, az, ha + 1.15, bx, bz, hb + 1.15, 0.14, 1.3); // a handrail: too high to step over
+    add({ kind: "circle", x: q.x, z: q.z, r: r + 0.15, y0: B - 40, y1: W.Ht + 60, b: r + 0.2 }); // the trunk
+    // the path: up from the ground on the camp's side, 18 m higher each time round
+    const a0 = Math.atan2(-q.z, -q.x), turns = (top - B) / 18, segs = Math.max(8, Math.ceil(turns * 24)), da = (turns * Math.PI * 2) / segs, aEnd = a0 + turns * Math.PI * 2;
+    W.a0 = a0; W.aEnd = aEnd;
+    for (let i = 0; i < segs; i++) {
+        const a1 = a0 + i * da, a2 = a1 + da, h1 = B + 0.1 + (top - B - 0.1) * (i / segs), h2 = B + 0.1 + (top - B - 0.1) * ((i + 1) / segs);
+        const [x1, z1] = at(a1, rp), [x2, z2] = at(a2, rp);
+        plank(x1, z1, h1, x2, z2, h2, 2.05, 0.6);
+        if (i >= 2) { const [p1, s1] = at(a1, rp + 2.15), [p2, s2] = at(a2, rp + 2.15); rail(p1, s1, h1, p2, s2, h2); } // the first steps are low: no rail yet
+        W.path.push({ a1, a2, h1, h2 });
+    }
+    // the Crownring: a deck round the trunk at the top of the path. It's open where the path comes up through it,
+    // and its rail is open where the branches go out
+    const K = q.isles, bA = k => aEnd + Math.PI * 0.5 + (k * Math.PI * 2) / Math.max(1, K), RS = 40;
+    W.bA = bA;
+    for (let i = 0; i < RS; i++) {
+        const a1 = (i * Math.PI * 2) / RS, a2 = a1 + (Math.PI * 2) / RS, mid = (a1 + a2) / 2, d = angDiff(mid, aEnd);
+        const hole = d < 0.1 && d > -1.2; // the last stretch of the path, just before it arrives
+        if (!hole) { const [x1, z1] = at(a1, r + 4.5), [x2, z2] = at(a2, r + 4.5); plank(x1, z1, top, x2, z2, top, 4.6, 1.3); }
+        let gate = false; for (let k = 0; k < K; k++) if (Math.abs(angDiff(mid, bA(k))) < 0.13) gate = true;
+        if (!gate) { const [x1, z1] = at(a1, r + 9.05), [x2, z2] = at(a2, r + 9.05); rail(x1, z1, top, x2, z2, top); }
+        W.ring.push({ a1, a2, hole, gate });
+    }
+    // branches out to decks, and from each deck a rope bridge to an island floating in the sky
+    for (let k = 0; k < K; k++) {
+        const a = bA(k), Hk = top + 2.5 + Math.sin(k * 1.9) * 2, Db = r + 27, nx = -Math.sin(a), nz = Math.cos(a);
+        const [sx, sz] = at(a, r + 8.4), [ex, ez] = at(a, Db - 6.6), [dx, dz] = at(a, Db);
+        plank(sx, sz, top, ex, ez, Hk, 1.95, 0.7);
+        for (const s of [-1, 1]) rail(sx + nx * 2.05 * s + Math.cos(a) * 1.1, sz + nz * 2.05 * s + Math.sin(a) * 1.1, top, ex + nx * 2.05 * s, ez + nz * 2.05 * s, Hk);
+        add({ kind: "circle", x: dx, z: dz, r: 7.4, y0: Hk - 1.6, y1: Hk, b: 7.5 });
+        W.branches.push({ a, sx, sz, ex, ez, Hk, dx, dz, k });
+        const Rs = 15 + ((k * 5) % 8), as = a + (k % 2 ? 0.14 : -0.14), Hs = Hk - 3 + ((k * 7) % 10);
+        let Ds = Db + 7 + 17 + Rs, [cx, cz] = at(as, Ds);
+        for (let t = 0; t < 40 && Math.hypot(cx, cz) > C.shoreAt(cx, cz) - Rs - 14 && Ds > Db + 12 + Rs; t++) { Ds -= 3; [cx, cz] = at(as, Ds); } // it hangs over the land, so falling off lands you on the island
+        const ux = cx - dx, uz = cz - dz, L = Math.hypot(ux, uz) || 1, vx = ux / L, vz = uz / L;
+        const b1x = dx + vx * 6.6, b1z = dz + vz * 6.6, b2x = cx - vx * (Rs - 1.4), b2z = cz - vz * (Rs - 1.4);
+        plank(b1x, b1z, Hk, b2x, b2z, Hs, 1.5, 0.45);
+        const pt = t => [b1x + (b2x - b1x) * t, b1z + (b2z - b1z) * t, Hk + (Hs - Hk) * t];
+        for (const s of [-1, 1]) { const [p1, s1, h1] = pt(0.07), [p2, s2, h2] = pt(0.93); rail(p1 - vz * 1.6 * s, s1 + vx * 1.6 * s, h1, p2 - vz * 1.6 * s, s2 + vx * 1.6 * s, h2); }
+        add({ kind: "circle", x: cx, z: cz, r: Rs, y0: Hs - 3, y1: Hs, b: Rs });
+        W.skies.push({ x: cx, z: cz, r: Rs, y: Hs, name: WT_SKY_NAMES[k % WT_SKY_NAMES.length], k, falls: k % 2 === 0, vx, vz });
+        W.bridges.push({ ax: b1x, az: b1z, ha: Hk, bx: b2x, bz: b2z, hb: Hs, vx, vz });
+    }
+    // the Rootlift: a door at the bottom beside the path, and one on the Crownring on the far side of the trunk
+    const face = (x, z) => Math.atan2(-(x - q.x), -(z - q.z)); // looking out, away from the trunk
+    const [lx0, lz0] = at(a0 - 0.5, r + 2.2), [lx1, lz1] = at(aEnd + Math.PI, r + 2.2), [ox0, oz0] = at(a0 - 0.5, r + 4.2), [ox1, oz1] = at(aEnd + Math.PI, r + 4.2);
+    const L0 = { x: lx0, z: lz0, y: B, a: a0 - 0.5, up: true, to: { x: ox1, z: oz1, y: top, yaw: face(ox1, oz1), up: true } };
+    const L1 = { x: lx1, z: lz1, y: top, a: aEnd + Math.PI, up: false, to: { x: ox0, z: oz0, y: B, yaw: face(ox0, oz0), up: false } };
+    W.lifts = [L0, L1];
+    for (const s of W.skies) C.LM.push({ name: s.name, x: s.x, z: s.z, r: 3, col: "#9fe8ff" });
+    C.WT = W; C.glide = true;
+    // trees grow on the sky islands too (about one in eight)
+    const land0 = C.landSpot;
+    C.landSpot = () => {
+        if (W.skies.length && Math.random() < 0.13) { const s = W.skies[Math.floor(Math.random() * W.skies.length)], a = Math.random() * 6.283, rr = Math.sqrt(Math.random()) * (s.r - 4.5); return { x: s.x + Math.cos(a) * rr, z: s.z + Math.sin(a) * rr, y: s.y }; }
+        return land0();
+    };
+    return W;
+}
+// a beam from one point to another (for batch): returns [x, y, z, rx, ry, rz, length]
+const wtQ = new THREE.Quaternion(), wtE = new THREE.Euler(), wtUp = new THREE.Vector3(0, 1, 0), wtD = new THREE.Vector3();
+function beamPose(x1, y1, z1, x2, y2, z2) {
+    wtD.set(x2 - x1, y2 - y1, z2 - z1); const L = wtD.length() || 1; wtD.divideScalar(L);
+    wtQ.setFromUnitVectors(wtUp, wtD); wtE.setFromQuaternion(wtQ);
+    return [(x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2, wtE.x, wtE.y, wtE.z, L];
+}
+const wtBeam = (bt, geo, x1, y1, z1, x2, y2, z2, rad) => { const [x, y, z, rx, ry, rz, L] = beamPose(x1, y1, z1, x2, y2, z2); bt.add(geo, x, y, z, rx, ry, rz, rad, L, rad); };
+// a flat box lying from one point to another (a plank): w wide, t thick, its top on the line
+function wtPlank(bt, x1, y1, z1, x2, y2, z2, w, t) {
+    const dx = x2 - x1, dz = z2 - z1, L = Math.hypot(dx, dz) || 1, yaw = Math.atan2(-dz, dx), pitch = Math.atan2(y2 - y1, L);
+    bt.add(BOX, (x1 + x2) / 2, (y1 + y2) / 2 - t / 2, (z1 + z2) / 2, 0, yaw, pitch, Math.hypot(L, y2 - y1) + 0.2, t, w);
+}
+function buildWorldTree(C, q) {
+    const W = q.wt, r = W.r, B = W.B, top = W.Hd, cols = C.cols;
+    const bark = lamb(0x4a3424), wood = lamb(0x8a6440), wood2 = lamb(0x5a3e28), moss = lamb(0x3f7a34), rock = lamb(cols.rock), grass = lamb(cols.grass), dirt = lamb(0x5a4632);
+    const sapM = glowM(0x8affd0), fruitM = glowM(0xffd86a), lampM = glowM(0xffe6a0);
+    const at = (a, rr) => [W.x + Math.cos(a) * rr, W.z + Math.sin(a) * rr], at3 = (a, rr, y) => { const [x, z] = at(a, rr); return [x, y, z]; };
+    // ----- the trunk: ridged bark, a little wider at the bottom, narrowing up into the canopy -----
+    {
+        const H = W.Ht - B + 8, g = new THREE.CylinderGeometry(1, 1, H, 36, 30, true), p = g.attributes.position;
+        for (let i = 0; i < p.count; i++) {
+            const x = p.getX(i), y = p.getY(i) + H / 2 - 4, z = p.getZ(i), a = Math.atan2(z, x), hy = y + B;
+            let k = r * (1 + 0.06 * Math.exp(-Math.max(0, y) / 5));
+            if (hy > top) k *= lerp(1, 0.5, clamp((hy - top) / (W.Ht - top), 0, 1));
+            k += Math.sin(a * 13 + y * 0.045) * 0.5 + Math.sin(a * 5 - y * 0.021) * 0.3;
+            p.setXYZ(i, Math.cos(a) * k, hy, Math.sin(a) * k);
+        }
+        g.computeVertexNormals();
+        const m = new THREE.Mesh(g, bark); m.position.set(W.x, 0, W.z); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+        // glowing sap veins spiralling up the bark, and moss
+        const sap = batch(sapM), ms = batch(moss);
+        for (let v = 0; v < 7; v++) for (let y = B + 1.5; y < W.Ht - 8; y += 2.4) { const a = v * 0.8976 + (y - B) * 0.022 + Math.sin(y * 0.11 + v) * 0.12, kk = r * (y > top ? lerp(1, 0.5, (y - top) / (W.Ht - top)) : 1) + 0.25; sap.add(BOX, W.x + Math.cos(a) * kk, y, W.z + Math.sin(a) * kk, 0, -a, 0, 0.3, 2.3, 0.5); }
+        for (let i = 0; i < 46; i++) { const a = srand() * 6.283, y = B + srange(0, top - B + 10), kk = r * (y > top ? lerp(1, 0.5, (y - top) / (W.Ht - top)) : 1) + 0.2; ms.add(ICO, W.x + Math.cos(a) * kk, y, W.z + Math.sin(a) * kk, 0, -a, 0, srange(0.6, 1.2), srange(1.4, 3.4), srange(1.4, 3)); }
+        sap.build(); ms.build();
+    }
+    // ----- the roots: great bark tubes running out along the ridges in the land -----
+    {
+        const rb = batch(bark);
+        for (const ak of q.roots) {
+            let px = null;
+            for (let j = 0; j <= 9; j++) {
+                const along = r + 6.5 + j * r * 0.6, [x, z] = at(ak + Math.sin(j * 0.7 + ak) * 0.05, along), rad = Math.max(1.2, r * 0.34 * Math.exp(-(j * r * 0.6) / (r * 3.4))), y = C.terrain(x, z) - rad * 0.35;
+                if (px) wtBeam(rb, CYL8, px[0], px[1], px[2], x, y, z, rad);
+                rb.add(ICO, x, y, z, srand(), srand(), 0, rad * 1.05);
+                px = [x, y, z];
+            }
+        }
+        // a collar of knotted bark right round the bottom of the trunk
+        for (let i = 0; i < 26; i++) { const a = (i / 26) * 6.283, [x, z] = at(a, r + 0.4); rb.add(ICO, x, B + 0.2, z, srand(), srand(), 0, srange(1.2, 2), srange(0.8, 1.4), srange(1.2, 2)); }
+        rb.build();
+    }
+    // ----- the path round the trunk: planks, posts and rails, lanterns, and brackets into the bark -----
+    {
+        const pl = batch(wood), rl = batch(wood2), lp = batch(lampM);
+        W.path.forEach((s, i) => {
+            const [x1, z1] = at(s.a1, W.rp), [x2, z2] = at(s.a2, W.rp);
+            wtPlank(pl, x1, s.h1, z1, x2, s.h2, z2, 4.1, 0.35);
+            if (i >= 2) {
+                const [p1, q1] = at(s.a1, W.rp + 2.15), [p2, q2] = at(s.a2, W.rp + 2.15);
+                rl.add(CYL6, p1, s.h1 + 0.6, q1, 0, 0, 0, 0.09, 1.2, 0.09);
+                wtBeam(rl, CYL6, p1, s.h1 + 1.15, q1, p2, s.h2 + 1.15, q2, 0.07);
+                if (i % 3 === 0) { lp.add(SPH, p1, s.h1 + 1.45, q1, 0, 0, 0, 0.2); rl.add(CYL6, p1, s.h1 + 1.62, q1, 0, 0, 0, 0.16, 0.08, 0.16); }
+            }
+            if (i % 2 === 0) { const [b1, c1] = at(s.a1, r - 0.3), [b2, c2] = at(s.a1, W.rp + 1.3); wtBeam(rl, CYL6, b1, s.h1 - 2.4, c1, b2, s.h1 - 0.3, c2, 0.2); }
+        });
+        // the Crownring's deck, its rail, and a glowing trim right round it
+        for (const s of W.ring) {
+            const [x1, z1] = at(s.a1, r + 4.5), [x2, z2] = at(s.a2, r + 4.5);
+            if (!s.hole) wtPlank(pl, x1, top, z1, x2, top, z2, 9.3, 0.5);
+            const [p1, q1] = at(s.a1, r + 9.05), [p2, q2] = at(s.a2, r + 9.05);
+            if (!s.gate) { rl.add(CYL6, p1, top + 0.6, q1, 0, 0, 0, 0.1, 1.2, 0.1); wtBeam(rl, CYL6, p1, top + 1.15, q1, p2, top + 1.15, q2, 0.08); }
+            if (!s.gate && Math.round(s.a1 * 10) % 3 === 0) lp.add(SPH, p1, top + 1.45, q1, 0, 0, 0, 0.24);
+        }
+        pl.build(); rl.build(); lp.build();
+        const trim = new THREE.Mesh(new THREE.TorusGeometry(r + 9.25, 0.16, 6, 96), sapM); trim.rotation.x = Math.PI / 2; trim.position.set(W.x, top - 0.45, W.z); scene.add(trim);
+    }
+    // ----- branches, decks, rope bridges and the sky islands -----
+    {
+        const br = batch(bark), pl = batch(wood), rl = batch(wood2), rp = batch(lamb(0xc8b07a)), lp = batch(lampM), dk = batch(wood);
+        const top2 = batch(grass), side = batch(dirt), under = batch(rock), hang = batch(bark), tips = batch(sapM), bush = batch(lamb(cols.bush)), shroom = batch(glowM(C.coverCol.glowshroom));
+        for (const b of W.branches) {
+            wtBeam(br, CYL8, ...at3(b.a, r - 1.5, top - 3.2), b.dx, b.Hk - 2.4, b.dz, 2.9);
+            wtPlank(pl, b.sx, top, b.sz, b.ex, b.Hk, b.ez, 4, 0.4);
+            const nx = -Math.sin(b.a), nz = Math.cos(b.a);
+            for (const s of [-1, 1]) for (let t = 0; t <= 4; t++) {
+                const u = t / 4, x = lerp(b.sx + Math.cos(b.a) * 1.1, b.ex, u) + nx * 2.05 * s, z = lerp(b.sz + Math.sin(b.a) * 1.1, b.ez, u) + nz * 2.05 * s, y = lerp(top, b.Hk, u);
+                rl.add(CYL6, x, y + 0.6, z, 0, 0, 0, 0.1, 1.2, 0.1);
+                if (t < 4) { const u2 = (t + 1) / 4; wtBeam(rl, CYL6, x, y + 1.15, z, lerp(b.sx + Math.cos(b.a) * 1.1, b.ex, u2) + nx * 2.05 * s, lerp(top, b.Hk, u2) + 1.15, lerp(b.sz + Math.sin(b.a) * 1.1, b.ez, u2) + nz * 2.05 * s, 0.08); }
+            }
+            dk.add(WT_CYL, b.dx, b.Hk - 0.6, b.dz, 0, 0, 0, 7.4, 1.2, 7.4);
+            br.add(ICO, b.dx, b.Hk - 2.6, b.dz, 0, 0, 0, 4.2, 2.6, 4.2);
+            lp.add(SPH, b.dx + nx * 5.5, b.Hk + 2.6, b.dz + nz * 5.5, 0, 0, 0, 0.32); rl.add(CYL6, b.dx + nx * 5.5, b.Hk + 1.2, b.dz + nz * 5.5, 0, 0, 0, 0.1, 2.4, 0.1);
+        }
+        for (const bd of W.bridges) {
+            const L = Math.hypot(bd.bx - bd.ax, bd.bz - bd.az), n = Math.ceil(L / 0.9), px = -bd.vz, pz = bd.vx;
+            for (let i = 0; i <= n; i++) { const u = i / n, x = lerp(bd.ax, bd.bx, u), z = lerp(bd.az, bd.bz, u), y = lerp(bd.ha, bd.hb, u); pl.add(BOX, x, y - 0.12, z, 0, Math.atan2(-bd.vz, bd.vx) + Math.PI / 2, 0, 3.0, 0.16, 0.55); }
+            for (const s of [-1, 1]) {
+                const x1 = bd.ax + px * 1.6 * s, z1 = bd.az + pz * 1.6 * s, x2 = bd.bx + px * 1.6 * s, z2 = bd.bz + pz * 1.6 * s;
+                wtBeam(rp, CYL6, x1, bd.ha + 1.15, z1, x2, bd.hb + 1.15, z2, 0.06); wtBeam(rp, CYL6, x1, bd.ha + 0.5, z1, x2, bd.hb + 0.5, z2, 0.045);
+                for (let i = 0; i <= Math.ceil(L / 3); i++) { const u = i / Math.ceil(L / 3); rl.add(CYL6, lerp(x1, x2, u), lerp(bd.ha, bd.hb, u) + 0.58, lerp(z1, z2, u), 0, 0, 0, 0.07, 1.16, 0.07); }
+            }
+        }
+        for (const s of W.skies) {
+            const R = s.r;
+            top2.add(WT_CYL, s.x, s.y - 0.3, s.z, 0, 0, 0, R, 0.6, R);
+            side.add(WT_CYL, s.x, s.y - 2.2, s.z, 0, 0, 0, R * 0.97, 3.2, R * 0.97);
+            under.add(CONE6, s.x, s.y - 3.8 - R * 0.85, s.z, Math.PI, srand(), 0, R * 0.96, R * 1.7, R * 0.96);
+            for (let i = 0; i < 9; i++) { const a = srand() * 6.283, rr = srange(R * 0.4, R * 0.85); under.add(ICO, s.x + Math.cos(a) * rr, s.y - srange(4, 9), s.z + Math.sin(a) * rr, srand() * 3, srand() * 3, 0, srange(2, 4.5), srange(2.5, 6), srange(2, 4.5)); }
+            for (let i = 0; i < 12; i++) { const a = srand() * 6.283, rr = R * srange(0.55, 0.92), len = srange(4, 13), x = s.x + Math.cos(a) * rr, z = s.z + Math.sin(a) * rr; hang.add(CYL6, x, s.y - 3.5 - len / 2, z, srand() * 0.2, 0, srand() * 0.2, 0.18, len, 0.18); tips.add(SPH, x, s.y - 3.6 - len, z, 0, 0, 0, 0.3); }
+            for (let i = 0; i < 10; i++) { const a = srand() * 6.283, rr = Math.sqrt(srand()) * (R - 3); bush.add(SPH, s.x + Math.cos(a) * rr, s.y + 0.4, s.z + Math.sin(a) * rr, 0, 0, 0, srange(0.6, 1.3)); }
+            for (let i = 0; i < 8; i++) { const a = srand() * 6.283, rr = Math.sqrt(srand()) * (R - 3), x = s.x + Math.cos(a) * rr, z = s.z + Math.sin(a) * rr; shroom.add(CYL6, x, s.y + 0.3, z, 0, 0, 0, 0.12, 0.6, 0.12); shroom.add(WT_HALF, x, s.y + 0.6, z, 0, 0, 0, 0.45, 0.32, 0.45); }
+            for (let i = 0; i < 5; i++) { const a = srand() * 6.283, rr = Math.sqrt(srand()) * (R - 4); under.add(ICO, s.x + Math.cos(a) * rr, s.y + 0.35, s.z + Math.sin(a) * rr, srand() * 3, srand() * 3, 0, srange(0.5, 1.1), srange(0.4, 0.8), srange(0.5, 1.1)); }
+            const lb = label(s.name, "#9fe8ff", 3, 0.75); lb.position.set(s.x, s.y + 8, s.z); lb.maxD = 120; lb.blurK = 0.5;
+            // a chest on every sky island (a cursed one on every other)
+            const a = srand() * 6.283, rr = (R - 5) * Math.sqrt(srand()), c = makeChest(s.x + Math.cos(a) * rr, s.z + Math.sin(a) * rr, srand() * 6, s.k % 2 === 1);
+            c.g.position.y = s.y; c.beacon.position.y = s.y + 2.7; c.y = s.y;
+        }
+        for (const b of [br, pl, rl, rp, lp, dk, top2, side, under, hang, tips, bush, shroom]) b.build();
+        // waterfalls pouring off the edge of some of the sky islands, all the way down to a pool
+        W.falls = [];
+        for (const s of W.skies) if (s.falls) {
+            const fx = s.x + s.vx * (s.r - 0.6), fz = s.z + s.vz * (s.r - 0.6), gy = C.terrain(fx + s.vx * 2, fz + s.vz * 2), H = s.y - gy;
+            const m = new THREE.Mesh(new THREE.PlaneGeometry(3.4, H), new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }));
+            m.position.set(fx + s.vx * 0.6, gy + H / 2, fz + s.vz * 0.6); m.rotation.y = Math.atan2(s.vx, s.vz) + Math.PI / 2; scene.add(m);
+            const st = new THREE.Mesh(BOX, glowM(0x8ae8ff)); st.scale.set(1.6, 0.12, s.r * 0.7); st.position.set(s.x + s.vx * s.r * 0.6, s.y + 0.08, s.z + s.vz * s.r * 0.6); st.rotation.y = Math.atan2(s.vx, s.vz); scene.add(st);
+            const pool = new THREE.Mesh(new THREE.CircleGeometry(6, 24), new THREE.MeshLambertMaterial({ color: cols.shallow, emissive: 0x0a2a3a, transparent: true, opacity: 0.85 })); pool.rotation.x = -Math.PI / 2; pool.position.set(fx + s.vx * 1.5, gy + 0.18, fz + s.vz * 1.5); scene.add(pool);
+            W.falls.push(m);
+        }
+    }
+    // ----- the canopy: great clouds of leaves up above the Crownring, limbs reaching into them, and glowing fruit -----
+    {
+        const leafCols = [0x3f8f3a, 0x2f7a34, 0x5aa84a, 0xc8b84a], lb = leafCols.map(c => batch(lamb(c))), limbs = batch(bark), fr = batch(fruitM), geo = new THREE.IcosahedronGeometry(1, 2);
+        for (let i = 0; i < 24; i++) {
+            const a = srand() * 6.283, rho = i < 3 ? srange(0, r) : srange(r * 1.2, r * 4.3), y = top + 22 + srange(0, 28) + (i < 3 ? 14 : 0), s = srange(13, 23), x = W.x + Math.cos(a) * rho, z = W.z + Math.sin(a) * rho;
+            lb[i % 7 === 3 ? 3 : i % 3].add(geo, x, y, z, srand(), srand(), 0, s, s * 0.6, s);
+            if (rho > r * 1.5) wtBeam(limbs, CYL8, W.x + Math.cos(a) * r * 0.6, top + 10 + srange(0, 12), W.z + Math.sin(a) * r * 0.6, x, y - s * 0.3, z, srange(1.4, 2.4));
+        }
+        for (let i = 0; i < 40; i++) { const a = srand() * 6.283, rho = srange(r + 12, r * 4), x = W.x + Math.cos(a) * rho, z = W.z + Math.sin(a) * rho, y = top + srange(13, 21); fr.add(SPH, x, y, z, 0, 0, 0, srange(0.6, 1.25)); limbs.add(CYL6, x, y + 1.6, z, 0, 0, 0, 0.06, 2.4, 0.06); }
+        for (const b of [...lb, limbs, fr]) b.build();
+    }
+    // ----- the Rootlift's two glowing doors -----
+    W.doors = [];
+    for (const L of W.lifts) {
+        const [x, z] = at(L.a, r + 0.1), rot = Math.PI / 2 - L.a;
+        const arch = new THREE.Mesh(new THREE.TorusGeometry(2.3, 0.3, 8, 22, Math.PI), sapM); arch.position.set(x, L.y + 2.4, z); arch.rotation.y = rot; scene.add(arch);
+        const door = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 4.6), new THREE.MeshBasicMaterial({ color: 0x8affd0, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }));
+        door.position.set(x + Math.cos(L.a) * 0.05, L.y + 2.3, z + Math.sin(L.a) * 0.05); door.rotation.y = rot; scene.add(door); W.doors.push(door);
+        const lb = label("THE ROOTLIFT", "#8affd0", 2.6, 0.62); lb.position.set(x + Math.cos(L.a) * 1.5, L.y + 5.6, z + Math.sin(L.a) * 1.5); lb.maxD = 70;
+    }
+    { const [x, z] = at(W.aEnd + 0.4, r + 6); const lb = label("THE CROWNRING", "#c8ff9a", 3, 0.75); lb.position.set(x, top + 5, z); lb.maxD = 160; }
+    // ----- warm light on the Crownring, and falling leaves -----
+    { const L = new THREE.PointLight(0xffd890, 26, 46, 1.6); L.position.set(...at3(W.aEnd + 1, r + 5, top + 4)); scene.add(L);
+    }
+    const N = 320, lp = new Float32Array(N * 3); W.leafV = [];
+    for (let i = 0; i < N; i++) { const a = Math.random() * 6.283, rho = Math.sqrt(Math.random()) * r * 6; lp[i * 3] = W.x + Math.cos(a) * rho; lp[i * 3 + 1] = B + Math.random() * (top + 40 - B); lp[i * 3 + 2] = W.z + Math.sin(a) * rho; W.leafV.push(srange(1.1, 2.3), srand() * 6.283); }
+    const lg = new THREE.BufferGeometry(); lg.setAttribute("position", new THREE.BufferAttribute(lp, 3));
+    W.leaves = new THREE.Points(lg, new THREE.PointsMaterial({ color: 0xb8ff7a, size: 0.6, transparent: true, opacity: 0.9, depthWrite: false })); W.leaves.frustumCulled = false; scene.add(W.leaves);
+}
+// every frame on the island: leaves drift down, the doors and sap pulse, and your first climb to the top wakes the Rootlift
+function updateWorldTree(C, dt) {
+    const W = C.WT; if (!W || !W.leaves) return;
+    const p = W.leaves.geometry.attributes.position, a = p.array, t = time;
+    for (let i = 0; i < a.length / 3; i++) {
+        const v = W.leafV[i * 2], ph = W.leafV[i * 2 + 1];
+        a[i * 3] += Math.sin(t * 0.9 + ph) * 0.7 * dt; a[i * 3 + 2] += Math.cos(t * 0.7 + ph) * 0.7 * dt; a[i * 3 + 1] -= v * dt;
+        if (a[i * 3 + 1] < W.B - 1) a[i * 3 + 1] = W.Hd + 40;
+    }
+    p.needsUpdate = true;
+    const pulse = 0.4 + Math.sin(t * 2.2) * 0.15;
+    for (const d of W.doors) d.material.opacity = pulse;
+    for (const f of W.falls) f.material.opacity = 0.42 + Math.sin(t * 7 + f.position.x) * 0.06;
+    if (!save.rootClimbed && state === "playing" && player.pos.y - 1.7 > W.Hd - 0.7 && Math.hypot(player.pos.x - W.x, player.pos.z - W.z) < W.r + 10) {
+        save.rootClimbed = 1; writeSave(); flash = 0.7;
+        toast("★ You climbed the Worldroot! The Rootlift is awake: press F at its glowing doors to ride up and down. And up here the wind will carry you: jump off and glide.", "rare");
+        sfx(523, 0.2, "triangle", 0.1, 1.5); setTimeout(() => sfx(659, 0.2, "triangle", 0.1, 1.5), 150); setTimeout(() => sfx(784, 0.3, "triangle", 0.1, 1.5), 300); setTimeout(() => sfx(1046, 0.5, "triangle", 0.1, 1.5), 460);
+    }
+}
+function rootLift(L) {
+    if (!save.rootClimbed) { toast("The Rootlift is asleep. Climb the Worldroot once, all the way up to the Crownring, to wake it.", "bad"); sfx(160, 0.2, "sine", 0.06, 0.7); return; }
+    const to = L.to;
+    sfx(260, 0.6, "sine", 0.08, 2.4);
+    fadeTo(() => { player.pos.set(to.x, to.y + 1.75, to.z); player.vel.set(0, 0, 0); player.yaw = to.yaw; player.pitch = 0; flash = 0.4; toast(to.up ? "⇧ The sap carries you up to the Crownring." : "⇩ The sap carries you down to the roots.", "good"); });
+}
+// 2.6: where there's a world tree, the wind catches you: fall from high up and you glide down on a giant leaf.
+// W goes faster, S dives. Land, and the leaf folds away
+let gliding = false, glideLeaf = null;
+function glideTick(dt) {
+    const C = CI();
+    if (!C || !C.glide || flying || ride || boating() || state !== "playing") { if (gliding) glideSet(false); return; }
+    const feet = player.pos.y - 1.7, above = feet - structGround(player.pos.x, player.pos.z, feet);
+    if (!gliding) { if (player.vel.y < -7 && above > 7) glideSet(true); else return; }
+    if (above < 0.9) { glideSet(false); return; }
+    player.vel.y = Math.max(player.vel.y, keys.KeyS ? -10 : -2.3);
+    const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), sp = keys.KeyW ? 15 : 10;
+    player.vel.x += (fx * sp - player.vel.x) * Math.min(1, 3 * dt); player.vel.z += (fz * sp - player.vel.z) * Math.min(1, 3 * dt);
+    if (glideLeaf) glideLeaf.rotation.z = Math.sin(time * 3) * 0.06;
+}
+function glideSet(on) {
+    gliding = on;
+    if (on && !glideLeaf) { // a big leaf held over your head
+        glideLeaf = new THREE.Group();
+        const leaf = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 8), new THREE.MeshLambertMaterial({ color: 0x5aa84a, side: THREE.DoubleSide })); leaf.scale.set(1.5, 0.06, 0.9);
+        const rib = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: 0x3a6a2a })); rib.scale.set(2.8, 0.05, 0.06); rib.position.y = 0.03;
+        glideLeaf.add(leaf, rib); glideLeaf.position.set(0, 0.6, -1.15); glideLeaf.rotation.x = 0.55; glideLeaf.scale.set(0.62, 1, 0.66); viewScene.add(glideLeaf);
+    }
+    if (glideLeaf) glideLeaf.visible = on;
+    if (on) { fovKick = 2; sfx(140, 0.8, "sine", 0.05, 0.5); if (!save.glideTold) { save.glideTold = 1; toast("🍃 The wind catches a giant leaf for you! You're gliding: W to go faster, S to dive.", "rare"); } }
+}
+// the map: the trunk, the Crownring, the branches, the bridges and the sky islands
+function drawMapWT(g, W, X, Z, sc) {
+    g.strokeStyle = "#c89a5a"; g.lineWidth = 3;
+    for (const b of W.branches) { g.beginPath(); g.moveTo(X(b.sx), Z(b.sz)); g.lineTo(X(b.dx), Z(b.dz)); g.stroke(); }
+    for (const b of W.bridges) { g.beginPath(); g.moveTo(X(b.ax), Z(b.az)); g.lineTo(X(b.bx), Z(b.bz)); g.stroke(); }
+    g.fillStyle = "rgba(90,168,74,.85)"; g.strokeStyle = "#9fe8ff"; g.lineWidth = 2;
+    for (const s of W.skies) { g.beginPath(); g.arc(X(s.x), Z(s.z), s.r * sc, 0, 7); g.fill(); g.stroke(); }
+    g.strokeStyle = "rgba(200,255,154,.9)"; g.lineWidth = Math.max(2, 9 * sc); g.beginPath(); g.arc(X(W.x), Z(W.z), (W.r + 4.5) * sc, 0, 7); g.stroke();
+    g.fillStyle = "#4a3424"; g.beginPath(); g.arc(X(W.x), Z(W.z), W.r * sc, 0, 7); g.fill();
+}
 function enterCI(C) {
     leaveWorld();
     if (!C.built) { buildCI(C); snapWorld(C.n); } else loadWorld(C.n);
@@ -14150,6 +14480,7 @@ function updateCustomIsles(dt) {
     if (C.fireLight) C.fireLight.intensity = 16 + Math.sin(time * 13) * 3 + Math.sin(time * 7.3) * 2;
     for (const [b, ph] of [[C.boatArr, 0], [C.boatNext, 1.3]]) if (b) { b.position.y = -0.15 + Math.sin(time * 1.1 + ph) * 0.07; b.rotation.z = Math.sin(time * 0.9 + ph) * 0.03; }
     if (C.man) C.man.position.y = 0.3 + Math.sin(time * 1.2) * 0.02;
+    if (C.WT) updateWorldTree(C, dt);
 }
 // ---- a Studio island's own look for the menus and the HUD while you're on it (d.ui): colours, a heading font, rounder or squarer corners ----
 const ISLE_FONTS = ["Segoe UI", "Georgia", "Palatino Linotype", "Book Antiqua", "Trebuchet MS", "Consolas", "Courier New", "Impact", "Segoe Script", "Gabriola", "Comic Sans MS"];
@@ -14281,6 +14612,7 @@ function drawMapC(C) {
     g.font = "bold 11px Consolas"; g.textAlign = "center"; g.lineWidth = 3; g.strokeStyle = "#000";
     for (const lm of C.LM) { g.fillStyle = lm.col; g.strokeText(lm.name, X(lm.x), Z(lm.z) - 6); g.fillText(lm.name, X(lm.x), Z(lm.z) - 6); }
     g.strokeStyle = "#c89a5a"; g.lineWidth = 4; for (const b of C.bridges) { g.beginPath(); g.moveTo(X(b.ax), Z(b.az)); g.lineTo(X(b.bx), Z(b.bz)); g.stroke(); } // bridges
+    if (C.WT) drawMapWT(g, C.WT, X, Z, sc);
     for (const [D, txt, colr] of [[C.ARR, "ARRIVALS", "#bfe8ff"], [C.NEXT, `REBIRTH ${C.n} FERRY`, "#ffd890"]]) { const e = D.pt(D.LEN); g.strokeStyle = colr; g.lineWidth = 4; g.beginPath(); g.moveTo(X(D.B.x), Z(D.B.z)); g.lineTo(X(e.x), Z(e.z)); g.stroke(); g.fillStyle = colr; g.strokeStyle = "#000"; g.lineWidth = 3; g.strokeText(txt, X(e.x), Z(e.z) + 14); g.fillText(txt, X(e.x), Z(e.z) + 14); }
     for (const ch of chests) if (!ch.opened) { g.fillStyle = ch.special ? "#c8a0ff" : "#ffd040"; g.fillRect(X(ch.x) - 4, Z(ch.z) - 4, 8, 8); }
     for (const t of trees) { if (t.gone || t.dying || t.boss) continue; g.fillStyle = t.mut ? mutCol(t.mut) : t.type.rare ? t.type.col : "rgba(40,60,40,.9)"; g.beginPath(); g.arc(X(t.x), Z(t.z), 2.5, 0, 7); g.fill(); }
@@ -14448,7 +14780,8 @@ save.rebirths = Math.max(save.rebirths || 0, (save.isle || 1) - 1);
 const el = { hp: $("hpFill"), hpTxt: $("hpTxt"), cash: $("cash"), logs: $("logsN"), zone: $("zone"), prompt: $("prompt"), fps: $("fps"), hot: $("hotbar"), hud: $("hud"), clock: $("clock"), contract: $("contract") };
 let hudT = 0, frames = 0, fpsT = 0, lastCash = -1;
 const PROMPTS = {
-    ...PROMPTS5, ferry6: () => "[F] Talk to the Ferryman", ferryC: () => "[F] Talk to the Ferryman", placed: n => placedPrompt(n.o),
+    ...PROMPTS5, miFerry: () => "[F] Talk to the Ferryman", rootlift: n => (save.rootClimbed ? (n.L.up ? "[F] Ride the Rootlift up to the Crownring" : "[F] Ride the Rootlift down to the roots") : "The Rootlift is asleep: climb the Worldroot to wake it"),
+    ferry6: () => "[F] Talk to the Ferryman", ferryC: () => "[F] Talk to the Ferryman", placed: n => placedPrompt(n.o),
     shop: () => "[F] Talk to the Reaper", ench: () => "[F] Use the Enchanting Table", market: () => "[F] Psst... Sly's Black Market", casino: () => `[F] Enter ${casino && casino.name ? casino.name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : "the Casino"}`, ...CS_PROMPTS, bed: () => (isNight() ? "[F] Sleep until dawn" : "Too bright to sleep. Come back at night"),
     chute: () => (save.logs ? `[F] Send ${save.logs} logs down the chute` : "Bring logs here, then [F]"),
     ferry: () => "[F] Talk to the Ferryman", ferry2: () => "[F] Talk to the Ferryman", relic: n => `[F] Take the Hypergamous Relic (Piece ${n.r.i + 1})`, vein: n => `[F] Mine the ${MATS[n.v.k].name} vein`, smith: () => "[F] Use the Forge",
@@ -14672,6 +15005,76 @@ function defineCustomProp(d) {
 function dropCustomProp(k) { if (/^u_/.test(String(k))) delete PROPS[k]; }
 for (const d of Array.isArray(CONTENT_PROPS) ? CONTENT_PROPS : []) defineCustomProp(d);
 
+// ---- walk structures (2.6): things you stand on and bump into that aren't the ground: My Island's builds, and the Studio
+// islands' climbable features (the world tree's path, decks, bridges and sky islands). Each solid is one of
+//   circle { x, z, r, y0, y1 }      box / foot { x, z, cs, sn, parts: [[cx, cz, hx, hz]], y0, y1, ramp? } (in its own turned frame)
+//   ring { x, z, ri, ro, y0, y1 }   plank { ax, az, bx, bz, ha, hb, w, t }: a walkway from a to b, its top sloping from ha to hb, t thick
+// and b says how far it reaches from (x, z), so most are skipped at a glance
+const WALK_STEP = 0.55; // as high as you step up without jumping
+const miRampY = (S, lz) => S.y0 + (S.y1 - S.y0) * clamp((S.lz1 - lz) / (S.lz1 - S.lz0), 0, 1); // a ramp is highest at its back
+function plankAt(S, x, z) { // how far along a plank a point is (u: 0 at a, 1 at b), how far off its middle line, and its top there
+    const ux = S.bx - S.ax, uz = S.bz - S.az, L2 = ux * ux + uz * uz || 1, u = ((x - S.ax) * ux + (z - S.az) * uz) / L2, cu = clamp(u, 0, 1);
+    return { u, side: Math.hypot(S.ax + ux * cu - x, S.az + uz * cu - z), top: S.ha + (S.hb - S.ha) * cu };
+}
+// the top of a solid at a point, or null when the point isn't over it (pad widens it a little)
+function solTop(S, dx, dz, pad) {
+    if (S.kind === "circle") return dx * dx + dz * dz < (S.r + pad) ** 2 ? S.y1 : null;
+    if (S.kind === "ring") { const d = Math.hypot(dx, dz); return d > S.ri - pad && d < S.ro + pad ? S.y1 : null; }
+    if (S.kind === "plank") { const P = plankAt(S, S.x + dx, S.z + dz); return P.side < S.w + pad && P.u > -0.03 && P.u < 1.03 ? P.top : null; }
+    const lx = dx * S.cs - dz * S.sn, lz = dx * S.sn + dz * S.cs;
+    for (const [cx, cz, hx, hz] of S.parts) if (Math.abs(lx - cx) < hx + pad && Math.abs(lz - cz) < hz + pad) return S.ramp ? miRampY(S, lz) : S.y1;
+    return null;
+}
+// the ground under something at height `feet`: the land (base), or the top of a solid it's on or can step up onto
+function solGround(list, x, z, feet, base) {
+    let g = base;
+    for (const S of list) {
+        const dx = x - S.x, dz = z - S.z; if (Math.abs(dx) > S.b + 0.2 || Math.abs(dz) > S.b + 0.2) continue;
+        const top = solTop(S, dx, dz, 0.15);
+        if (top !== null && top > g && top <= feet + WALK_STEP) g = top;
+    }
+    return g;
+}
+// solids push you back, unless you can step up onto them or they're over your head
+function solClamp(list, p) {
+    const feet = p.y - 1.7, R = 0.38;
+    for (const S of list) {
+        const dx = p.x - S.x, dz = p.z - S.z; if (Math.abs(dx) > S.b + R || Math.abs(dz) > S.b + R) continue;
+        if (S.kind === "plank") { // off its nearer side
+            const P = plankAt(S, p.x, p.z);
+            if (P.top <= feet + WALK_STEP || P.top - S.t > feet + 1.75 || P.u < -0.02 || P.u > 1.02 || P.side >= S.w + R) continue;
+            const ux = S.bx - S.ax, uz = S.bz - S.az, L = Math.hypot(ux, uz) || 1, nx = -uz / L, nz = ux / L, s = (p.x - S.ax) * nx + (p.z - S.az) * nz, k = (S.w + R) * Math.sign(s || 1) - s;
+            p.x += nx * k; p.z += nz * k; continue;
+        }
+        if (S.y0 > feet + 1.75 || S.y1 <= feet + WALK_STEP) continue;
+        if (S.kind === "circle") { const dd = Math.hypot(dx, dz), m = S.r + R; if (dd < m && dd > 1e-4) { p.x = S.x + dx / dd * m; p.z = S.z + dz / dd * m; } continue; }
+        if (S.kind === "ring") { const dd = Math.hypot(dx, dz) || 1e-4; if (dd > S.ri - R && dd < S.ro + R) { const m = dd - (S.ri - R) < S.ro + R - dd ? S.ri - R : S.ro + R; p.x = S.x + dx / dd * m; p.z = S.z + dz / dd * m; } continue; }
+        let lx = dx * S.cs - dz * S.sn, lz = dx * S.sn + dz * S.cs, moved = false;
+        for (const [cx, cz, hx, hz] of S.parts) {
+            const ex = hx + R - Math.abs(lx - cx), ez = hz + R - Math.abs(lz - cz);
+            if (ex <= 0 || ez <= 0) continue;
+            if (S.ramp && miRampY(S, lz) <= feet + WALK_STEP) continue; // walking up it
+            if (ex < ez) lx += Math.sign(lx - cx || 1) * ex; else lz += Math.sign(lz - cz || 1) * ez;
+            moved = true;
+        }
+        if (moved) { p.x = S.x + lx * S.cs + lz * S.sn; p.z = S.z - lx * S.sn + lz * S.cs; }
+    }
+}
+// the ground under something at height y (your feet, a log, a pet): the land, or the structure it's on
+function structGround(x, z, y) {
+    const base = groundY(x, z);
+    if (x < -4500) return MI.solids.length ? solGround(MI.solids, x, z, y, base) : base;
+    const C = CI(); return C && C.solids && C.solids.length ? solGround(C.solids, x, z, y, base) : base;
+}
+// on My Island: the island, or the top of whatever you built that you're standing on
+function miGround(x, z, feet) { return solGround(MI.solids, x, z, feet, miBase(x, z)); }
+// you stay on the island (you can wade a little way out), and your builds push you back unless you can step onto them
+function clampMi(p) {
+    const ox = p.x - MYX, d = Math.hypot(ox, p.z), lim = MI_R + 5;
+    if (d > lim) { p.x = MYX + ox * lim / d; p.z *= lim / d; }
+    solClamp(MI.solids, p);
+}
+
 // =====================================================================
 //  2.5: MY ISLAND. Your own island to build on with every prop in the game (100+, and the Studio's own props), a bit like
 //  a creative mode. It sits far out to the west (x < -4500, the way the casino's hall sits far to the east), so the island
@@ -14679,7 +15082,7 @@ for (const d of Array.isArray(CONTENT_PROPS) ? CONTENT_PROPS : []) defineCustomP
 //  On it, B builds and E opens every prop. What you build is solid: walls block you, and you can climb onto crates,
 //  floors and ramps. Saved in save.myIsle; on the public server the layout is kept too, so anyone can visit (/visit Name).
 // =====================================================================
-const MYX = -7000, MI_R = 70, MI_MAX = 1500, MI_STEP = 0.55, MI_MP = 99; // MI_MP: the island number the server hears while you're on one
+const MYX = -7000, MI_R = 70, MI_MAX = 1500, MI_MP = 99; // MI_MP: the island number the server hears while you're on one
 const inMyIsle = () => player.pos.x < -4500;
 if (!save.myIsle || typeof save.myIsle !== "object" || !Array.isArray(save.myIsle.objs)) save.myIsle = { objs: [] };
 // owner: "" for yours, or whose island you're visiting. objs: the layout on show. solids: what you bump into and stand on.
@@ -14752,44 +15155,6 @@ function miLoad(owner, objs) {
     for (const r of MI.recs.slice()) miDrop(r);
     MI.lights = 0; MI.owner = owner; MI.objs = objs; MI.undo = [];
     for (const o of objs) miAdd(o);
-}
-// the top of a solid at a point, or null when the point isn't over it (pad widens it a little)
-function miTop(S, dx, dz, pad) {
-    if (S.kind === "circle") return dx * dx + dz * dz < (S.r + pad) ** 2 ? S.y1 : null;
-    const lx = dx * S.cs - dz * S.sn, lz = dx * S.sn + dz * S.cs;
-    for (const [cx, cz, hx, hz] of S.parts) if (Math.abs(lx - cx) < hx + pad && Math.abs(lz - cz) < hz + pad) return S.ramp ? miRampY(S, lz) : S.y1;
-    return null;
-}
-const miRampY = (S, lz) => S.y0 + (S.y1 - S.y0) * clamp((S.lz1 - lz) / (S.lz1 - S.lz0), 0, 1); // a ramp is highest at its back
-// the ground under you: the island, or the top of whatever you built that you're standing on (or can step up onto)
-function miGround(x, z, feet) {
-    let g = miBase(x, z);
-    for (const S of MI.solids) {
-        const dx = x - S.x, dz = z - S.z; if (Math.abs(dx) > S.b + 0.2 || Math.abs(dz) > S.b + 0.2) continue;
-        const top = miTop(S, dx, dz, 0.15);
-        if (top !== null && top > g && top <= feet + MI_STEP) g = top;
-    }
-    return g;
-}
-// you stay on the island (you can wade a little way out), and your builds push you back unless you can step onto them
-function clampMi(p) {
-    const ox = p.x - MYX, d = Math.hypot(ox, p.z), lim = MI_R + 5;
-    if (d > lim) { p.x = MYX + ox * lim / d; p.z *= lim / d; }
-    const feet = p.y - 1.7, R = 0.38;
-    for (const S of MI.solids) {
-        if (S.y0 > feet + 1.75 || S.y1 <= feet + MI_STEP) continue; // over your head, or low enough to step onto
-        const dx = p.x - S.x, dz = p.z - S.z; if (Math.abs(dx) > S.b + R || Math.abs(dz) > S.b + R) continue;
-        if (S.kind === "circle") { const dd = Math.hypot(dx, dz), m = S.r + R; if (dd < m && dd > 1e-4) { p.x = S.x + dx / dd * m; p.z = S.z + dz / dd * m; } continue; }
-        let lx = dx * S.cs - dz * S.sn, lz = dx * S.sn + dz * S.cs, moved = false;
-        for (const [cx, cz, hx, hz] of S.parts) {
-            const ex = hx + R - Math.abs(lx - cx), ez = hz + R - Math.abs(lz - cz);
-            if (ex <= 0 || ez <= 0) continue;
-            if (S.ramp && miRampY(S, lz) <= feet + MI_STEP) continue; // walking up it
-            if (ex < ez) lx += Math.sign(lx - cx || 1) * ex; else lz += Math.sign(lz - cz || 1) * ez;
-            moved = true;
-        }
-        if (moved) { p.x = S.x + lx * S.cs + lz * S.sn; p.z = S.z - lx * S.sn + lz * S.cs; }
-    }
 }
 function nearestMi() {
     if (MI.man && Math.hypot(player.pos.x - (MYX + 1.6), player.pos.z - (MI_R + 1)) < 3.6) return { k: "miFerry" };
@@ -15522,7 +15887,7 @@ function updatePets(dt) {
         if (d > 0.05) { const st = Math.min(d, p.sp * dt); p.x += dx / d * st; p.z += dz / d * st; }
         const face = biting ? Math.atan2(biting.x - p.x, biting.z - p.z) : d > 0.3 ? Math.atan2(dx, dz) : player.yaw + Math.PI;
         p.g.rotation.y += angDiff(face, p.g.rotation.y) * Math.min(1, dt * 8);
-        const gy = groundY(p.x, p.z);
+        const gy = structGround(p.x, p.z, player.pos.y - 1.2); // your pets come up onto walkways with you
         p.y = p.P.fly ? gy + 1.7 + Math.sin(p.ph * 2.2) * 0.15 : gy;
         // a biter lunges at the bark now and then
         let lunge = 0;
@@ -16602,6 +16967,7 @@ function frameSim(now) {
 }
 function frameDraw(real) {
     camera.updateMatrixWorld();
+    { const C = CI(); if (C && C.WT) { const far = scene.fog.far + 12, cx = camera.position.x, cz = camera.position.z; for (const t of trees) if (!t.gone) t.g.visible = Math.abs(t.x - cx) < far && Math.abs(t.z - cz) < far && Math.hypot(t.x - cx, t.z - cz) < far; } } // the Worldroot is big: trees lost in the fog aren't drawn
     updateLabels();
     if (state === "playing" && panel !== "inv" && panel !== "map") updateNameplates(); else hidePlates();
     if (panel === "talk") updateTalk(real);
@@ -16630,6 +16996,7 @@ $("gfxPick").classList.remove("show");
 // debug/test handle (used by automated checks, harmless in play)
 if (DEBUG) window.__ts4 = {
     mp: { mp, mpConnect, mpLeave, mpState, mpLook, mpCheckOnline, mpShowJoin, mpJoinGo, mpOpenChat, mpCloseChat, renderMpList, mpUrl, mpSend, mpIsleName, anns, annAdd, annRemove, loadAdmin, pvpTarget, get pvpOn() { return pvpOn; } },
+    wt: { customIsle, ciList, structGround, rootLift, glideTick, get gliding() { return gliding; }, renderer, scene },
     myIsle: { MI, MYX, MI_R, inMyIsle, goMyIsle, leaveMyIsle, miAim, miPlace, miRemove, miUndo, miCopy, miCycle, miKey, miGround, clampMi, miBuildMode, visitIsle, mpUploadIsle, miEnc, miDec, renderMiCat },
     pets: { PETS, CASES, RAR, PERKS, list: () => pets, evolvePet, petTrickDo, openCase, startSpin, finishSpin, togglePet, spawnPets, petK, petAdd, petValue, casePrice, slyCart, placeDealer, rollPet, getSpin: () => spin },
     save, player, trees, camera, renderer, gfx: { GQ, FX, sunL, grass, TSU, MODERN, hemiL, skyDome }, chests, LANDMARKS, enterIsle2, startRebirthRide, groundY, terrain2, GUNS, equipGun, fireGun, startReload, LM2, getIsle: () => isle, getRide: () => ride,

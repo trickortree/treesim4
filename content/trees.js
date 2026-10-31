@@ -374,5 +374,213 @@ export default [
     "flee": false,
     "titan": false,
     "tall": false
+  },
+  {
+    "glow": "",
+    "snow": false,
+    "rocks": false,
+    "arch": "",
+    "rare": false,
+    "night": false,
+    "flee": false,
+    "titan": false,
+    "tall": false,
+    "isl": [
+      10
+    ],
+    "key": "c_rootling_oak",
+    "name": "Rootling Oak",
+    "shape": "round",
+    "leaf": [
+      "#3f8f3a",
+      "#5aa84a",
+      "#2f7a34"
+    ],
+    "trunk": "#5a3d26",
+    "dots": "#d8ff9a",
+    "col": "#9dff6a",
+    "hp": 1.6,
+    "logs": 1.4,
+    "dmg": 1,
+    "speed": 0.9,
+    "bonus": 14,
+    "wd": 0.36,
+    "wn": 0.2,
+    "minTier": 0,
+    "mat": "m_rootwood"
+  },
+  {
+    "glow": "",
+    "snow": false,
+    "rocks": false,
+    "arch": "",
+    "rare": false,
+    "night": false,
+    "flee": false,
+    "titan": false,
+    "tall": true,
+    "isl": [
+      10
+    ],
+    "key": "c_skypine",
+    "name": "Skypine",
+    "shape": "tall",
+    "leaf": [
+      "#2f6a5a",
+      "#3f8a6a",
+      "#24584a"
+    ],
+    "trunk": "#4a3a30",
+    "dots": "#c8fff0",
+    "col": "#8affd8",
+    "hp": 1.9,
+    "logs": 1.6,
+    "dmg": 1.05,
+    "speed": 0.9,
+    "bonus": 18,
+    "wd": 0.3,
+    "wn": 0.16,
+    "minTier": 0,
+    "mat": "m_skybark"
+  },
+  {
+    "glow": "",
+    "snow": false,
+    "rocks": false,
+    "arch": "",
+    "rare": false,
+    "night": false,
+    "flee": false,
+    "titan": false,
+    "tall": false,
+    "isl": [
+      10
+    ],
+    "key": "c_amber_birch",
+    "name": "Amber Birch",
+    "shape": "birch",
+    "leaf": [
+      "#e8b84a",
+      "#ffd86a",
+      "#c8902a"
+    ],
+    "trunk": "#e8e0d0",
+    "dots": "#fff0b0",
+    "col": "#ffd86a",
+    "hp": 2.0,
+    "logs": 1.5,
+    "dmg": 1.1,
+    "speed": 1,
+    "bonus": 22,
+    "wd": 0.24,
+    "wn": 0.1,
+    "minTier": 1,
+    "mat": "m_canopy_resin"
+  },
+  {
+    "glow": "#1aff9a",
+    "snow": false,
+    "rocks": false,
+    "arch": "",
+    "rare": false,
+    "night": true,
+    "flee": false,
+    "titan": false,
+    "tall": false,
+    "isl": [
+      10
+    ],
+    "key": "c_lumen_willow",
+    "name": "Lumen Willow",
+    "shape": "round",
+    "leaf": [
+      "#1f7a6a",
+      "#5affd8",
+      "#155a5a"
+    ],
+    "trunk": "#2a3a3a",
+    "dots": "#aaffee",
+    "col": "#5affd8",
+    "hp": 2.3,
+    "logs": 1.9,
+    "dmg": 1.2,
+    "speed": 1,
+    "bonus": 32,
+    "wd": 0,
+    "wn": 0.34,
+    "minTier": 1,
+    "mat": "m_lumen_sap"
+  },
+  {
+    "glow": "#ffc84a",
+    "snow": false,
+    "rocks": false,
+    "arch": "",
+    "rare": true,
+    "night": false,
+    "flee": false,
+    "titan": false,
+    "tall": false,
+    "isl": [
+      10
+    ],
+    "key": "c_starbloom",
+    "name": "Starbloom",
+    "shape": "crystal",
+    "leaf": [
+      "#ffe06a",
+      "#fff4c0",
+      "#ffb84a"
+    ],
+    "trunk": "#6a5a3a",
+    "dots": "#ffffff",
+    "col": "#ffe06a",
+    "hp": 2.6,
+    "logs": 2.3,
+    "dmg": 1.25,
+    "speed": 1,
+    "bonus": 48,
+    "wd": 0.5,
+    "wn": 0.6,
+    "minTier": 2,
+    "mat": "m_star_pollen",
+    "alt": [
+      40,
+      400
+    ]
+  },
+  {
+    "glow": "",
+    "snow": false,
+    "rocks": false,
+    "arch": "",
+    "rare": false,
+    "night": false,
+    "flee": false,
+    "titan": true,
+    "tall": false,
+    "isl": [
+      10
+    ],
+    "key": "c_canopy_titan",
+    "name": "Canopy Titan",
+    "shape": "conifer",
+    "leaf": [
+      "#1f5a2a",
+      "#2f7a3a",
+      "#174a22"
+    ],
+    "trunk": "#3a2818",
+    "dots": "#ffcf6a",
+    "col": "#ff9a4a",
+    "hp": 3.4,
+    "logs": 3.2,
+    "dmg": 1.4,
+    "speed": 0.8,
+    "bonus": 60,
+    "wd": 0.04,
+    "wn": 0.04,
+    "minTier": 2,
+    "mat": "m_worldheart"
   }
 ];

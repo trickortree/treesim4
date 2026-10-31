@@ -611,5 +611,313 @@ export default [
     "campName": "CAMP",
     "arrDir": 125,
     "nextDir": -35
+  },
+  {
+    "name": "The Worldroot",
+    "sub": "One tree. Its roots are hills, and its crown is in the clouds.",
+    "theme": "",
+    "seed": 4.217,
+    "radius": 330,
+    "wobble": 0.2,
+    "plateau": 3.5,
+    "hills": 16,
+    "hillSize": 1.6,
+    "beach": 14,
+    "cliffs": 0.25,
+    "decor": 1.8,
+    "shape": {
+      "kind": "lobed",
+      "stretch": 1.6,
+      "lobes": 5,
+      "amount": 0.16,
+      "angle": 20
+    },
+    "features": [
+      {
+        "type": "worldtree",
+        "dir": 30,
+        "dist": 0.42,
+        "r": 16,
+        "h": 120,
+        "isles": 4,
+        "name": "THE WORLDROOT"
+      },
+      {
+        "type": "lake",
+        "dir": 205,
+        "dist": 0.45,
+        "r": 22,
+        "name": "THE MIRROR POOLS"
+      },
+      {
+        "type": "lake",
+        "dir": 245,
+        "dist": 0.62,
+        "r": 13
+      },
+      {
+        "type": "valley",
+        "dir": 120,
+        "dist": 0.55,
+        "r": 12,
+        "len": 150,
+        "rot": 25,
+        "name": "THE ROOTWAY"
+      },
+      {
+        "type": "mountain",
+        "dir": 300,
+        "dist": 0.72,
+        "r": 55,
+        "h": 46,
+        "name": "MOSSBACK PEAK"
+      },
+      {
+        "type": "plateau",
+        "dir": 160,
+        "dist": 0.74,
+        "r": 34,
+        "h": 13,
+        "name": "THE ELDER TERRACE"
+      },
+      {
+        "type": "spire",
+        "dir": 80,
+        "dist": 0.8,
+        "r": 14,
+        "h": 52,
+        "name": "THE THORN"
+      },
+      {
+        "type": "crater",
+        "dir": 345,
+        "dist": 0.33,
+        "r": 18,
+        "h": 9,
+        "name": "THE SEEDFALL"
+      },
+      {
+        "type": "isle",
+        "dir": 225,
+        "dist": 1.5,
+        "r": 40,
+        "h": 7,
+        "bridge": true,
+        "name": "SEEDLING ISLE"
+      },
+      {
+        "type": "islet",
+        "dir": 95,
+        "dist": 1.45,
+        "r": 11,
+        "h": 5
+      },
+      {
+        "type": "islet",
+        "dir": 12,
+        "dist": 1.55,
+        "r": 8,
+        "h": 4
+      },
+      {
+        "type": "bay",
+        "dir": 170,
+        "width": 0.28,
+        "depth": 0.16
+      }
+    ],
+    "colors": {
+      "grass": "#3f8f3a",
+      "grass2": "#2f7a44",
+      "sand": "#e2d6a2",
+      "rock": "#6a6458",
+      "snow": "#f4fff0",
+      "camp": "#7a6448",
+      "shallow": "#4fd0c0",
+      "deep": "#0d3a4a",
+      "bush": "#2f8a3a"
+    },
+    "snowline": "",
+    "trees": [
+      "redwood",
+      "silverbirch",
+      "amberpine",
+      "goldleaf"
+    ],
+    "treeCount": 190,
+    "treeW": {
+      "redwood": 0.5,
+      "silverbirch": 0.5,
+      "amberpine": 0.4,
+      "goldleaf": 0.35
+    },
+    "allTiers": false,
+    "economy": 6,
+    "mats": [
+      {
+        "key": "m_rootwood",
+        "name": "Rootwood",
+        "color": "#8a5a34",
+        "glow": false
+      },
+      {
+        "key": "m_skybark",
+        "name": "Skybark",
+        "color": "#a8c4d8",
+        "glow": false
+      },
+      {
+        "key": "m_canopy_resin",
+        "name": "Canopy Resin",
+        "color": "#e8a83a",
+        "glow": false
+      },
+      {
+        "key": "m_lumen_sap",
+        "name": "Lumen Sap",
+        "color": "#5affd8",
+        "glow": true
+      },
+      {
+        "key": "m_star_pollen",
+        "name": "Star Pollen",
+        "color": "#ffe86a",
+        "glow": true
+      },
+      {
+        "key": "m_worldheart",
+        "name": "Worldheart",
+        "color": "#ff7a4a",
+        "glow": true
+      }
+    ],
+    "axes": [
+      {
+        "key": "x_rootsplitter",
+        "name": "Rootsplitter",
+        "steel": "#5a3e28",
+        "edge": "#9dff6a",
+        "glow": "#1a4a10",
+        "ability": 18
+      },
+      {
+        "key": "x_canopy_reaver",
+        "name": "Canopy Reaver",
+        "steel": "#2f6a3a",
+        "edge": "#ffd86a",
+        "glow": "#3a2a00",
+        "ability": 22
+      },
+      {
+        "key": "x_worldroot_edge",
+        "name": "Worldroot Edge",
+        "steel": "#3a281c",
+        "edge": "#8affd0",
+        "glow": "#0a3a2a",
+        "ability": 19
+      }
+    ],
+    "animals": [
+      {
+        "kind": "deer",
+        "n": 6
+      },
+      {
+        "kind": "rabbit",
+        "n": 5
+      },
+      {
+        "kind": "squirrel",
+        "n": 6
+      },
+      {
+        "kind": "fox",
+        "n": 3
+      },
+      {
+        "kind": "eagle",
+        "n": 2
+      },
+      {
+        "kind": "butterfly",
+        "n": 6
+      },
+      {
+        "kind": "moth",
+        "n": 4
+      },
+      {
+        "kind": "monkey",
+        "n": 4
+      },
+      {
+        "kind": "parrot",
+        "n": 3
+      }
+    ],
+    "cover": {
+      "grass": 120,
+      "flowers": 45,
+      "berries": 25,
+      "mush": 25,
+      "glowshroom": 45,
+      "rings": 12,
+      "logs": 25,
+      "stumps": 20,
+      "crystals": 8,
+      "cracks": 0,
+      "bones": 0,
+      "cairns": 8
+    },
+    "coverCol": {
+      "mush": "#d04a2a",
+      "glowshroom": "#8affc8",
+      "berries": "#ff4a6a",
+      "flowers": "#ffd86a",
+      "crystals": "#9affd8",
+      "cracks": "#8affd0"
+    },
+    "flies": "fireflies",
+    "fliesCol": "#c8ff7a",
+    "rebirth": {
+      "cost": 150000000,
+      "items": {
+        "obsidian": 60,
+        "ember": 15
+      }
+    },
+    "rideLine1": "The sea turns green and gold. Something enormous blots out the stars ahead.",
+    "rideLine2": "A tree. One tree. Its roots are hills, and its crown is lost in the clouds.",
+    "ferryLine": "Next stop: the Worldroot. Mind the roots, traveller. Some of them are older than the sea.",
+    "arrive": "Welcome to the Worldroot, the biggest island there is. Climb the great tree, cross the sky islands, then jump: the wind will carry you.",
+    "campName": "ROOTHOLD",
+    "arrDir": 125,
+    "nextDir": -35,
+    "ui": {
+      "accent": "#9dff6a",
+      "panel": "#0b1a10",
+      "ink": "#eaffe6",
+      "font": "Georgia",
+      "corner": 12
+    },
+    "casino": {
+      "wall": "#3a2a1a",
+      "base": "#2a1e14",
+      "trim": "#9dff6a",
+      "roof": "#1f3a1a",
+      "glow": "#c8ff7a",
+      "dim": "#1a120c",
+      "rock": "#4a4036",
+      "sign": "#ffd86a",
+      "name": "THE ROOT HALL",
+      "tagline": "FORTUNE GROWS HERE",
+      "roofKind": "dome",
+      "hall": {
+        "walls": "#2a1e14",
+        "carpet": "#1f4a24",
+        "trim": "#d8b46a",
+        "light": "#c8ff9a"
+      }
+    }
   }
 ];

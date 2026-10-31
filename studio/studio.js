@@ -826,8 +826,8 @@ let myThemes = {}; // your own themes, saved next to the Studio (studio/my-theme
 const THEMES = () => ({ ...BUILTIN_THEMES, ...Object.fromEntries(Object.entries(myThemes).map(([k, t]) => ["my:" + k, t])) });
 const THEME_KEYS = ["shape", "colors", "trees", "snowline", "economy", "hills", "hillSize", "beach", "cliffs", "decor", "plateau", "wobble", "radius", "features", "treeCount", "treeW", "allTiers", "animals", "cover", "coverCol", "flies", "fliesCol"];
 const ECON = { 2: "the Highland Isle", 3: "Mooncap Isle", 4: "Ashfall Isle", 5: "the Archipelago", 6: "the Iceberg" };
-const FTYPES = { mountain: "⛰ Mountain", hill: "Hill", spire: "Spire", crater: "Crater", plateau: "Plateau (mesa)", ridge: "Ridge", valley: "Valley", lake: "Lake", islet: "Islet (scenery)", isle: "🏝 Walkable island + bridge", bay: "Bay" };
-const FDEF = { mountain: { r: 40, h: 35, dist: 0.55 }, hill: { r: 30, h: 10, dist: 0.5 }, spire: { r: 12, h: 45, dist: 0.6 }, crater: { r: 26, h: 16, dist: 0.55 }, plateau: { r: 28, h: 12, dist: 0.55 }, ridge: { r: 14, h: 22, len: 80, dist: 0.55 }, valley: { r: 10, len: 70, dist: 0.45 }, lake: { r: 14, dist: 0.5 }, islet: { r: 16, h: 6, dist: 1.4 }, isle: { r: 28, h: 4, dist: 1.7 }, bay: { width: 0.35, depth: 0.25 } };
+const FTYPES = { mountain: "⛰ Mountain", hill: "Hill", spire: "Spire", crater: "Crater", plateau: "Plateau (mesa)", ridge: "Ridge", valley: "Valley", lake: "Lake", islet: "Islet (scenery)", isle: "🏝 Walkable island + bridge", bay: "Bay", worldtree: "🌳 World tree (climb it, sky islands, gliding)" };
+const FDEF = { mountain: { r: 40, h: 35, dist: 0.55 }, hill: { r: 30, h: 10, dist: 0.5 }, spire: { r: 12, h: 45, dist: 0.6 }, crater: { r: 26, h: 16, dist: 0.55 }, plateau: { r: 28, h: 12, dist: 0.55 }, ridge: { r: 14, h: 22, len: 80, dist: 0.55 }, valley: { r: 10, len: 70, dist: 0.45 }, lake: { r: 14, dist: 0.5 }, islet: { r: 16, h: 6, dist: 1.4 }, isle: { r: 28, h: 4, dist: 1.7 }, bay: { width: 0.35, depth: 0.25 }, worldtree: { r: 16, h: 120, dist: 0.42, isles: 4 } };
 // ground cover: [key, label, most, colour key]
 const COVER = [["grass", "Grass tufts", 300], ["flowers", "Flowers", 80, "flowers"], ["berries", "Berry bushes", 80, "berries"], ["mush", "Mushrooms", 80, "mush"], ["glowshroom", "Glowing mushrooms", 80, "glowshroom"], ["rings", "Fairy rings", 30, "glowshroom"],
     ["logs", "Fallen logs", 60], ["stumps", "Stumps", 60], ["crystals", "Crystals", 80, "crystals"], ["cracks", "Glowing cracks", 80, "cracks"], ["bones", "Bones", 40], ["cairns", "Stone piles", 40]];
@@ -1097,7 +1097,7 @@ function cleanIsland(src, d) { // every field checked before it reaches the game
     const num = (v, a, b, dflt) => { v = +v; return Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : dflt; }, hex = v => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : null), str = (v, n) => (typeof v === "string" ? v.slice(0, n) : "");
     if (str(src.name, 40).trim()) d.name = str(src.name, 40).trim();
     d.sub = str(src.sub, 80);
-    for (const [k, a, b] of [["radius", 90, 200], ["wobble", 0, 0.3], ["plateau", 0.6, 10], ["hills", 0, 30], ["hillSize", 0.3, 3], ["beach", 2, 24], ["cliffs", 0, 1], ["decor", 0, 3], ["treeCount", 20, 200]]) if (src[k] !== undefined) d[k] = r3(num(src[k], a, b, d[k]));
+    for (const [k, a, b] of [["radius", 90, 360], ["wobble", 0, 0.3], ["plateau", 0.6, 10], ["hills", 0, 30], ["hillSize", 0.3, 3], ["beach", 2, 24], ["cliffs", 0, 1], ["decor", 0, 3], ["treeCount", 20, 220]]) if (src[k] !== undefined) d[k] = r3(num(src[k], a, b, d[k]));
     if (src.colors && typeof src.colors === "object") { d.colors = { ...(d.colors || {}) }; for (const k of ["grass", "grass2", "sand", "rock", "snow", "camp", "bush", "shallow", "deep"]) if (hex(src.colors[k])) d.colors[k] = hex(src.colors[k]); }
     d.snowline = src.snowline === "" || src.snowline === null || src.snowline === undefined ? "" : num(src.snowline, 0, 200, "");
     if (Array.isArray(src.trees)) { const t = src.trees.filter(k => T.TYPES[k] && !T.TYPES[k].rush && !T.TYPES[k].custom).slice(0, 8); if (t.length) d.trees = t; }
@@ -1121,7 +1121,8 @@ function cleanIsland(src, d) { // every field checked before it reaches the game
     if (src.fliesCol !== undefined) d.fliesCol = hex(src.fliesCol) || "";
     if (Array.isArray(src.features)) d.features = src.features.filter(f => f && FTYPES[f.type]).slice(0, 12).map(f => {
         const o = { type: f.type, dir: Math.round(num(f.dir, 0, 359, 0)), dist: r3(num(f.dist, 0, f.type === "islet" ? 2.2 : f.type === "isle" ? 2.8 : 0.95, FDEF[f.type].dist || 0.5)) };
-        if (f.r !== undefined) o.r = Math.round(num(f.r, 4, 90, FDEF[f.type].r || 20)); if (f.h !== undefined) o.h = Math.round(num(f.h, 0, 90, FDEF[f.type].h || 10));
+        if (f.r !== undefined) o.r = Math.round(num(f.r, f.type === "worldtree" ? 8 : 4, f.type === "worldtree" ? 30 : 90, FDEF[f.type].r || 20)); if (f.h !== undefined) o.h = Math.round(num(f.h, f.type === "worldtree" ? 60 : 0, f.type === "worldtree" ? 200 : 90, FDEF[f.type].h || 10));
+        if (f.type === "worldtree") o.isles = Math.round(num(f.isles, 0, 6, 4));
         if (f.len !== undefined) o.len = Math.round(num(f.len, 10, 300, 60)); if (f.rot !== undefined) o.rot = Math.round(num(f.rot, -360, 360, 0));
         if (f.type === "bay") { o.width = r3(num(f.width, 0.08, 1.2, 0.35)); o.depth = r3(num(f.depth, 0.05, 0.6, 0.25)); }
         if (f.type === "crater" && f.lava) o.lava = true;
@@ -1253,6 +1254,8 @@ function featRows(d) {
         if (["mountain", "hill", "spire", "crater", "plateau", "ridge", "islet", "isle"].includes(f.type)) h += rng(i, "h", "Height", f.h ?? D.h, 0, 90, 1, "m");
         if (f.type === "ridge" || f.type === "valley") h += rng(i, "r", "Width", f.r ?? D.r, 4, 40, 1, "m") + rng(i, "len", "Length", f.len ?? D.len, 10, 300, 5, "m") + rng(i, "rot", "Angle", Math.round(f.rot ?? ((f.dir || 0) + 90)), -180, 180, 1, "°");
         if (f.type === "isle") h += `<div class="stChecks"><label><input type="checkbox" data-fi="${i}" data-fk="bridge"${f.bridge !== false ? " checked" : ""}> A bridge to it from the main island</label></div>`;
+        if (f.type === "worldtree") h += rng(i, "r", "Trunk size", f.r ?? D.r, 8, 30, 1, "m") + rng(i, "h", "Height", f.h ?? D.h, 60, 200, 5, "m") + rng(i, "isles", "Sky islands", f.isles ?? D.isles, 0, 6, 1)
+            + `<div class="stHint">A path spirals up the trunk to a deck under the leaves, with branches out to islands in the sky. The rarest trees can grow up there, and players glide down on leaves.</div>`;
         if (f.type === "crater") h += `<div class="stChecks"><label><input type="checkbox" data-fi="${i}" data-fk="lava"${f.lava ? " checked" : ""}> Full of lava</label></div>`;
         if (!["hill", "valley", "bay"].includes(f.type)) h += `<div class="stRow"><label>Name</label><input class="stIn" type="text" data-fi="${i}" data-fk="name" value="${esc(f.name || "")}" placeholder="none"></div>`;
         return h + `</div>`;
@@ -1299,7 +1302,7 @@ function renderIslands() {
       <div class="stH">THEME <small>colours, trees, land and wildlife in one click</small></div>
       <div class="stBtns" style="margin:0">${Object.entries(Th).map(([k, t]) => `<button class="stB${d.theme === k ? " on" : ""}" data-theme="${esc(k)}" style="padding:4px 8px;font-size:11px">${esc(t.label)}${k.startsWith("my:") ? ` <span data-deltheme="${esc(k.slice(3))}" title="Delete this theme">✕</span>` : ""}</button>`).join("")}</div>
       <div class="stRow" style="margin-top:6px"><input class="stIn" type="text" id="iThemeName" placeholder="name this look as a theme…" style="flex:1"><button class="stB" id="iThemeSave">Save as theme</button></div>
-      <div class="stH" id="iSecLand">SHAPE</div>${rng("iRad", "Size", d.radius || 130, 70, 220, 5, "m")}${rng("iWob", "Wobbly coast", d.wobble ?? 0.12, 0, 0.35, 0.01)}
+      <div class="stH" id="iSecLand">SHAPE</div>${rng("iRad", "Size", d.radius || 130, 70, 360, 5, "m")}${rng("iWob", "Wobbly coast", d.wobble ?? 0.12, 0, 0.35, 0.01)}
       <div class="stRow"><label>Seed</label><span><input class="stIn" type="number" id="iSeed" value="${d.seed}" step="0.1"> <button class="stB" id="iDice">🎲</button></span></div>
       <div class="stRow"><label>Outline</label><select class="stSel" id="iShapeK">${[["round", "Round"], ["long", "Long"], ["lobed", "Lobed (clover)"]].map(([k, l]) => opt(k, (d.shape || {}).kind || "round", l)).join("")}</select></div>
       ${(d.shape || {}).kind === "long" ? rng("iShapeS", "Stretch", d.shape.stretch ?? 1.6, 1, 2.4, 0.05) : ""}${(d.shape || {}).kind === "lobed" ? rng("iShapeL", "Lobes", d.shape.lobes ?? 3, 2, 7, 1) + rng("iShapeA", "How deep", d.shape.amount ?? 0.3, 0, 0.45, 0.01) : ""}${(d.shape || {}).kind && d.shape.kind !== "round" ? rng("iShapeAng", "Turned", d.shape.angle ?? 0, 0, 359, 1, "°") : ""}
