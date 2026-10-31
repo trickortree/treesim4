@@ -1,6 +1,6 @@
 {
   "name": "hypergamous-tree-chopping-simulator-4",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "description": "Hypergamous Tree Chopping Simulator 4",
   "author": "Tree Chop Studios",
   "main": "main.js",
@@ -60,7 +60,7 @@
       "releaseType": "release"
     },
     "releaseInfo": {
-      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.5.1 (FIXES FOR LAPTOPS AND LOST REBIRTHS)\n\nFixes for 2.5.0, which looked broken on a lot of laptops.\n\n- The main menu fits small and zoomed-in screens again: nothing cut off or on top of each other.\n- Sly's Black Market has two tabs, Pet Cases and Sly's Armory, so it fits on your screen.\n- Big windows (inventory, the relic, pets) scroll instead of running off the screen.\n- Starting the game on an island you'd sailed back to took away rebirths. Fixed, and the rebirths you lost come back.\n- If something in the game breaks, it keeps running, tells you what broke, and sends the error to us so we can fix it."
+      "releaseNotes": "Hypergamous Tree Chopping Simulator 4 - 2.6.0 (THE WORLDROOT)\n\nRebirth 9: the Worldroot, the biggest island yet.\n\n- One tree so big its roots are hills. Climb the path that spirals up its trunk to the Crownring, high under the leaves.\n- Cross the branches and rope bridges to islands floating in the sky. The rarest trees grow up there, and every sky island has a chest.\n- Jump off anything high and the wind catches a giant leaf: you glide! W goes faster, S dives.\n- Climb it once and the Rootlift wakes up to take you up and down.\n- 6 new trees, 6 new materials and 3 new axes.\n- Get there from Midwest Island's Ferryman."
     }
   }
 }
